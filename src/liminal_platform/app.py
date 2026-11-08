@@ -1,0 +1,166 @@
+"""The platform app: the frame's App with the chip icon; its routes serve the machine's facts, the machine
+plugins (their status, a setup run in a thread with its lines kept, a command), the Docker instances and
+the plugins attached."""
+from __future__ import annotations
+
+import os
+import platform as py_platform
+import threading
+import time
+from http import HTTPStatus
+from pathlib import Path
+
+from liminal_libs import docker as docker_mod
+from liminal_libs.apps import App, EnvironmentLogin, Refused, attach_registry
+
+PORT = 8775
+
+
+def facts() -> dict:
+    """What this machine is: the system, the processor, the memory, the Python, the host name."""
+    return {"system": py_platform.system(), "release": py_platform.release(), "version": py_platform.version(),
+            "machine": py_platform.machine(), "processor": py_platform.processor(), "cpus": os.cpu_count() or 0,
+            "memoryMb": memory_mb(), "python": py_platform.python_version(), "host": py_platform.node()}
+
+
+def memory_mb() -> int:
+    """The machine's memory in MB (0 when it cannot be read)."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class Status(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_uint32), ("dwMemoryLoad", ctypes.c_uint32), ("ullTotalPhys", ctypes.c_uint64),
+                            ("ullAvailPhys", ctypes.c_uint64), ("ullTotalPageFile", ctypes.c_uint64), ("ullAvailPageFile", ctypes.c_uint64),
+                            ("ullTotalVirtual", ctypes.c_uint64), ("ullAvailVirtual", ctypes.c_uint64), ("ullAvailExtendedVirtual", ctypes.c_uint64)]
+            s = Status()
+            s.dwLength = ctypes.sizeof(Status)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s))
+            return int(s.ullTotalPhys // (1024 * 1024))
+        return int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 * 1024))
+    except Exception:  # noqa: BLE001 - a fact that cannot be read is 0
+        return 0
+
+
+class Setup:
+    """A machine plugin's setup under way, in a thread: its lines as they come, its steps when done."""
+
+    def __init__(self, machine, steps):
+        self.machine = machine
+        self.steps = tuple(steps) if steps else None
+        self.lines: list[str] = []
+        self.done: list[dict] | None = None
+        self.error: str | None = None
+        self.started = time.time()
+        self.thread = threading.Thread(target=self._run, name=f"setup-{machine.name}", daemon=True)
+
+    def _run(self) -> None:
+        try:
+            self.done = self.machine.setup(log=self.lines.append, steps=self.steps)
+        except Exception as e:  # noqa: BLE001 - the page gets the words
+            self.error = f"{type(e).__name__}: {e}"
+            self.done = []
+
+    @property
+    def running(self) -> bool:
+        return self.thread.is_alive()
+
+    def describe(self) -> dict:
+        return {"machine": self.machine.name, "steps": list(self.steps or ()), "running": self.running, "lines": list(self.lines),
+                "done": self.done, "error": self.error, "startedAt": self.started,
+                "ok": None if self.done is None else (self.error is None and all(d["ok"] is not False for d in self.done))}
+
+
+class PlatformApp(App):
+    NAME = "platform"
+    TITLE = "Liminal Platform"
+    ICON = "chip"  # the hardware (icons.js)
+    PORT = PORT
+    PORT_VAR = "LIMINAL_PLATFORM_PORT"
+    STATIC = Path(__file__).parent / "static"
+
+    def __init__(self, log=print, login=None, machines: dict | None = None):
+        super().__init__(log, login if login is not None else EnvironmentLogin())
+        self._machines = machines  # by name; None: the registry's
+        self._setups: dict[str, Setup] = {}
+        self._lock = threading.Lock()
+
+    def machines(self) -> dict:
+        if self._machines is not None:
+            return dict(self._machines)
+        from liminal_libs.sources.registry import machines
+
+        return machines()
+
+    def machine(self, name: str):
+        m = self.machines().get(name)
+        if m is None:
+            raise Refused(HTTPStatus.NOT_FOUND, f"no machine plugin named {name!r}")
+        return m
+
+    def attach_plugins(self) -> list[str]:
+        """Every platform plugin the registry loaded (the machines, the AI assistants), attached here."""
+        return attach_registry(self, only="platform")
+
+    def instances(self) -> list[dict]:
+        return [i.describe() for i in docker_mod.instances(machines=self.machines().values())]
+
+    def status(self) -> dict:
+        return {"app": self.describe(), "machine": facts(), "docker": docker_mod.Docker(env={}).describe(),
+                "machines": {n: self.machine_status(m) for n, m in self.machines().items()},
+                "instances": self.instances(), "plugins": self.plugins()}
+
+    def machine_status(self, m) -> dict:
+        try:
+            status = m.status()
+        except Exception as e:  # noqa: BLE001 - a plugin's trouble is shown, not raised
+            status = {"present": False, "problem": f"{type(e).__name__}: {e}"}
+        with self._lock:
+            setup = self._setups.get(m.name)
+        return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
+                "setup": setup.describe() if setup else None}
+
+    def start_setup(self, name: str, steps=None) -> Setup:
+        m = self.machine(name)
+        with self._lock:
+            current = self._setups.get(name)
+            if current is not None and current.running:
+                raise Refused(HTTPStatus.CONFLICT, f"{name} is being set up already")
+            setup = Setup(m, steps)
+            self._setups[name] = setup
+        self.log(f"platform: setting up {name}" + (f" ({', '.join(setup.steps)})" if setup.steps else ""))
+        setup.thread.start()
+        return setup
+
+    def api(self, handler, method: str, path: str, query: dict, body: dict | None):
+        body = body or {}
+        if method == "GET" and path == "/api/status":
+            return 200, self.status()
+        if method == "GET" and path == "/api/machines":
+            return 200, {"machines": [self.machine_status(m) for m in self.machines().values()]}
+        if method == "GET" and path == "/api/instances":
+            return 200, {"instances": self.instances()}
+        if path.startswith("/api/machines/"):
+            rest = path[len("/api/machines/"):]
+            name, _, action = rest.partition("/")
+            m = self.machine(name)
+            if method == "GET" and not action:
+                return 200, self.machine_status(m)
+            if method == "GET" and action == "setup":
+                with self._lock:
+                    setup = self._setups.get(name)
+                return 200, (setup.describe() if setup else {"machine": name, "running": False, "lines": [], "done": None})
+            if method == "POST" and action == "setup":
+                steps = body.get("steps") or None
+                if steps is not None and (not isinstance(steps, list) or not all(isinstance(s, str) for s in steps)):
+                    raise Refused(HTTPStatus.BAD_REQUEST, "steps is a list of step names")
+                return 202, self.start_setup(name, steps).describe()
+            if method == "POST" and action == "run":
+                command = body.get("command")
+                if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
+                    raise Refused(HTTPStatus.BAD_REQUEST, "command is a list of words")
+                try:
+                    return 200, {"output": m.run(*command)}
+                except Exception as e:  # noqa: BLE001 - the plugin's words
+                    raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
+        return super().api(handler, method, path, query, body)

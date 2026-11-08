@@ -1,0 +1,4 @@
+body.embedded #rail { display: none; }
+.machine .engine { font-family: ui-monospace, monospace; }
+.setup-log { max-height: 20em; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.9em; }
+.steps button { margin-right: 0.4em; }
