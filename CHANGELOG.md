@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1 (2026-11-08)
+
+Each plugin by its maker's mark (the user: "for the AI icons, lets use the respective mascot/icon from the business,
+logo, etc.."; and for the WSL distributions, the firewalls, Namecheap, Docker, Kubernetes, LXD and Hyper-V the same): the
+AI assistants are drawn with their own icons (`icon` in their status, from the plugin's ICON; the chart when one has
+none) in the list, on their page and in Connections, as the machine plugins were. The marks themselves are liminal-libs
+1.33.0's icons. Needs liminal-libs>=1.33.0.
+
 ## 0.10.0 (2026-11-08)
 
 Connections (the user: "the root plugin (platform) will need to visually illustrate how plugins are connected to each

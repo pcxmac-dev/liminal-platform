@@ -406,6 +406,7 @@ class Bot(PlatformPlugin):
     about = "a stand-in assistant"
     api = "2.1"
     vendor = "Bots"
+    ICON = "copilot"  # its maker's mark, as the AI plugins have theirs (0.10.1)
     default_model = "bot-1"
     key_names = ("BOT_API_KEY", "BOT_ACCOUNT")
 
@@ -431,7 +432,7 @@ def test_the_ai_assistants_are_valid_with_a_key_and_enabled_or_disabled():
     try:
         assert app.attach_plugins([bot]) == ["bot"]
         (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
-        assert (a["enabled"], a["valid"], a["state"], a["vendor"]) == (True, False, "invalid", "Bots")
+        assert (a["enabled"], a["valid"], a["state"], a["vendor"], a["icon"]) == (True, False, "invalid", "Bots", "copilot")
         assert a["why"] == "no key: BOT_API_KEY is not set (its Settings, on its page, set it)" and bot.app is None
         bot.key = True
         (a,) = _call(port, "GET", "/api/status")[1]["assistants"]

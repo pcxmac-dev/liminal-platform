@@ -224,7 +224,7 @@ class PlatformApp(App):
                 nodes.pop(name, None)
                 continue
             nodes[name] = {"id": name, "role": "plugin", "title": p.title, "attached": attached, "state": state,
-                           "icon": "analysis" if name in assistants else getattr(p, "ICON", "") or "chip",
+                           "icon": getattr(p, "ICON", "") or ("analysis" if name in assistants else "chip"),
                            "kind": "assistant" if name in assistants else "machine"}
         out["nodes"], out["hidden"] = list(nodes.values()), sorted(hidden)
         return out
@@ -389,6 +389,7 @@ class PlatformApp(App):
             self._states[p.name] = state
         self._settle(p, state == "active")
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
+                "icon": getattr(p, "ICON", "") or "analysis",  # its maker's mark (0.10.1), else the chart
                 "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
                 "settings": self.settings_of(p)}
 
