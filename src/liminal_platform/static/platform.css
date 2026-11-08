@@ -28,3 +28,29 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
 .choice .sub { color: var(--muted); font-size: 11px; }
 .swatch { display: inline-grid; grid-template-columns: repeat(2, 12px); grid-template-rows: repeat(2, 12px); border-radius: 4px; overflow: hidden;
   border: 1px solid var(--border); flex: none; }
+/* 0.4.0: a plugin's check of this PC, its install; a terminal panel (a job's output as it comes, a login shell). The
+   terminal is dark in every theme, as terminals are; its colours are the escape sequences' (not data). */
+.criteria { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 5px; }
+.criteria li { display: flex; gap: 8px; align-items: flex-start; }
+.criteria .mark { width: 14px; flex: none; font-weight: 700; text-align: center; }
+.criteria li.met .mark { color: var(--up); }  /* not .ok: liminal.css colours a whole .ok */
+.criteria li.unmet .mark { color: var(--down); }
+.criteria .what { display: flex; flex-direction: column; }
+.criteria .sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.install-row { margin: 8px 0 4px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.term-panel { margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #0c0f14; }
+.term-head { display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 10px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 12px; }
+.term-head > span:first-child { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-head button { padding: 0 8px; font-size: 16px; line-height: 20px; }
+.term { margin: 0; padding: 8px 10px; height: 340px; overflow: auto; color: #d4d4d4; background: #0c0f14; white-space: pre;
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+.term:focus { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
+.term.interactive { cursor: text; }
+.term .t-b { font-weight: 700; }
+.term .t-cursor { background: #d4d4d4; color: #0c0f14; }
+.term:not(:focus) .t-cursor { background: transparent; outline: 1px solid #d4d4d4; outline-offset: -1px; color: inherit; }
+.term .t-1 { color: #7f7f7f; } .term .t-2 { color: #f14c4c; } .term .t-3 { color: #23d18b; } .term .t-4 { color: #e5e510; }
+.term .t-5 { color: #3b8eea; } .term .t-6 { color: #d670d6; } .term .t-7 { color: #29b8db; } .term .t-8 { color: #e5e5e5; }
+.term .t-9 { color: #a0a0a0; } .term .t-10 { color: #ff6b6b; } .term .t-11 { color: #5af78e; } .term .t-12 { color: #f4f99d; }
+.term .t-13 { color: #6cb6ff; } .term .t-14 { color: #ff92d0; } .term .t-15 { color: #9aedfe; } .term .t-16 { color: #ffffff; }

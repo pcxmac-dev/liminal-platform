@@ -22,13 +22,18 @@
   const Charts = window.LiminalCharts;
   const list = $('list'), data = $('data'), side = $('side'), rail = $('rail');
   if (new URLSearchParams(location.search).get('embedded') === '1') document.body.classList.add('embedded');
-  const polls = {};
   let st = null;  // the last GET api/status
   let tray = null;  // the last GET api/tray
   let span = 'recent';  // the charts' range: the last ten minutes, or the last day
   const day = {};  // a plugin's charts of the last day, by name (asked apart: they move every 30 s)
   let live = null;  // the timer asking the shown plugin again
   let gen = 0;  // bumped by every change of what the page holds: an answer asked before it is dropped
+  const checks = {};  // a plugin's check of this PC, by name: {at, data} | {at, loading} | {at, error}
+  const jobs = {};  // a plugin's job panel (an install, an update), by name: {term, offset, open, action, running, ok, timer}
+  const shells = {};  // a plugin's login terminal, by name: {term, offset, alive, title, queue, timer, sending}
+  const PREPARING = ['wsl', 'update', 'version'];  // setup steps that prepare this PC: never locked by its check
+  const enc = encodeURIComponent;
+  const hasHook = (m, h) => (m.hooks || []).includes(h);
   const selected = () => decodeURIComponent(location.hash.slice(1)) || 'machine';
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
 
@@ -155,18 +160,66 @@
     return `<label class="switch-row"${held ? ` title="${esc(`Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? 'Disabled: not valid' : 'Disabled'}</label>`;
   }
 
-  const setupLog = (m) => `<h4>Setup log</h4><pre class="setup-log" id="log-${esc(m.name)}">${m.setup ? esc(m.setup.lines.join('\n')) : 'Nothing run yet: the steps are on the right.'}</pre>`;
+  // a job's terminal panel: what an install or an update prints, as it comes (the user: "after the install is run a
+  // terminal pops up in the plugin and shows the install progress")
+  function jobState(j) {
+    return j.running ? 'running…' : j.ok ? 'done' : j.ok === false ? 'ended with a failure' : '';
+  }
+  function jobTitle(m, j) {
+    const what = (checks[m.name] && checks[m.name].data && checks[m.name].data.distribution) || m.title;
+    return j.action === 'update' ? `Updating ${what}'s packages` : PREPARING.includes((j.steps || [])[0]) && j.steps.length === 1
+      ? `${m.title}: ${j.steps[0]}` : `Installing ${what}`;
+  }
+  function setupLog(m) {
+    const j = jobs[m.name];
+    if (j && j.open) {
+      return `<div class="term-panel" data-panel="job-${esc(m.name)}"><div class="term-head"><span>${esc(jobTitle(m, j))}</span>`
+        + `<span class="muted small state">${esc(jobState(j))}</span><button type="button" class="term-hide" data-machine="${esc(m.name)}" `
+        + `aria-label="Hide the panel (the job goes on)">×</button></div><pre class="term" id="job-term-${esc(m.name)}" tabindex="0"></pre></div>`;
+    }
+    return (m.steps || []).length ? '<h4>Setup log</h4><div class="muted small">Nothing run here yet: a step\'s output shows in a terminal panel as it runs.</div>' : '';
+  }
+
+  // a plugin's check of this PC for what it installs, its Install (locked until every criterion is met), its packages'
+  // update and its login terminal once installed
+  function installHtml(m) {
+    if (!hasHook(m, 'check')) return '';
+    const c = checks[m.name], busy = m.setup && m.setup.running || (jobs[m.name] && jobs[m.name].running);
+    const what = m.title.replace(/^WSL /, '');
+    const again = `<button type="button" class="recheck" data-machine="${esc(m.name)}">Check again</button>`;
+    if (!c || c.loading) return `<h4>This PC for ${esc(what)}</h4><div class="muted small">Checking this PC…</div>`;
+    if (c.error) return `<h4>This PC for ${esc(what)}</h4><p class="error">${esc(c.error)}</p>${again}`;
+    const d = c.data;
+    const items = d.criteria.map((x) => `<li class="${x.ok ? 'met' : 'unmet'}"><span class="mark" aria-hidden="true">${x.ok ? '✓' : '✗'}</span>`
+      + `<span class="what"><span>${esc(x.title)}<span class="sr-only">: ${x.ok ? 'met' : 'not met'}</span></span><span class="sub">${esc(x.detail)}</span></span></li>`).join('');
+    const install = d.installed ? '' : `<button type="button" class="install accent" data-machine="${esc(m.name)}" ${d.ready && !busy ? '' : 'disabled'}>Install ${esc(d.distribution || what)}</button>`;
+    const tools = !d.installed ? '' : `<button type="button" class="update" data-machine="${esc(m.name)}" ${busy ? 'disabled' : ''}>Update packages</button>`
+      + (hasHook(m, 'terminal') ? `<button type="button" class="shell-open" data-machine="${esc(m.name)}">${shells[m.name] ? 'Show the terminal' : 'Open a terminal'}</button>` : '');
+    const said = d.installed ? `${d.distribution} is installed` : d.ready ? (busy ? 'Installing…' : 'Every criterion is met: the install is unlocked.') : `Locked: ${d.why}`;
+    return `<h4>This PC for ${esc(what)}</h4><ul class="criteria">${items}</ul>`
+      + `<div class="row install-row">${install}${tools}${again}<span class="muted small">${esc(said)}</span></div>${shellPanel(m)}`;
+  }
+
+  function shellPanel(m) {
+    const sh = shells[m.name];
+    if (!sh) return '';
+    return `<div class="term-panel shell" data-panel="shell-${esc(m.name)}"><div class="term-head"><span>${esc(sh.title || 'Terminal')}</span>`
+      + `<span class="muted small state">${sh.alive ? 'click, then type; Ctrl+Shift+C copies' : 'ended'}</span>`
+      + `<button type="button" class="shell-close" data-machine="${esc(m.name)}" aria-label="Close the terminal">×</button></div>`
+      + `<pre class="term interactive" id="shell-term-${esc(m.name)}" data-machine="${esc(m.name)}" tabindex="0" aria-label="${esc(sh.title || 'Terminal')}"></pre></div>`;
+  }
 
   function pluginData(m) {
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
     if (userOff(m)) return `${head}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
     if (invalid(m)) {
-      return `${head}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}`
-        + 'It is enabled again by itself once it is valid.</p>' + (logged ? setupLog(m) : '');
+      return `${head}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${hasHook(m, 'check') ? 'Its install, below, can make it valid. '
+        : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
+        + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
-    return head + optionsHtml(m) + chartsBlock(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
-      + (logged ? setupLog(m) : '');
+    return head + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
+      + (logged || jobs[m.name] ? setupLog(m) : '');
   }
 
   function assistantData(a) {
@@ -180,8 +233,16 @@
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
+    const typing = document.activeElement && document.activeElement.matches && document.activeElement.matches('.term.interactive');
+    if (m && hasHook(m, 'check') && !userOff(m)) {  // its check of this PC: asked when shown, again after a minute
+      const c = checks[m.name];
+      if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
+    }
     data.innerHTML = sel === 'machine' ? machineData() : m ? pluginData(m) : a ? assistantData(a) : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
     Charts.draw(data);
+    Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
+    Object.entries(shells).forEach(([name, sh]) => sh.term.attach($(`shell-term-${name}`)));
+    if (typing && m && shells[m.name]) { const el = $(`shell-term-${m.name}`); if (el) el.focus({ preventScroll: true }); }
     data.scrollTop = scrolled;
   }
 
@@ -217,11 +278,14 @@
     const running = m.setup && m.setup.running;
     const steps = m.steps || [];
     const said = invalid(m) ? `Disabled while not valid: ${whyOf(m)}` : stateLine(m);
+    const c = hasHook(m, 'check') ? checks[m.name] : null;  // a plugin that checks this PC: its install locked until it passes
+    const locked = c !== null && !(c && c.data && (c.data.ready || c.data.installed));
+    const off_ = (s) => running || (locked && !PREPARING.includes(s));
     return `${head}<p class="summary">${esc(said)}</p>${m.status && m.status.problem && !invalid(m) ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
       ${facts(m.status)}
-      ${steps.length ? `<h4>Set up</h4><div class="steps"><button type="button" class="setup accent" data-machine="${esc(m.name)}" ${running ? 'disabled' : ''}>Everything</button>
-        ${steps.map((s) => `<button type="button" class="step" data-machine="${esc(m.name)}" data-step="${esc(s)}" ${running ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
-        <div class="muted small">${running ? 'Setting up: the log is in the middle.' : 'Each step reports what it did in the setup log.'}</div>` : ''}`;
+      ${steps.length ? `<h4>Set up</h4><div class="steps"><button type="button" class="setup accent" data-machine="${esc(m.name)}" ${off_('everything') ? 'disabled' : ''}>Everything</button>
+        ${steps.map((s) => `<button type="button" class="step" data-machine="${esc(m.name)}" data-step="${esc(s)}" ${off_(s) ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
+        <div class="muted small">${running ? 'Running: its output is in the middle.' : locked ? `The install is locked until this PC meets what it needs (${PREPARING.join(', ')} prepare it).` : 'Each step\'s output shows in the middle as it runs.'}</div>` : ''}`;
   }
 
   function assistantSide(a) {
@@ -253,7 +317,7 @@
     if (g !== gen) return;  // something changed meanwhile: a newer answer is on its way
     [st, tray] = fresh;
     draw();
-    Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running) watch(m.name); });
+    Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running && !(jobs[m.name] && jobs[m.name].running)) follow(m.name, m.setup.action, m.setup.steps); });
   }
 
   // -- the shown plugin's figures, asked again at its interval (the day's every 30 s), drawn in place ------------
@@ -306,7 +370,7 @@
   // -- what the page asks -------------------------------------------------------------------------------
   async function ask(name, hook, args) {
     try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args }); }
-    catch (e) { const log = $(`log-${name}`); if (log) log.textContent = e.message; else say(name, e.message); return false; }
+    catch (e) { say(name, e.message); return false; }
     await render();
     return true;
   }
@@ -391,21 +455,113 @@
     render();
   }
 
+  // -- jobs: a setup (its steps, everything, the install) or the packages' update, followed in a terminal panel ------------
   async function setup(name, steps) {
-    try { await api('POST', `api/machines/${encodeURIComponent(name)}/setup`, steps ? { steps } : {}); await render(); watch(name); }
-    catch (e) { const log = $(`log-${name}`); if (log) log.textContent = e.message; else say(name, e.message); }
+    try { await api('POST', `api/machines/${enc(name)}/setup`, steps ? { steps } : {}); }
+    catch (e) { say(name, e.message); return; }
+    follow(name, 'setup', steps || []);
   }
 
-  function watch(name) {
-    if (polls[name]) return;
-    polls[name] = setInterval(async () => {
-      try {
-        const s = await api('GET', `api/machines/${encodeURIComponent(name)}/setup`);
-        const log = $(`log-${name}`);
-        if (log) log.textContent = s.lines.join('\n') + (s.error ? `\n${s.error}` : '') + (s.running ? '' : s.ok ? '\n— done' : '\n— ended with a failure');
-        if (!s.running) { clearInterval(polls[name]); delete polls[name]; render(); }
-      } catch (e) { clearInterval(polls[name]); delete polls[name]; }
-    }, 2000);
+  async function runJob(name, action) {  // the Install (everything) or the packages' update
+    try { await api('POST', `api/machines/${enc(name)}/job`, { action }); }
+    catch (e) { say(name, e.message); return; }
+    follow(name, action === 'update' ? 'update' : 'setup', []);
+  }
+
+  function follow(name, action, steps) {  // the panel pops up and follows the job from its start
+    const was = jobs[name];
+    if (was) clearTimeout(was.timer);
+    jobs[name] = { term: LiminalTerminal.create(null), offset: 0, open: true, action, steps: steps || [], running: true, ok: null, timer: null };
+    say(name, '');
+    if (st.machines[name]) st.machines[name].setup = { running: true, action };
+    if (selected() === name) { drawData(); drawSide(); }
+    pollJob(name);
+  }
+
+  async function pollJob(name) {
+    const j = jobs[name];
+    if (!j) return;
+    clearTimeout(j.timer);
+    try {
+      const got = await api('GET', `api/machines/${enc(name)}/job?since=${j.offset}`);
+      if (got.text) j.term.write(got.text);
+      j.offset = got.offset ?? j.offset;
+      j.running = !!got.running;
+      j.ok = got.ok;
+      if (got.error) j.term.write(`\n${got.error}\n`);
+    } catch (e) {
+      j.term.write(`\n${e.message}\n`);
+      j.running = false;
+    }
+    const state = document.querySelector(`[data-panel="job-${CSS.escape(name)}"] .state`);
+    if (state) state.textContent = jobState(j);
+    if (j.running) { j.timer = setTimeout(() => pollJob(name), document.hidden ? 2000 : 500); return; }
+    delete checks[name];  // installed now, perhaps: asked again
+    await render();
+  }
+
+  async function loadCheck(name, fresh) {
+    const c = checks[name];
+    if (c && (c.loading || (!fresh && Date.now() - c.at < 60000))) return;
+    checks[name] = { loading: true, at: Date.now() };
+    try { checks[name] = { data: await api('GET', `api/machines/${enc(name)}/check`), at: Date.now() }; }
+    catch (e) { checks[name] = { error: e.message, at: Date.now() }; }
+    if (selected() === name) { drawData(); drawSide(); }
+  }
+
+  // -- a login terminal (the user: "the plugin also allows for a user to login through a terminal in to the environment")
+  async function openShell(name) {
+    if (shells[name]) { const el = $(`shell-term-${name}`); if (el) el.focus(); return; }
+    let got;
+    try { got = await api('POST', `api/machines/${enc(name)}/terminal`, {}); }
+    catch (e) { say(name, e.message); return; }
+    const sh = { term: LiminalTerminal.create(null, { cursor: true }), offset: got.offset, alive: got.alive, title: got.title, queue: '', timer: null, sending: null };
+    shells[name] = sh;
+    sh.term.write(got.text);
+    drawData();
+    const el = $(`shell-term-${name}`);
+    if (el) el.focus();
+    pollShell(name);
+  }
+
+  async function pollShell(name) {
+    const sh = shells[name];
+    if (!sh) return;
+    clearTimeout(sh.timer);
+    try {
+      const got = await api('GET', `api/machines/${enc(name)}/terminal?since=${sh.offset}`);
+      if (got.text) sh.term.write(got.text);
+      sh.offset = got.offset;
+      if (!got.alive) sh.alive = false;
+    } catch (e) {
+      sh.alive = false;
+    }
+    const state = document.querySelector(`[data-panel="shell-${CSS.escape(name)}"] .state`);
+    if (state && !sh.alive) state.textContent = 'ended';
+    if (sh.alive) sh.timer = setTimeout(() => pollShell(name), document.hidden ? 2000 : 200);
+  }
+
+  function type(name, keys) {  // the keys typed, sent in small batches; the echo comes back with the next read
+    const sh = shells[name];
+    if (!sh || !sh.alive || !keys) return;
+    sh.queue += keys;
+    if (sh.sending) return;
+    sh.sending = setTimeout(async () => {
+      const out = sh.queue;
+      sh.queue = '';
+      sh.sending = null;
+      try { await api('POST', `api/machines/${enc(name)}/terminal/input`, { data: out }); pollShell(name); }
+      catch (e) { sh.term.write(`\r\n${e.message}\r\n`); }
+    }, 25);
+  }
+
+  async function closeShell(name) {
+    const sh = shells[name];
+    if (!sh) return;
+    clearTimeout(sh.timer);
+    delete shells[name];
+    try { await api('POST', `api/machines/${enc(name)}/terminal/close`, {}); } catch (e) { /* gone already */ }
+    drawData();
   }
 
   document.addEventListener('click', (e) => {
@@ -417,6 +573,18 @@
     if (sp) { setSpan(sp.dataset.span); return; }
     const c = e.target.closest('button.choice[data-hook]');
     if (c) { if (c.getAttribute('aria-checked') !== 'true') choose(c.dataset.machine, c.dataset.hook, c.dataset.value); return; }
+    const ins = e.target.closest('button.install[data-machine]');
+    if (ins) { runJob(ins.dataset.machine, 'install'); return; }
+    const upd = e.target.closest('button.update[data-machine]');
+    if (upd) { runJob(upd.dataset.machine, 'update'); return; }
+    const rc = e.target.closest('button.recheck[data-machine]');
+    if (rc) { loadCheck(rc.dataset.machine, true); return; }
+    const hide = e.target.closest('button.term-hide[data-machine]');
+    if (hide) { const j = jobs[hide.dataset.machine]; if (j) j.open = false; drawData(); return; }
+    const so = e.target.closest('button.shell-open[data-machine]');
+    if (so) { openShell(so.dataset.machine); return; }
+    const sc = e.target.closest('button.shell-close[data-machine]');
+    if (sc) { closeShell(sc.dataset.machine); return; }
     const go = e.target.closest('button.setup, button.step');
     if (go) { setup(go.dataset.machine, go.dataset.step ? [go.dataset.step] : null); return; }
     const a = e.target.closest('button.ask');
@@ -433,6 +601,20 @@
     const keyboard = e.clientX === 0 && e.clientY === 0;  // the menu key, or Shift+F10: beside the icon
     window.LiminalMenu.open({ x: keyboard ? r.left - 170 : e.clientX, y: keyboard ? r.top : e.clientY, title: m.title,
       items: [{ label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
+  });
+
+  // keys typed into a login terminal go to it (Ctrl+Shift+C still copies); a paste is sent as typed
+  data.addEventListener('keydown', (e) => {
+    const t = e.target.closest && e.target.closest('.term.interactive[data-machine]');
+    if (!t) return;
+    const keys = LiminalTerminal.keys(e);
+    if (keys) { e.preventDefault(); type(t.dataset.machine, keys); }
+  });
+  data.addEventListener('paste', (e) => {
+    const t = e.target.closest && e.target.closest('.term.interactive[data-machine]');
+    if (!t) return;
+    e.preventDefault();
+    type(t.dataset.machine, (e.clipboardData.getData('text') || '').replace(/\r?\n/g, '\r'));
   });
 
   // the radio group's arrow keys move the choice, as a radio group's do

@@ -14,12 +14,16 @@ from pathlib import Path
 from liminal_libs import docker as docker_mod
 from liminal_libs import layout
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem
+from liminal_libs.machines.terminal import Output, Terminal
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
 READS = ("present", "status", "view", "charts", "instances", "wanted", "services", "startups", "processes")  # asks not logged
 DIR_VAR = "LIMINAL_PLATFORM_DIR"  # the platform's own folder: its log, which plugins are disabled
 PLUGINS_FILE = "plugins.json"
+TERMINAL_IDLE_S = 120.0  # a terminal no page has read for this long is closed
+PREPARING = ("wsl", "update", "version")  # setup steps that prepare this PC: never locked by a plugin's check
+MAX_INPUT = 8192  # characters of keys a page sends at once
 
 
 def platform_dir() -> Path:
@@ -66,12 +70,14 @@ def _json_of(value):
 
 
 class Setup:
-    """A machine plugin's setup under way, in a thread: its lines as they come, its steps when done."""
+    """A machine plugin's job under way, in a thread: its setup, or its packages' update (`action`); what it prints as it
+    comes (`output`, read from an offset by the page's terminal panel), its steps when done."""
 
-    def __init__(self, machine, steps):
+    def __init__(self, machine, steps, action: str = "setup"):
         self.machine = machine
+        self.action = action
         self.steps = tuple(steps) if steps else None
-        self.lines: list[str] = []
+        self.output = Output()
         self.done: list[dict] | None = None
         self.error: str | None = None
         self.started = time.time()
@@ -79,7 +85,10 @@ class Setup:
 
     def _run(self) -> None:
         try:
-            self.done = self.machine.setup(log=self.lines.append, steps=self.steps)
+            if self.action == "update":
+                self.done = self.machine.update_packages(log=self.output)
+            else:
+                self.done = self.machine.setup(log=self.output, steps=self.steps)
         except Exception as e:  # noqa: BLE001 - the page gets the words
             self.error = f"{type(e).__name__}: {e}"
             self.done = []
@@ -88,10 +97,18 @@ class Setup:
     def running(self) -> bool:
         return self.thread.is_alive()
 
-    def describe(self) -> dict:
-        return {"machine": self.machine.name, "steps": list(self.steps or ()), "running": self.running, "lines": list(self.lines),
-                "done": self.done, "error": self.error, "startedAt": self.started,
-                "ok": None if self.done is None else (self.error is None and all(d["ok"] is not False for d in self.done))}
+    @property
+    def lines(self) -> list[str]:
+        return self.output.text.splitlines()
+
+    def describe(self, since: int | None = None, last: int | None = None) -> dict:
+        """Its state; with `since`, the text printed after that offset (the panel's next part); `last`: only so many lines."""
+        out = {"machine": self.machine.name, "action": self.action, "steps": list(self.steps or ()), "running": self.running,
+               "lines": self.lines[-last:] if last else self.lines, "done": self.done, "error": self.error, "startedAt": self.started,
+               "ok": None if self.done is None else (self.error is None and all(d["ok"] is not False for d in self.done))}
+        if since is not None:
+            out["text"], out["from"], out["offset"] = self.output.read(since)
+        return out
 
 
 class PlatformApp(App):
@@ -107,13 +124,15 @@ class PlatformApp(App):
     SETTINGS_SECONDS = 30.0  # the app's settings (the assistants' keys and plans) are read again after this long
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
-                 assistants: dict | None = None, settings=None):
+                 assistants: dict | None = None, settings=None, terminal=None):
         super().__init__(log, login if login is not None else EnvironmentLogin())
         self._machines = machines  # by name; None: the registry's
         self._assistants = assistants  # by name; None: the registry's
         self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login
         self._settings_cache: tuple[float, object] | None = None
         self._invalid: set[str] = set()  # the plugins found not valid by the last status: out of the tray
+        self._terminals: dict[str, Terminal] = {}  # a login terminal per plugin (the page's terminal panel)
+        self._terminal_of = terminal  # (argv, title) -> Terminal: a test's
         self._settling = threading.Lock()
         self._state = Path(state) if state is not None else None  # the platform's folder; platform_dir() unless given
         self._disabled: set[str] | None = None  # read from the folder's plugins.json when first wanted
@@ -341,7 +360,16 @@ class PlatformApp(App):
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
                 "icon": getattr(m, "ICON", "") or "chip", "enabled": on, "valid": valid, "why": why, "state": state,
                 "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
-                "setup": setup.describe() if setup else None}
+                "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
+                "terminal": {"open": self.terminal_of(m.name) is not None}}
+
+    @staticmethod
+    def hooks(m) -> list[str]:
+        """The hooks a machine plugin offers, whether it is valid now or not (its check, its update, its terminal)."""
+        try:
+            return list(m.interface()["hooks"])
+        except Exception:  # noqa: BLE001 - one that cannot say offers nothing
+            return []
 
     @staticmethod
     def asks(m) -> list[str]:
@@ -368,18 +396,95 @@ class PlatformApp(App):
             raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
         return _json_of(answer)
 
-    def start_setup(self, name: str, steps=None) -> Setup:
+    def check(self, name: str) -> dict:
+        """A plugin's check of this PC for what it installs (the user: \"each plugin should have a scheme for checking the
+        environment to see if it supports installing the operating system it has in its name\")."""
         m = self.machine(name)
         self._refuse_disabled(name)
+        if "check" not in self.hooks(m):
+            raise Refused(HTTPStatus.BAD_REQUEST, f"{name} checks nothing")
+        try:
+            return m.check()
+        except Exception as e:  # noqa: BLE001 - the plugin's words
+            raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
+
+    def start_setup(self, name: str, steps=None, action: str = "setup") -> Setup:
+        """A plugin's setup (or its packages' update) started in a thread. A plugin that checks this PC is installed only
+        once the check passes (\"if the criteria are met according to the O/S, then the install method should be not
+        locked out\"); the steps that prepare this PC (WSL itself) are never locked; an update needs it installed."""
+        m = self.machine(name)
+        self._refuse_disabled(name)
+        hooks = self.hooks(m)
+        if action == "update":
+            if "update_packages" not in hooks:
+                raise Refused(HTTPStatus.BAD_REQUEST, f"{name} updates no packages")
+            if "check" in hooks and not self.check(name).get("installed"):
+                raise Refused(HTTPStatus.CONFLICT, f"{name} is not installed: install it first")
+        elif "check" in hooks and not (steps and set(steps) <= set(PREPARING)):
+            c = self.check(name)
+            if not (c.get("ready") or c.get("installed")):
+                raise Refused(HTTPStatus.CONFLICT, f"the install is locked: {c.get('why') or 'this PC does not meet what it needs'}")
         with self._lock:
             current = self._setups.get(name)
             if current is not None and current.running:
-                raise Refused(HTTPStatus.CONFLICT, f"{name} is being set up already")
-            setup = Setup(m, steps)
+                raise Refused(HTTPStatus.CONFLICT, f"{name} is busy already ({current.action})")
+            setup = Setup(m, steps, action)
             self._setups[name] = setup
-        self.log(f"platform: setting up {name}" + (f" ({', '.join(setup.steps)})" if setup.steps else ""))
+        self.log(f"platform: {'updating the packages of' if action == 'update' else 'setting up'} {name}"
+                 + (f" ({', '.join(setup.steps)})" if setup.steps else ""))
         setup.thread.start()
         return setup
+
+    # -- login terminals (the user: "the plugin also allows for a user to login through a terminal in to the environment")
+    def terminal_of(self, name: str) -> Terminal | None:
+        with self._lock:
+            return self._terminals.get(name)
+
+    def _close_idle(self) -> None:
+        """Terminals no page has read for TERMINAL_IDLE_S, or that ended, closed."""
+        now = time.monotonic()
+        with self._lock:
+            gone = [(n, t) for n, t in self._terminals.items() if not t.alive or now - t.seen > TERMINAL_IDLE_S]
+            for n, _ in gone:
+                del self._terminals[n]
+        for _, t in gone:
+            t.close()
+
+    def open_terminal(self, name: str) -> dict:
+        m = self.machine(name)
+        self._refuse_disabled(name)
+        if "terminal" not in self.hooks(m):
+            raise Refused(HTTPStatus.BAD_REQUEST, f"{name} offers no terminal")
+        self._close_idle()
+        current = self.terminal_of(name)
+        if current is not None and current.alive:
+            return current.read(current.output.end)
+        try:
+            argv = m.terminal()
+        except Exception as e:  # noqa: BLE001 - not installed: its words
+            raise Refused(HTTPStatus.CONFLICT, str(e)) from None
+        title = f"{getattr(m, 'user', '') or 'you'} in {getattr(m, 'distribution_name', '') or m.title}"
+        term = (self._terminal_of or (lambda a, t: Terminal(a, title=t)))(argv, title)
+        with self._lock:
+            self._terminals[name] = term
+        self.log(f"platform: a terminal opened into {name}")
+        return term.read(0)
+
+    def close_terminal(self, name: str) -> bool:
+        with self._lock:
+            term = self._terminals.pop(name, None)
+        if term is None:
+            return False
+        term.close()
+        self.log(f"platform: the terminal into {name} closed")
+        return True
+
+    def stop(self) -> None:
+        with self._lock:
+            terms, self._terminals = list(self._terminals.values()), {}
+        for t in terms:
+            t.close()
+        super().stop()
 
     def api(self, handler, method: str, path: str, query: dict, body: dict | None):
         body = body or {}
@@ -400,10 +505,39 @@ class PlatformApp(App):
             m = self.machine(name)
             if method == "GET" and not action:
                 return 200, self.machine_status(m)
-            if method == "GET" and action == "setup":
+            if method == "GET" and action in ("setup", "job"):
                 with self._lock:
                     setup = self._setups.get(name)
-                return 200, (setup.describe() if setup else {"machine": name, "running": False, "lines": [], "done": None})
+                since = int(query.get("since") or 0) if action == "job" else None
+                return 200, (setup.describe(since=since) if setup else {"machine": name, "running": False, "lines": [], "done": None,
+                                                                       "text": "", "from": 0, "offset": 0})
+            if method == "GET" and action == "check":
+                return 200, self.check(name)
+            if method == "POST" and action == "job":
+                what = body.get("action")
+                if what not in ("install", "update"):
+                    raise Refused(HTTPStatus.BAD_REQUEST, "action is install or update")
+                job = self.start_setup(name, None, "update" if what == "update" else "setup")
+                return 202, job.describe(since=0)
+            if action == "terminal" and method == "POST":
+                return 200, self.open_terminal(name)
+            if action == "terminal" and method == "GET":
+                term = self.terminal_of(name)
+                if term is None:
+                    raise Refused(HTTPStatus.NOT_FOUND, f"no terminal is open into {name}")
+                got = term.read(int(query.get("since") or 0))
+                self._close_idle()
+                return 200, got
+            if action == "terminal/input" and method == "POST":
+                data, term = body.get("data"), self.terminal_of(name)
+                if not isinstance(data, str) or len(data) > MAX_INPUT:
+                    raise Refused(HTTPStatus.BAD_REQUEST, f"data is the keys typed, at most {MAX_INPUT} characters")
+                if term is None or not term.alive:
+                    raise Refused(HTTPStatus.CONFLICT, f"no terminal is open into {name}")
+                term.write(data)
+                return 200, {"sent": len(data)}
+            if action == "terminal/close" and method == "POST":
+                return 200, {"closed": self.close_terminal(name)}
             if method == "POST" and action == "setup":
                 steps = body.get("steps") or None
                 if steps is not None and (not isinstance(steps, list) or not all(isinstance(s, str) for s in steps)):

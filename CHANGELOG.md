@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 (2026-11-07)
+
+A plugin that installs a system shows its check of this PC and unlocks the install only when every criterion is met (the
+user: "each plugin should have a scheme for checking the environment to see if it supports installing the operating system
+it has in its name, if the criteria are met according to the O/S, then the install method should be not locked out"):
+`GET /api/machines/<name>/check`, the page's list of criteria with Install and Check again; the setup's own install steps
+locked the same way, the steps that prepare this PC (wsl, update, version) never. A job (the install, a step, the
+packages' update) pops up a terminal panel that shows what it prints as it comes ("after the install is run a terminal
+pops up in the plugin and shows the install progress"): `POST /api/machines/<name>/job {action: install|update}`, `GET
+/api/machines/<name>/job?since=N`. Once installed, Update packages ("the user can use the plugin to update the
+environment's packages") and Open a terminal ("the plugin also allows for a user to login through a terminal in to the
+environment"): `POST /api/machines/<name>/terminal`, its `input` and `close`, `GET ...?since=N`; a terminal no page reads
+for two minutes is closed. `terminal.js` draws a shell's output (colours, progress lines, readline's editing) and sends
+the keys typed.
+
 ## 0.3.0 (2026-11-07)
 
 A plugin not in a valid state is disabled until it is (the user: "if a plugin is not in a valid state it has to be

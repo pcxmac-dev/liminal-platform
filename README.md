@@ -18,7 +18,11 @@ framework"; "it also has an icon just like the chart/login and integrator"). An 
 
 Plugins can be disabled: a right click on a plugin's icon in the tray offers Disable, and the switch at the head
 of a plugin's page enables or disables it (disabled: asked nothing, out of the tray, detached; kept in the
-platform's folder, `plugins.json`). A plugin not in a valid state (set up for Liminal: a WSL plugin with its own Liminal-named distribution, a firewall
+platform's folder, `plugins.json`). A plugin that installs a system (the WSL plugins) shows its check of this PC; its Install unlocks only when every
+criterion is met, and the install's output shows in a terminal panel as it runs. Once installed, the plugin updates its
+packages and opens a login terminal into it, on the page.
+
+A plugin not in a valid state (set up for Liminal: a WSL plugin with its own Liminal-named distribution, a firewall
 with Liminal's rules, an admin with the rights; an AI assistant with a key and a plan with API access) is disabled
 until it is: shaded, out of the tray, its switch held off with the reason, its setup still there. A plugin's own
 charts, tables and choices are drawn in the middle (the

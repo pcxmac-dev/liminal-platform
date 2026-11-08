@@ -232,3 +232,151 @@ def test_the_ai_assistants_are_valid_with_a_key_and_enabled_or_disabled():
         assert _call(port, "POST", "/api/plugins/bot/enabled", {"on": 1})[0] == 400
     finally:
         app.stop()
+
+
+from liminal_libs.machines import MachinePlugin  # noqa: E402
+from liminal_libs.machines.terminal import Output  # noqa: E402
+
+
+class Distro(MachinePlugin):
+    """A stand-in WSL plugin: its check of this PC, its install streamed, its packages' update, its terminal."""
+
+    name = "distro"
+    title = "A distro"
+    about = "a stand-in system"
+    api = "2.1"
+    order = 950
+    STEPS = ("wsl", "distribution")
+    HOOKS = (*MachinePlugin.HOOKS, "check", "update_packages", "terminal")
+
+    def __init__(self):
+        self.ready, self.installed, self.updates = False, False, 0
+
+    def present(self):
+        return self.installed
+
+    def status(self):
+        return {"present": self.installed, "summary": "installed" if self.installed else "not installed",
+                "valid": self.installed, "why": "" if self.installed else "no Liminal install: its setup installs it"}
+
+    def check(self):
+        return {"ready": self.ready and not self.installed, "installed": self.installed, "distribution": "Liminal-Distro",
+                "criteria": [{"name": "space", "title": "Room for it", "ok": self.ready, "detail": "plenty" if self.ready else "too little"}],
+                "why": "" if self.ready else "Room for it: too little"}
+
+    def setup(self, log=print, steps=None):
+        for step in steps or self.STEPS:
+            log.write(f"{step}: 50%\r{step}: 100%\n")  # what its commands print, as it comes
+            log(f"distro: {step}: ok")
+        if not steps or "distribution" in steps:
+            self.installed = True
+        return [{"step": step, "ok": True, "detail": "done"} for step in steps or self.STEPS]
+
+    def update_packages(self, log=print):
+        self.updates += 1
+        log.write("Reading package lists... Done\n")
+        log("distro: packages: ok")
+        return [{"step": "packages", "ok": True, "detail": "up to date"}]
+
+    def terminal(self, user=None):
+        if not self.installed:
+            raise RuntimeError("Liminal-Distro is not installed: install it first")
+        return ["wsl", "-d", "Liminal-Distro"]
+
+
+class FakeTerminal:
+    """A login shell's stand-in: what it prints, the keys typed (echoed as a terminal does)."""
+
+    def __init__(self, argv, title):
+        self.argv, self.title, self.typed, self.closed = argv, title, "", False
+        self.output = Output()
+        self.output.write("liminal@pc:~$ ")
+        self.seen = time.monotonic()
+
+    @property
+    def alive(self):
+        return not self.closed
+
+    def read(self, since=0):
+        self.seen = time.monotonic()
+        text, start, end = self.output.read(since)
+        return {"text": text, "from": start, "offset": end, "alive": self.alive, "title": self.title}
+
+    def write(self, data):
+        self.typed += data
+        self.output.write(data.replace("\r", "\r\n"))
+
+    def close(self):
+        self.closed = True
+
+
+def _wait_job(port, name):
+    for _ in range(100):
+        got = _call(port, "GET", f"/api/machines/{name}/job?since=0")[1]
+        if not got["running"]:
+            return got
+        time.sleep(0.02)
+    raise AssertionError("the job did not end")
+
+
+def test_the_install_is_locked_until_the_check_passes_and_streams_its_progress():
+    """The user: "if the criteria are met according to the O/S, then the install method should be not locked out, after the
+    install is run a terminal pops up in the plugin and shows the install progress, after the install is complete, the user
+    can use the plugin to update the environment's packages"."""
+    d = Distro()
+    app = PlatformApp(log=lambda m: None, machines={"distro": d}, assistants={})
+    port = _port(app.start(0))
+    try:
+        m = _call(port, "GET", "/api/machines/distro")[1]
+        assert {"check", "update_packages", "terminal"} <= set(m["hooks"]) and m["state"] == "invalid" and m["terminal"] == {"open": False}
+        c = _call(port, "GET", "/api/machines/distro/check")[1]
+        assert (c["ready"], c["installed"], c["why"]) == (False, False, "Room for it: too little")
+        status, refused = _call(port, "POST", "/api/machines/distro/job", {"action": "install"})
+        assert status == 409 and "the install is locked: Room for it: too little" in refused["error"]
+        assert _call(port, "POST", "/api/machines/distro/setup", {})[0] == 409  # everything is the install too
+        assert _call(port, "POST", "/api/machines/distro/setup", {"steps": ["wsl"]})[0] == 202  # preparing this PC: never locked
+        _wait_job(port, "distro")
+        assert _call(port, "POST", "/api/machines/distro/job", {"action": "update"})[0] == 409  # not installed yet
+        d.ready = True
+        status, job = _call(port, "POST", "/api/machines/distro/job", {"action": "install"})
+        assert status == 202 and job["action"] == "setup"
+        done = _wait_job(port, "distro")
+        assert done["ok"] is True and "distribution: 50%\rdistribution: 100%\n" in done["text"] and done["offset"] == len(done["text"])
+        assert _call(port, "GET", f"/api/machines/distro/job?since={done['offset'] - 4}")[1]["text"] == done["text"][-4:]  # read on from an offset
+        assert d.installed and _call(port, "GET", "/api/machines/distro/check")[1]["installed"] is True
+        status, job = _call(port, "POST", "/api/machines/distro/job", {"action": "update"})
+        assert status == 202 and job["action"] == "update"
+        upd = _wait_job(port, "distro")
+        assert upd["ok"] is True and upd["text"].startswith("Reading package lists... Done\n") and d.updates == 1
+        assert _call(port, "POST", "/api/machines/distro/job", {"action": "reboot"})[0] == 400
+    finally:
+        app.stop()
+
+
+def test_a_login_terminal_into_the_environment():
+    """The user: "the plugin also allows for a user to login through a terminal in to the environment"."""
+    d = Distro()
+    made: list = []
+
+    def terminal(argv, title):
+        made.append(FakeTerminal(argv, title))
+        return made[-1]
+    app = PlatformApp(log=lambda m: None, machines={"distro": d}, assistants={}, terminal=terminal)
+    port = _port(app.start(0))
+    try:
+        status, refused = _call(port, "POST", "/api/machines/distro/terminal", {})
+        assert status == 409 and "not installed" in refused["error"] and made == []
+        d.installed = True
+        status, opened = _call(port, "POST", "/api/machines/distro/terminal", {})
+        assert status == 200 and opened["text"] == "liminal@pc:~$ " and opened["alive"] and made[0].argv == ["wsl", "-d", "Liminal-Distro"]
+        assert _call(port, "GET", "/api/machines/distro")[1]["terminal"] == {"open": True}
+        assert _call(port, "POST", "/api/machines/distro/terminal/input", {"data": "ls\r"})[1] == {"sent": 3}
+        got = _call(port, "GET", f"/api/machines/distro/terminal?since={opened['offset']}")[1]
+        assert got["text"] == "ls\r\n" and made[0].typed == "ls\r"
+        assert _call(port, "POST", "/api/machines/distro/terminal", {})[1]["alive"] and len(made) == 1  # the one open, kept
+        assert _call(port, "POST", "/api/machines/distro/terminal/input", {"data": 5})[0] == 400
+        assert _call(port, "POST", "/api/machines/distro/terminal/close", {})[1] == {"closed": True} and made[0].closed
+        assert _call(port, "GET", "/api/machines/distro/terminal")[0] == 404
+        assert _call(port, "POST", "/api/machines/distro/terminal/input", {"data": "x"})[0] == 409
+    finally:
+        app.stop()
