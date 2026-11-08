@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 (2026-11-08)
+
+A plugin not for this machine at all (its status says `applies` False: Linux administration on Windows or in WSL; the
+user: "the scope of linux administration is only on native linux O/S") is shown as such: disabled, "Not for this
+machine" and its reason on its page, in the list, in this machine's table and on its switch, and no setup offered,
+since none can make it valid here. A plugin not valid yet keeps its setup or install as before.
+
 ## 0.4.1 (2026-11-08)
 
 The terminal's typing (the user: "in the terminal, characters repeat"; "the character entry is not great for the term"):

@@ -4,4 +4,4 @@ and integrator"): an app of the frame (liminal_libs.apps.App) with the chip icon
 shows the machine, the machine plugins (WSL distributions with Docker inside: plugin-platform-wsl-*), the
 Docker instances they and the machine offer, and the AI assistants attached; the machine plugins are set up
 from it."""
-__version__ = "0.4.1"
+__version__ = "0.4.2"

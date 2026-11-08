@@ -54,8 +54,9 @@
   const invalid = (m) => !userOff(m) && (m.state === 'invalid' || m.valid === false);
   const off = (m) => userOff(m) || invalid(m);
   const whyOf = (m) => m.why || 'not valid';
+  const notHere = (m) => invalid(m) && !!(m.status && m.status.applies === false);  // not for this machine at all: no setup offered
   const chipOf = (m) => (off(m) ? '<span class="chip">disabled</span>' : '<span class="chip up">active</span>');
-  const stateLine = (m) => (userOff(m) ? 'disabled' : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
+  const stateLine = (m) => (userOff(m) ? 'disabled' : notHere(m) ? `not for this machine: ${whyOf(m)}` : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
   function say(name, text) {  // a plugin's trouble, at the head of its page
     const el = $(`err-${name}`);
     if (el) el.textContent = text || '';
@@ -157,7 +158,7 @@
 
   function switchRow(m) {
     const on = !off(m), held = invalid(m);  // not valid: off until it is, whatever the switch says
-    return `<label class="switch-row"${held ? ` title="${esc(`Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? 'Disabled: not valid' : 'Disabled'}</label>`;
+    return `<label class="switch-row"${held ? ` title="${esc(notHere(m) ? `Not for this machine: ${whyOf(m)}` : `Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? (notHere(m) ? 'Disabled: not for this machine' : 'Disabled: not valid') : 'Disabled'}</label>`;
   }
 
   // a job's terminal panel: what an install or an update prints, as it comes (the user: "after the install is run a
@@ -215,6 +216,10 @@
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
     if (userOff(m)) return `${head}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
+    if (notHere(m)) {
+      return `${head}<p class="muted">Not for this machine: ${esc(whyOf(m))}. It stays disabled here; no setup is offered, since none can make it valid on this machine.</p>`
+        + (m.setup || jobs[m.name] ? setupLog(m) : '');
+    }
     if (invalid(m)) {
       return `${head}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${hasHook(m, 'check') ? 'Its install, below, can make it valid. '
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
@@ -278,13 +283,13 @@
     const head = `<h3>${icon(m.icon || 'chip', 20)} ${esc(m.title)} ${chipOf(m)}</h3><div class="muted small">${esc(m.name)}${m.version ? ` · ${esc(m.version)}` : ''}</div>`;
     if (userOff(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>`;
     const running = m.setup && m.setup.running;
-    const steps = m.steps || [];
-    const said = invalid(m) ? `Disabled while not valid: ${whyOf(m)}` : stateLine(m);
+    const steps = notHere(m) ? [] : m.steps || [];  // not for this machine: nothing to set up
+    const said = notHere(m) ? `Not for this machine: ${whyOf(m)}` : invalid(m) ? `Disabled while not valid: ${whyOf(m)}` : stateLine(m);
     const c = hasHook(m, 'check') ? checks[m.name] : null;  // a plugin that checks this PC: its install locked until it passes
     const locked = c !== null && !(c && c.data && (c.data.ready || c.data.installed));
     const off_ = (s) => running || (locked && !PREPARING.includes(s));
     return `${head}<p class="summary">${esc(said)}</p>${m.status && m.status.problem && !invalid(m) ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
-      ${facts(m.status)}
+      ${notHere(m) ? '' : facts(m.status)}
       ${steps.length ? `<h4>Set up</h4><div class="steps"><button type="button" class="setup accent" data-machine="${esc(m.name)}" ${off_('everything') ? 'disabled' : ''}>Everything</button>
         ${steps.map((s) => `<button type="button" class="step" data-machine="${esc(m.name)}" data-step="${esc(s)}" ${off_(s) ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
         <div class="muted small">${running ? 'Running: its output is in the middle.' : locked ? `The install is locked until this PC meets what it needs (${PREPARING.join(', ')} prepare it).` : 'Each step\'s output shows in the middle as it runs.'}</div>` : ''}`;
