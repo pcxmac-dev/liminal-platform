@@ -42,6 +42,49 @@ class Box(MachinePlugin):
         return (Instance("box", "the box", command="box docker", source="box"),)
 
 
+from liminal_libs.machines.firewall import Firewall, Rule  # noqa: E402
+
+
+class Wall(Firewall):
+    """A stand-in firewall: its rules in memory."""
+
+    name = "wall"
+    title = "A wall"
+    about = "a stand-in firewall"
+    api = "2.1"
+    order = 901
+
+    def __init__(self):
+        self.rules = {}
+
+    def present(self):
+        return True
+
+    def backend(self):
+        return "the wall"
+
+    def state(self):
+        return {"enabled": True, "profiles": {"all": True}}
+
+    def list_rules(self, owned_only=True):
+        return list(self.rules.values())
+
+    def add_rule(self, rule):
+        self.rules[rule.name] = rule
+
+    def delete_rule(self, name):
+        return self.rules.pop(name, None) is not None
+
+    def enable(self):
+        pass
+
+    def exposing(self, ports):
+        return []
+
+    def wanted(self):
+        return []
+
+
 @pytest.fixture(autouse=True)
 def _no_docker_or_wsl_here(monkeypatch):
     """The tests never ask this machine's Docker or WSL: GitHub's runners have Docker installed, this PC
@@ -58,7 +101,7 @@ def _port(url: str) -> int:
 def served():
     lines: list[str] = []
     box = Box()
-    app = PlatformApp(log=lines.append, machines={"box": box})
+    app = PlatformApp(log=lines.append, machines={"box": box, "wall": Wall()})
     url = app.start(0)
     yield app, _port(url), lines, box
     app.stop()

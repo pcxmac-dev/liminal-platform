@@ -14,6 +14,7 @@ from liminal_libs import docker as docker_mod
 from liminal_libs.apps import App, EnvironmentLogin, Refused, attach_registry
 
 PORT = 8775
+NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
 
 
 def facts() -> dict:
@@ -40,6 +41,17 @@ def memory_mb() -> int:
         return int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 * 1024))
     except Exception:  # noqa: BLE001 - a fact that cannot be read is 0
         return 0
+
+
+def _json_of(value):
+    """A plugin's answer as JSON: what can describe itself, described; lists and dicts through."""
+    if hasattr(value, "describe"):
+        return value.describe()
+    if isinstance(value, (list, tuple)):
+        return [_json_of(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _json_of(v) for k, v in value.items()}
+    return value
 
 
 class Setup:
@@ -118,7 +130,31 @@ class PlatformApp(App):
         with self._lock:
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
+                "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m),
                 "setup": setup.describe() if setup else None}
+
+    @staticmethod
+    def asks(m) -> list[str]:
+        """What the page may ask a machine plugin by name: its hooks (Plugin.interface) but the setup, the
+        settings, the scan and a command, which have routes of their own or none."""
+        try:
+            return [h for h in m.interface()["hooks"] if h not in NOT_ASKED]
+        except Exception:  # noqa: BLE001 - a plugin that cannot say: nothing to ask
+            return []
+
+    def ask(self, name: str, hook: str, args: list):
+        """One of a machine plugin's hooks by name (asks), its answer as JSON (a rule, a startup: described)."""
+        m = self.machine(name)
+        if hook not in self.asks(m):
+            raise Refused(HTTPStatus.BAD_REQUEST, f"{name} is not asked {hook!r} here: {', '.join(self.asks(m)) or 'nothing'}")
+        self.log(f"platform: {name} asked {hook}" + (f" {' '.join(map(str, args))}" if args else ""))
+        try:
+            answer = m.ask(hook, *args)
+        except (TypeError, ValueError, LookupError) as e:
+            raise Refused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}") from None
+        except Exception as e:  # noqa: BLE001 - the plugin's own words
+            raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
+        return _json_of(answer)
 
     def start_setup(self, name: str, steps=None) -> Setup:
         m = self.machine(name)
@@ -155,6 +191,11 @@ class PlatformApp(App):
                 if steps is not None and (not isinstance(steps, list) or not all(isinstance(s, str) for s in steps)):
                     raise Refused(HTTPStatus.BAD_REQUEST, "steps is a list of step names")
                 return 202, self.start_setup(name, steps).describe()
+            if method == "POST" and action == "ask":
+                hook, args = body.get("hook"), body.get("args") or []
+                if not isinstance(hook, str) or not isinstance(args, list):
+                    raise Refused(HTTPStatus.BAD_REQUEST, "hook is a hook's name, args a list")
+                return 200, {"answer": self.ask(name, hook, args)}
             if method == "POST" and action == "run":
                 command = body.get("command")
                 if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):

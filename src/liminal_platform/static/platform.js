@@ -31,6 +31,34 @@
       </dl>`;
   }
 
+  function tables(m) {
+    // what a plugin's status lists: Liminal's rules (a firewall), services, startups, processes (the admin)
+    const st = m.status || {}, can = new Set(m.asks || []), out = [];
+    const btn = (hook, args, label) => can.has(hook) ? `<button type="button" class="ask" data-hook="${esc(hook)}" data-args='${esc(JSON.stringify(args))}'>${esc(label)}</button>` : '';
+    if (Array.isArray(st.rules) && st.rules.length) {
+      out.push(`<table class="list"><thead><tr><th>Rule</th><th>Ports</th><th>Direction</th><th>From</th><th></th></tr></thead><tbody>` + st.rules.map((r) =>
+        `<tr><td>${esc(r.label)}</td><td class="mono">${esc((r.ports || []).join(', ') || 'every')}/${esc(r.protocol)}</td><td>${esc(r.direction)} ${esc(r.action)}</td><td>${esc(r.remote)}</td>`
+        + `<td>${r.owned ? btn('remove', [r.name], 'Remove') : ''}</td></tr>`).join('') + `</tbody></table>`);
+    }
+    if (Array.isArray(st.services) && st.services.length) {
+      out.push(`<table class="list"><thead><tr><th>Service</th><th>State</th><th>Start</th><th>For</th><th></th></tr></thead><tbody>` + st.services.map((s) =>
+        `<tr><td class="mono">${esc(s.name)}</td><td>${esc(s.state)}</td><td>${esc(s.startup)}</td><td class="muted">${esc(s.usedFor)}</td><td>`
+        + (s.state === 'absent' ? '' : s.state === 'running' ? btn('service', [s.name, 'restart'], 'Restart') + btn('service', [s.name, 'stop'], 'Stop') : btn('service', [s.name, 'start'], 'Start'))
+        + `</td></tr>`).join('') + `</tbody></table>`);
+    }
+    if (Array.isArray(st.startups) && st.startups.length) {
+      out.push(`<table class="list"><thead><tr><th>App</th><th>Startup</th><th>State</th><th></th></tr></thead><tbody>` + st.startups.map((s) =>
+        `<tr><td>${esc(s.app)}</td><td class="mono">${esc(s.name)}</td><td>${esc(s.state)}</td><td>`
+        + (s.state === 'absent' ? btn('register', [s.app], 'Start at logon') : btn('startup', [s.app, 'run'], 'Run') + btn('startup', [s.app, 'end'], 'End') + btn('unregister', [s.app], 'Remove'))
+        + `</td></tr>`).join('') + `</tbody></table>`);
+    }
+    if (Array.isArray(st.processes) && st.processes.length) {
+      out.push(`<table class="list"><thead><tr><th>Process</th><th>App</th><th>Memory</th></tr></thead><tbody>` + st.processes.map((p) =>
+        `<tr><td class="mono">${esc(p.pid)}</td><td>${esc(p.app)}</td><td>${esc(p.memoryMb)} MB</td></tr>`).join('') + `</tbody></table>`);
+    }
+    return out.join('');
+  }
+
   function engineText(st) {
     const e = st.engine || {};
     if (!st.present) return 'not present';
@@ -42,9 +70,10 @@
     return `<h2>Machine plugins</h2>` + list.map((m) => `<div class="card machine" data-name="${esc(m.name)}">
         <h3>${esc(m.title)} <span class="muted">${esc(m.version || '')}</span></h3>
         <p class="muted">${esc(m.about)}</p>
-        <p class="engine">${engineText(m.status)}${m.status.problem ? ` · <span class="error">${esc(m.status.problem)}</span>` : ''}</p>
+        <p class="engine">${m.status.summary ? esc(m.status.summary) : engineText(m.status)}${m.status.problem ? ` · <span class="error">${esc(m.status.problem)}</span>` : ''}</p>
+        ${tables(m)}
         <div class="steps"><button type="button" class="setup accent" ${m.setup && m.setup.running ? 'disabled' : ''}>Set up everything</button>
-          ${['distribution', 'docker', 'engine', 'user'].map((s) => `<button type="button" class="step" data-step="${s}" ${m.setup && m.setup.running ? 'disabled' : ''}>${s}</button>`).join('')}</div>
+          ${(m.steps || []).map((s) => `<button type="button" class="step" data-step="${esc(s)}" ${m.setup && m.setup.running ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
         <pre class="setup-log" id="log-${esc(m.name)}">${m.setup ? esc(m.setup.lines.join('\n')) : ''}</pre></div>`).join('');
   }
 
@@ -69,8 +98,14 @@
       const name = card.dataset.name;
       card.querySelector('.setup').addEventListener('click', () => setup(name, null));
       card.querySelectorAll('.step').forEach((b) => b.addEventListener('click', () => setup(name, [b.dataset.step])));
+      card.querySelectorAll('.ask').forEach((b) => b.addEventListener('click', () => ask(name, b.dataset.hook, JSON.parse(b.dataset.args))));
     });
     list.forEach((m) => { if (m.setup && m.setup.running) watch(m.name); });
+  }
+
+  async function ask(name, hook, args) {
+    try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args }); render(); }
+    catch (e) { $(`log-${name}`).textContent = e.message; }
   }
 
   async function setup(name, steps) {

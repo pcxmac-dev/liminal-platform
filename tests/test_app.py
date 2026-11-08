@@ -41,7 +41,7 @@ def test_the_page_its_icon_and_the_machine(served):
     status, st = _call(port, "GET", "/api/status")
     assert status == 200 and st["machine"]["cpus"] == f["cpus"] and st["app"]["icon"] == "chip"
     assert st["docker"]["installed"] is False and st["docker"]["available"] is False  # no Docker here, as the fixture says
-    assert st["machines"]["box"]["status"]["engine"]["running"] and st["machines"]["box"]["setup"] is None
+    assert st["machines"]["box"]["status"]["engine"]["running"] and st["machines"]["box"]["setup"] is None and "wall" in st["machines"]
     assert st["instances"] == [{"name": "box", "where": "the box", "command": "box docker", "context": "", "host": "", "source": "box"}]
     assert any("its page at" in m for m in lines)
 
@@ -64,12 +64,28 @@ def test_a_machine_is_set_up_from_the_page_and_runs_a_command(served):
     assert status == 200 and out["output"] == "ran ls /\n" and box.ran[-1] == ("ls", "/")
     assert _call(port, "POST", "/api/machines/box/run", {"command": ["false"]})[0] == 502
     assert _call(port, "POST", "/api/machines/box/run", {"command": []})[0] == 400
-    assert _call(port, "GET", "/api/machines")[1]["machines"][0]["name"] == "box"
+    assert [m["name"] for m in _call(port, "GET", "/api/machines")[1]["machines"]] == ["box", "wall"]
     assert _call(port, "GET", "/api/instances")[1]["instances"][0]["name"] == "box"
     # a write without the header is refused by the frame
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
     conn.request("POST", "/api/machines/box/run", body=b"{}", headers={"Content-Type": "application/json"})
     assert conn.getresponse().status == 403
+
+
+def test_a_plugins_steps_summary_and_asks_by_name(served):
+    app, port, lines, box = served
+    status, wall = _call(port, "GET", "/api/machines/wall")
+    assert status == 200 and wall["steps"] == ["enable", "exposure", "rules"] and wall["status"]["summary"] == "the wall: on (all on); 0 Liminal rule(s)"
+    assert {"allow", "remove", "wanted", "status", "present"} <= set(wall["asks"]) and "setup" not in wall["asks"] and "run" not in wall["asks"]
+    status, out = _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": ["web", [8443]]})
+    assert status == 200 and out["answer"]["label"] == "Liminal: web" and out["answer"]["ports"] == [8443]
+    assert _call(port, "GET", "/api/machines/wall")[1]["status"]["rules"][0]["name"] == "web"
+    assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "remove", "args": ["web"]})[1] == {"answer": True}
+    assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "setup", "args": []})[0] == 400  # its own route
+    assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": ["Bad Name", [1]]})[0] == 400
+    assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": "x"})[0] == 400
+    assert any("wall asked allow web" in m for m in lines)
+    assert _call(port, "GET", "/api/machines/box")[1]["steps"] == []  # a plugin without steps offers none
 
 
 def test_the_registry_is_asked_when_no_machines_are_given():
