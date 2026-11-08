@@ -631,7 +631,7 @@ def test_a_plugins_settings_are_entered_on_its_page_and_kept_through_the_login()
     port = _port(app.start(0))
     try:
         m = _call(port, "GET", "/api/machines/keyed")[1]
-        assert m["state"] == "invalid" and p.login is app.login  # its settings read through the platform's login, before it is attached
+        assert m["state"] == "invalid" and p.login.inner is app.login  # its settings read through the platform's login (lent noting it), before it is attached
         assert m["settings"] == [{"variable": "KEYED_API_USER", "label": "API user", "secret": False, "hint": "your username", "set": False},
                                  {"variable": "KEYED_API_KEY", "label": "API key", "secret": True, "hint": "", "set": False}]
         status, out = _call(port, "POST", "/api/plugins/keyed/settings", {"values": {"KEYED_API_USER": " tester ", "KEYED_API_KEY": "s3cret-value"}})
@@ -651,3 +651,80 @@ def test_a_plugins_settings_are_entered_on_its_page_and_kept_through_the_login()
         assert b"function settingsForm" in page and b"api/plugins/${enc(d.name)}/settings" in page and b'type="password"' in page
     finally:
         app.stop()
+
+
+def test_the_connections_picture_says_who_talks_to_whom_in_its_class(tmp_path):
+    """Connections (0.10.0; the user: "the root plugin (platform) will need to visually illustrate how plugins are
+    connected to each other or to the main app/plugin/icon via IPC, all requests and interactions should be
+    classified"): the page's requests, the platform's calls of its plugins, what each reads through the login, the
+    programs and hosts a plugin reaches (audit events raised by the stand-in: nothing starts, nothing is sent); never a
+    value, never an argument."""
+    import sys
+
+    from liminal_libs.apps import EnvironmentLogin
+    from liminal_libs.machines import MachinePlugin as Machine
+    from liminal_libs.sources.keys import KeyVar
+
+    class Prober(Machine):
+        name, title, about, api, order = "prober", "Prober", "a stand-in reaching out", "2.1", 906
+        ICON = "gauge"
+        keys = (KeyVar("PROBER_API_KEY", label="API key"),)
+
+        def present(self):
+            return True
+
+        def status(self):
+            have = self.login.variables(["PROBER_API_KEY"]) if self.login else {}
+            sys.audit("subprocess.Popen", None, [r"C:\Windows\System32\nslookup.exe", "-type=TXT", "x"], None, None)
+            sys.audit("socket.getaddrinfo", "updates.invalid", 443, 0, 0, 0)
+            sys.audit("socket.connect", None, ("192.0.2.7", 443))
+            return {"present": True, "valid": bool(have), "why": "no key", "summary": "probing"}
+
+    class Quiet(Machine):
+        name, title, about, api, order = "quiet", "Quiet", "a stand-in disabled", "2.1", 907
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True}
+
+    app = PlatformApp(log=lambda m: None, login=EnvironmentLogin(env={"PROBER_API_KEY": "s3cret-value"}),
+                      machines={"prober": Prober(), "quiet": Quiet()}, assistants={}, state=tmp_path)
+    app.attach_plugins(list(app.machines().values()))
+    port = _port(app.start(0))
+    try:
+        assert app.classify("GET", "/api/machines/prober/terminal") == "stream" and app.classify("GET", "/api/machines/prober/job") == "stream"
+        assert app.classify("POST", "/api/machines/prober/ask") == "ask" and app.classify("POST", "/api/machines/prober/enabled") == "change"
+        assert _call(port, "POST", "/api/machines/quiet/enabled", {"on": False})[0] == 200
+        assert _call(port, "GET", "/api/machines/prober")[1]["state"] == "active"
+        status, snap = _call(port, "GET", "/api/traffic")
+    finally:
+        app.stop()
+    assert status == 200 and set(snap["classes"]) >= {"read", "change", "ask", "stream", "attach", "login", "process", "network"}
+    links = {(k["from"], k["to"], k["kind"]): k["what"] for k in snap["links"]}
+    assert links[("client", "platform", "read")] == "GET /api/machines/prober"  # a program: no browser's headers
+    assert links[("client", "platform", "change")] == "POST /api/machines/quiet/enabled"
+    assert links[("platform", "prober", "read")] == "status" and links[("platform", "prober", "attach")] == "attached"
+    assert links[("platform", "quiet", "attach")] == "detached"
+    assert links[("prober", "login", "login")] == "read PROBER_API_KEY"  # the plugin reading its key
+    assert links[("platform", "login", "login")] == "read PROBER_API_KEY"  # the platform asking whether it is set
+    assert links[("prober", "process:nslookup", "process")] == "started"
+    assert links[("prober", "host:updates.invalid", "network")] == "connect :443"
+    nodes = {n["id"]: n for n in snap["nodes"]}
+    assert nodes["prober"]["state"] == "active" and nodes["prober"]["icon"] == "gauge" and nodes["prober"]["attached"] is True
+    assert nodes["quiet"]["state"] == "disabled" and nodes["quiet"]["attached"] is False  # disabled, yet said something: drawn
+    assert nodes["platform"]["role"] == "app" and nodes["login"]["sub"] == "the user's environment variables"
+    assert nodes["process:nslookup"]["role"] == "outside" and nodes["host:updates.invalid"]["kind"] == "host"
+    text = json.dumps(snap)
+    assert "s3cret" not in text and "-type=TXT" not in text and snap["hidden"] == []
+
+
+def test_the_page_draws_the_connections(served):
+    """The page's Connections view: its entry in the list, its picture asked from api/traffic, its legend's classes."""
+    port = served[1]
+    page = _call(port, "GET", "/platform.js")[1]
+    assert b"const CONNECTIONS = 'connections'" in page and b"api/traffic?last=200" in page and b"function connectionsSvg" in page
+    assert b"'read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'" in page
+    css = _call(port, "GET", "/platform.css")[1]
+    assert b".k-network { --k: var(--series-6); }" in css and b"prefers-reduced-motion" in css

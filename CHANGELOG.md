@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.0 (2026-11-08)
+
+Connections (the user: "the root plugin (platform) will need to visually illustrate how plugins are connected to each
+other or to the main app/plugin/icon via IPC, all requests and interactions should be classified and give the user a
+way to understand how the app and it's plugins communicate, visually"): a view of its own under This machine, drawing
+who talks to whom as it happens. On the left who asks the platform (this page, a program); in the middle the platform
+and its login; its plugins (each in its state); on the right what they reach (programs, hosts, the framework's other
+apps on this machine). A line for each link and class (read, change, ask, stream, attach, login, process, network) in
+the class's colour, its width how often; it moves while it carried something in the last seconds and a dot runs along
+it for each new interaction (still, with reduced motion). A box picked shows its own links and rows (Its page opens a
+plugin's); the legend's classes switch off and on; Pause holds the picture. The latest interactions under it, the same
+one said again within 30 s one row, counted, with how long each took and whether it failed. Never a value: a setting by
+its name, no hook's arguments, a program by its name alone, a host by its name and port.
+
+- `GET /api/traffic` (liminal-libs 1.32.0's `App.connections`): every platform plugin in its state, attached or not;
+  one disabled or not valid that nothing was said to is left out and named in `hidden`.
+- Noted: the page's requests in their class (a terminal's and a job's output streams, a hook asked by name an ask), each
+  plugin's presence, status, check, validity and hooks asked (the reads apart), a setup started and ended, a
+  terminal opened, typed into and closed, a command run, what the platform and each plugin read and keep through the
+  login (each plugin lent a login noting it: `TRACE_LOGIN`), the programs and hosts the platform and its plugins reach
+  (`WATCH_OUTSIDE`: one audit hook, the calling code naming who).
+- Needs liminal-libs>=1.32.0.
+
 ## 0.9.0 (2026-11-08)
 
 A plugin's settings entered on its page (the user: "i need a way to put my credentials in to the namecheap plugin and

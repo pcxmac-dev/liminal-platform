@@ -122,3 +122,53 @@ td .form-open { margin-right: 4px; white-space: nowrap; }
 .form-dialog ul.lines { margin: 6px 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
 .form-dialog .buttons { margin-top: 14px; }
 .form-dialog[aria-busy="true"] .buttons button { cursor: progress; }
+/* 0.10.0: Connections, who talks to whom (apps.traffic): a line per link and class in the class's colour (the theme's
+   series, validated against every theme), its width how often; a line that carried something in the last seconds
+   moves, and a dot runs along it for each new interaction; a box picked keeps its own lines and parts lit */
+.k-read { --k: var(--series-1); } .k-change { --k: var(--series-2); } .k-ask { --k: var(--series-7); } .k-stream { --k: var(--series-3); }
+.k-attach { --k: var(--muted); } .k-login { --k: var(--series-4); } .k-process { --k: var(--series-5); } .k-network { --k: var(--series-6); }
+.conn-picture { margin: 8px 0 4px; }
+.conn-picture svg { display: block; width: 100%; height: auto; overflow: visible; }
+.conn-picture .col-head { fill: var(--muted); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+.conn-picture .edge { fill: none; stroke: var(--k); stroke-linecap: round; opacity: .5; transition: opacity .2s; }
+.conn-picture .edge.busy { opacity: 1; stroke-dasharray: 7 5; animation: conn-flow .7s linear infinite; }
+.conn-picture .edge.k-attach:not(.busy) { stroke-dasharray: 2 4; }
+.conn-picture .focused .edge:not(.on) { opacity: .08; }
+.conn-picture .focused .edge.on { opacity: 1; }
+.conn-picture .pulse { fill: var(--k); stroke: var(--bg); stroke-width: 1; }
+.conn-picture .node { cursor: pointer; outline: none; transition: opacity .2s; }
+.conn-picture .node rect { fill: var(--panel); stroke: var(--border); stroke-width: 1; }
+.conn-picture .node text { fill: var(--text); font-size: 12px; }
+.conn-picture .node .ico { color: var(--muted); }
+.conn-picture .node:hover rect { stroke: var(--text); }
+.conn-picture .node:focus-visible rect, .conn-picture .node.picked rect { stroke: var(--accent); stroke-width: 2; }
+.conn-picture .node.role-app rect { stroke: var(--accent); }
+.conn-picture .node.role-app .ico { color: var(--accent); }
+.conn-picture .node.role-login .ico { color: var(--series-4); }
+.conn-picture .node.state-disabled, .conn-picture .node.state-invalid { opacity: .55; }
+.conn-picture .focused .node:not(.on):not(.picked) { opacity: .3; }
+.conn-picture .node .dot { fill: var(--muted); }
+.conn-picture .node.state-active .dot, .conn-picture .node.state-attached .dot { fill: var(--up); }
+.conn-picture .node.state-invalid .dot { fill: var(--series-4); }
+.kind { display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--border); border-radius: 9px;
+  font-size: 11px; line-height: 17px; color: var(--text); white-space: nowrap; }
+.kind::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--k); }
+.legend { display: grid; gap: 4px; margin: 4px 0; }
+.legend-item { display: flex; gap: 9px; align-items: flex-start; text-align: left; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; }
+.legend-item .what { display: flex; flex-direction: column; }
+.legend-item .sub { color: var(--muted); font-size: 11px; }
+.legend-item .swatch-line { width: 18px; height: 0; margin-top: 8px; flex: none; border-top: 3px solid var(--k); }
+.legend-item.k-attach .swatch-line { border-top-style: dotted; }
+.legend-item[aria-pressed="false"] { opacity: .5; }
+.legend-item[aria-pressed="false"] .swatch-line { border-top: 1px dashed var(--k); }
+table.conn-rows td.what { overflow-wrap: anywhere; }
+table.conn-rows .num, table.conn-links .num { text-align: right; white-space: nowrap; }
+table.conn-rows tr.failed td:first-child { box-shadow: inset 3px 0 0 var(--down); }
+table.conn-rows .bad, table.conn-links .bad { color: var(--down); }
+table.conn-rows tr.new td { animation: conn-new 1.6s ease-out; }
+@keyframes conn-flow { to { stroke-dashoffset: -12; } }
+@keyframes conn-new { from { background: var(--hover); } }
+@media (prefers-reduced-motion: reduce) {
+  .conn-picture .edge.busy { animation: none; stroke-dasharray: none; }
+  table.conn-rows tr.new td { animation: none; }
+}

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from liminal_libs import docker as docker_mod
 from liminal_libs import layout
-from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, saved_variables
+from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
 from liminal_libs.machines.terminal import Output, Terminal
 
 PORT = 8775
@@ -105,7 +105,7 @@ class Setup:
     """A machine plugin's job under way, in a thread: its setup, or its packages' update (`action`); what it prints as it
     comes (`output`, read from an offset by the page's terminal panel), its steps when done."""
 
-    def __init__(self, machine, steps, action: str = "setup"):
+    def __init__(self, machine, steps, action: str = "setup", traffic=None, by: str = "platform"):
         self.machine = machine
         self.action = action
         self.steps = tuple(steps) if steps else None
@@ -113,9 +113,11 @@ class Setup:
         self.done: list[dict] | None = None
         self.error: str | None = None
         self.started = time.time()
+        self.traffic, self.by = traffic, by  # who asked it, noted when it ends (apps.traffic)
         self.thread = threading.Thread(target=self._run, name=f"setup-{machine.name}", daemon=True)
 
     def _run(self) -> None:
+        began = time.perf_counter()
         try:
             if self.action == "update":
                 self.done = self.machine.update_packages(log=self.output)
@@ -124,6 +126,10 @@ class Setup:
         except Exception as e:  # noqa: BLE001 - the page gets the words
             self.error = f"{type(e).__name__}: {e}"
             self.done = []
+        if self.traffic is not None:
+            ok = self.error is None and all(d.get("ok") is not False for d in self.done or [] if isinstance(d, dict))
+            self.traffic.record(self.by, self.machine.name, "change", f"{self.action} ended" + ("" if ok else ": it failed"),
+                                (time.perf_counter() - began) * 1000, ok)
 
     @property
     def running(self) -> bool:
@@ -155,6 +161,14 @@ class PlatformApp(App):
 
     SETTINGS_SECONDS = 30.0  # the app's settings (the assistants' keys and plans) are read again after this long
 
+    # who talks to whom, drawn on the page's Connections (the user, 2026-11-08: "the root plugin (platform) will need to
+    # visually illustrate how plugins are connected to each other or to the main app/plugin/icon via IPC, all requests
+    # and interactions should be classified"): each plugin lent a login noting what it reads and keeps, and the programs
+    # and hosts the platform and its plugins reach noted once it serves (apps.traffic)
+    TRACE_LOGIN = True
+    WATCH_OUTSIDE = True
+    READ_HOOKS = READS
+
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
                  assistants: dict | None = None, settings=None, terminal=None):
         # its login: the user's environment variables, those saved after it started too (a setting entered on a page
@@ -174,6 +188,46 @@ class PlatformApp(App):
         self._setups: dict[str, Setup] = {}
         self._lock = threading.Lock()
         self._active: tuple[float, list[str]] | None = None
+        self._states: dict[str, str] = {}  # each plugin's state when last asked: active | disabled | invalid (Connections)
+
+    # -- who talks to whom (apps.traffic; the page's Connections) -------------------------------------------------
+    def classify(self, method: str, path: str) -> str:
+        """A page's request in its class: a terminal's keys and output and a job's output read are streams, a hook
+        asked by name an ask; the rest as the frame says (a GET reads, anything else asks for a change)."""
+        if "/terminal" in path or (method == "GET" and path.endswith(("/job", "/setup"))):
+            return "stream"
+        if path.endswith("/ask"):
+            return "ask"
+        return super().classify(method, path)
+
+    def known_ports(self) -> dict[int, str]:
+        """The framework's apps' ports on this machine (their variables moving them): a link to one is drawn as it."""
+        from liminal_libs.machines.firewall import app_ports
+
+        try:
+            return {port: app for app, port in app_ports().items()}
+        except Exception:  # noqa: BLE001 - none known
+            return {}
+
+    def connections(self, last: int = 200) -> dict:
+        """The frame's picture with every platform plugin in it, attached or not, in its state (active, disabled, not
+        valid); one disabled or not valid that nothing was said to is left out, named in `hidden`."""
+        out = super().connections(last)
+        nodes = {n["id"]: n for n in out["nodes"]}
+        linked = {end for link in out["links"] for end in (link["from"], link["to"])}
+        assistants, hidden = self.assistant_plugins(), []
+        for name, p in {**self.machines(), **assistants}.items():
+            state = self._states.get(name) or ("disabled" if not self.enabled(name) else "unknown")
+            attached = self.plugin(name) is p
+            if state != "active" and not attached and name not in linked:
+                hidden.append(name)
+                nodes.pop(name, None)
+                continue
+            nodes[name] = {"id": name, "role": "plugin", "title": p.title, "attached": attached, "state": state,
+                           "icon": "analysis" if name in assistants else getattr(p, "ICON", "") or "chip",
+                           "kind": "assistant" if name in assistants else "machine"}
+        out["nodes"], out["hidden"] = list(nodes.values()), sorted(hidden)
+        return out
 
     # -- disabled plugins (the user, 2026-11-07: "allow me to right click on the icons to disable them on the right
     # icon menu, also allow for enable disable switch (left to right) on the plugin description") -------------------
@@ -265,8 +319,11 @@ class PlatformApp(App):
         for name, m in self.machines().items():
             if name in off:
                 continue
+            self.traffic.own(m, name)
             try:
-                if m.present():
+                with self.traffic.timed(self.NAME, name, "read", "present"):
+                    present = m.present()
+                if present:
                     names.append(name)
             except Exception:  # noqa: BLE001 - a plugin that cannot say is not active
                 continue
@@ -299,7 +356,7 @@ class PlatformApp(App):
             return cached[1]
         from liminal_libs.config import load_settings
 
-        settings = load_settings(login=self.login)
+        settings = load_settings(login=self.login_for(self.NAME))
         with self._lock:
             self._settings_cache = (now, settings)
         return settings
@@ -321,8 +378,15 @@ class PlatformApp(App):
         """An AI assistant as the page shows it: who it is, enabled (the user's), valid (a key and a plan with API
         access) and why not; attached while both (its keys and plans are set on the charts app's Plugins view)."""
         on = self.enabled(p.name)
-        valid, why = self.assistant_validity(p) if on else (None, "")
+        self.traffic.own(p, p.name)
+        if on:
+            with self.traffic.timed(self.NAME, p.name, "read", "valid? (its key, its plan)"):
+                valid, why = self.assistant_validity(p)
+        else:
+            valid, why = None, ""
         state = "active" if on and valid else "disabled" if not on else "invalid"
+        with self._lock:
+            self._states[p.name] = state
         self._settle(p, state == "active")
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
                 "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
@@ -337,7 +401,7 @@ class PlatformApp(App):
         if not keys:
             return []
         try:
-            have = set(self.login.variables([n for k in keys for n in k.names]))
+            have = set(self.login_for(self.NAME).variables([n for k in keys for n in k.names]))
         except Exception:  # noqa: BLE001 - a login that cannot say: none is said set
             have = set()
         return [{"variable": k.name, "label": k.label, "secret": bool(k.secret), "hint": k.hint or "",
@@ -367,10 +431,10 @@ class PlatformApp(App):
         changes += [(v, None) for v in forget]
         if not changes:
             raise Refused(HTTPStatus.BAD_REQUEST, "nothing to keep: every field was left empty (an empty field keeps its value)")
-        where = ""
+        where, login = "", self.login_for(self.NAME)
         for variable, value in changes:
             try:
-                where = self.login.save(variable, value)
+                where = login.save(variable, value)
             except Unauthorized as e:
                 raise Refused(HTTPStatus(e.status) if 400 <= e.status < 600 else HTTPStatus.INTERNAL_SERVER_ERROR, e.reason) from None
         with self._lock:
@@ -378,7 +442,8 @@ class PlatformApp(App):
         changed = getattr(p, "settings_changed", None)
         if callable(changed):
             try:
-                changed()
+                with self.traffic.timed(self.NAME, name, "change", "its settings changed"):
+                    changed()
             except Exception:  # noqa: BLE001 - the plugin reads them on its own then
                 pass
         kept, dropped = [v for v, x in changes if x is not None], [v for v, x in changes if x is None]
@@ -437,10 +502,12 @@ class PlatformApp(App):
         if not on:  # asked nothing
             status = {"present": None, "summary": "disabled: the platform asks it nothing"}
         else:
+            self.traffic.own(m, m.name)
             if getattr(m, "login", None) is None:  # the platform's login lent, attached or not: its settings read through it
-                m.login = self.login
+                m.login = self.login_for(m.name)
             try:
-                status = m.status()
+                with self.traffic.timed(self.NAME, m.name, "read", "status"):
+                    status = m.status()
             except Exception as e:  # noqa: BLE001 - a plugin's trouble is shown, not raised
                 status = {"present": False, "problem": f"{type(e).__name__}: {e}"}
         valid, why = None, ""
@@ -450,6 +517,7 @@ class PlatformApp(App):
         state = "active" if on and valid else "disabled" if not on else "invalid"
         with self._lock:
             (self._invalid.add if state == "invalid" else self._invalid.discard)(m.name)
+            self._states[m.name] = state
         self._settle(m, state == "active")
         with self._lock:
             setup = self._setups.get(m.name)
@@ -486,7 +554,8 @@ class PlatformApp(App):
         if hook not in READS:
             self.log(f"platform: {name} asked {hook}" + (f" {' '.join(map(str, args))}" if args else ""))
         try:
-            answer = m.ask(hook, *args)
+            with self.traffic.timed(self.NAME, name, "read" if hook in READS else "ask", hook):
+                answer = m.ask(hook, *args)
         except (TypeError, ValueError, LookupError) as e:
             raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e), _accepting(e)) from None
         except Exception as e:  # noqa: BLE001 - the plugin's own words
@@ -501,7 +570,8 @@ class PlatformApp(App):
         if "check" not in self.hooks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} checks nothing")
         try:
-            return m.check()
+            with self.traffic.timed(self.NAME, name, "read", "check"):
+                return m.check()
         except Exception as e:  # noqa: BLE001 - the plugin's words
             raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
 
@@ -525,10 +595,12 @@ class PlatformApp(App):
             current = self._setups.get(name)
             if current is not None and current.running:
                 raise Refused(HTTPStatus.CONFLICT, f"{name} is busy already ({current.action})")
-            setup = Setup(m, steps, action)
+            setup = Setup(m, steps, action, self.traffic, self.NAME)
             self._setups[name] = setup
         self.log(f"platform: {'updating the packages of' if action == 'update' else 'setting up'} {name}"
                  + (f" ({', '.join(setup.steps)})" if setup.steps else ""))
+        self.traffic.own(m, name)
+        self.traffic.record(self.NAME, name, "change", f"{action} started" + (f": {', '.join(setup.steps)}" if setup.steps else ""))
         setup.thread.start()
         return setup
 
@@ -557,7 +629,8 @@ class PlatformApp(App):
         if current is not None and current.alive:
             return current.read(max(0, current.output.end - KEPT_SHOWN))  # where it was: its last lines
         try:
-            argv = m.terminal()
+            with self.traffic.timed(self.NAME, name, "ask", "terminal"):
+                argv = m.terminal()
         except Exception as e:  # noqa: BLE001 - not installed: its words
             raise Refused(HTTPStatus.CONFLICT, str(e)) from None
         title = f"{getattr(m, 'user', '') or 'you'} in {getattr(m, 'distribution_name', '') or m.title}"
@@ -573,8 +646,14 @@ class PlatformApp(App):
         if term is None:
             return False
         term.close()
+        self.traffic.record(self.NAME, self._terminal_program(term), "stream", "closed")
         self.log(f"platform: the terminal into {name} closed")
         return True
+
+    @staticmethod
+    def _terminal_program(term) -> str:
+        """The program a login terminal runs, as a link's end (process:wsl)."""
+        return f"process:{program_name(None, list(getattr(term, 'argv', None) or [])) or 'terminal'}"
 
     def stop(self) -> None:
         with self._lock:
@@ -636,6 +715,7 @@ class PlatformApp(App):
                 if term is None or not term.alive:
                     raise Refused(HTTPStatus.CONFLICT, f"no terminal is open into {name}")
                 term.write(data)
+                self.traffic.record(self.NAME, self._terminal_program(term), "stream", "keys typed")  # never the keys
                 return 200, {"sent": len(data)}
             if action == "terminal/close" and method == "POST":
                 return 200, {"closed": self.close_terminal(name)}
@@ -663,7 +743,8 @@ class PlatformApp(App):
                 if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
                     raise Refused(HTTPStatus.BAD_REQUEST, "command is a list of words")
                 try:
-                    return 200, {"output": m.run(*command)}
+                    with self.traffic.timed(self.NAME, name, "ask", f"run {program_name(None, command) or 'a command'}"):
+                        return 200, {"output": m.run(*command)}
                 except Exception as e:  # noqa: BLE001 - the plugin's words
                     raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
         return super().api(handler, method, path, query, body)

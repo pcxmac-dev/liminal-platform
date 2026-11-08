@@ -86,6 +86,7 @@
     const machines = Object.values(st.machines);
     list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>`
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
+      + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
       + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), off(m) ? ' off' : '')).join('')
         : '<div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
       + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, 'analysis', a.title, off(a) ? stateLine(a) : (a.vendor || a.about), off(a) ? ' off' : '')).join('') : '');
@@ -604,6 +605,241 @@
     return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are set with Settings…, above; its plan and model on the charts app's Plugins view. The platform hosts it.</div>`;
   }
 
+  // -- Connections (0.10.0; the user, 2026-11-08: "the root plugin (platform) will need to visually illustrate how
+  // plugins are connected to each other or to the main app/plugin/icon via IPC, all requests and interactions should be
+  // classified and give the user a way to understand how the app and it's plugins communicate, visually"): who asks the
+  // platform on the left (this page, a program), the platform and its login in the middle, its plugins, then what they
+  // reach on the right (programs, hosts, the framework's other apps). A line per link and class: its colour the class,
+  // its width how often, moving while it carried something in the last seconds, a dot running along it for each new
+  // interaction. A box picked shows its own links and rows; a class switched off leaves the picture and the table.
+  const CONNECTIONS = 'connections';
+  const CLASS_ORDER = ['read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'];
+  const COLS = { caller: [64, 112], app: [236, 136], plugin: [478, 168], outside: [704, 176] };  // x and width, of 800
+  let traffic = null;  // the last GET api/traffic
+  let trafficTimer = null;
+  let trafficGen = 0;  // the latest ask of it: an older one's answer is dropped
+  let trafficPaused = false;
+  let trafficSeq = -1;  // the newest interaction drawn: newer ones run along their line
+  let connShape = '';  // the parts and links drawn: the picture is built again only when they change
+  let focusNode = null;  // a box picked: its own links and rows alone
+  const kindsOff = new Set();  // classes switched off in the legend
+  const still = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const ago = (s) => (s < 1.5 ? 'just now' : s < 90 ? `${Math.round(s)} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`);
+  const clockOf = (t) => new Date(t * 1000).toLocaleTimeString();
+  const cut = (s, n) => (s.length > n ? `${s.slice(0, Math.max(1, n - 1))}…` : s);
+  const linkKey = (l) => `${l.from}|${l.to}|${l.kind}`;
+  const nodeTitle = (t, id) => { const n = ((t && t.nodes) || []).find((x) => x.id === id); return n ? n.title : id; };
+  const nodeTip = (n) => `${n.title}${n.sub ? ` (${n.sub})` : ''}${n.role === 'plugin' && n.state ? `: ${n.state}` : ''}`;
+  const linkTip = (t, l) => `${nodeTitle(t, l.from)} → ${nodeTitle(t, l.to)}: ${l.kind}, ${l.count} time${l.count === 1 ? '' : 's'}`
+    + `${l.failed ? ` (${l.failed} failed)` : ''}, ${l.ms} ms on average; the last ${ago(t.now - l.last)}: ${l.what}`;
+
+  function connectionsModel(t) {  // the parts in their columns, the links between parts drawn
+    const nodes = (t.nodes || []).map((n) => ({ ...n, title: String(n.title || n.id) }));
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const links = (t.links || []).filter((l) => !kindsOff.has(l.kind) && byId.has(l.from) && byId.has(l.to));
+    const lastOf = new Map();
+    links.forEach((l) => [l.from, l.to].forEach((id) => lastOf.set(id, Math.max(lastOf.get(id) || 0, l.last))));
+    let outside = nodes.filter((n) => n.role === 'outside');
+    const more = Math.max(0, outside.length - 16);  // the 16 reached last are drawn; the table names every one
+    if (more) {
+      const keep = new Set([...outside].sort((a, b) => (lastOf.get(b.id) || 0) - (lastOf.get(a.id) || 0)).slice(0, 16).map((n) => n.id));
+      outside = outside.filter((n) => keep.has(n.id));
+    }
+    const KIND = { app: 0, process: 1, host: 2 }, STATE = { active: 0, attached: 0, unknown: 1, invalid: 2, disabled: 3 };
+    outside.sort((a, b) => (KIND[a.kind] ?? 3) - (KIND[b.kind] ?? 3) || a.title.localeCompare(b.title));
+    const plugins = nodes.filter((n) => n.role === 'plugin').sort((a, b) => (STATE[a.state] ?? 1) - (STATE[b.state] ?? 1) || a.title.localeCompare(b.title));
+    const callers = nodes.filter((n) => n.role === 'caller').sort((a, b) => (a.id === 'page' ? -1 : b.id === 'page' ? 1 : a.title.localeCompare(b.title)));
+    const app = nodes.find((n) => n.role === 'app'), login = nodes.find((n) => n.role === 'login');
+    const ROW = 34, TOP = 30;
+    const rows = Math.max(plugins.length, outside.length, callers.length, 4);
+    const mid = TOP + (rows * ROW) / 2;
+    const column = (list, role, c) => list.forEach((n, i) => Object.assign(n, { x: COLS[role][0], w: COLS[role][1], col: c, y: mid + (i - (list.length - 1) / 2) * ROW }));
+    column(callers, 'caller', 0);
+    column(plugins, 'plugin', 2);
+    column(outside, 'outside', 3);
+    if (app) Object.assign(app, { x: COLS.app[0], w: COLS.app[1], col: 1, y: login ? mid - 34 : mid });
+    if (login) Object.assign(login, { x: COLS.app[0], w: COLS.app[1], col: 1, y: mid + 34 });
+    const drawn = [...callers, ...(app ? [app] : []), ...(login ? [login] : []), ...plugins, ...outside];
+    const ids = new Set(drawn.map((n) => n.id));
+    return { nodes: drawn, byId, links: links.filter((l) => ids.has(l.from) && ids.has(l.to)), H: TOP + rows * ROW + 10, more };
+  }
+  const shapeOf = (m) => `${m.nodes.map((n) => `${n.id}:${n.state || ''}`).join(',')}/${m.links.map(linkKey).sort().join(',')}`;
+
+  function edgeD(a, b, off) {  // a line from a to b; `off` sets apart several classes between the same two parts
+    if (a.col === 1 && b.col === 1) {  // the platform and its login, one above the other
+      const down = b.y > a.y;
+      return `M${a.x + off} ${a.y + (down ? 13 : -13)}L${b.x + off} ${b.y + (down ? -13 : 13)}`;
+    }
+    if (a.col === b.col) {  // one plugin asking another: an arc on their right
+      const x1 = a.x + a.w / 2, x2 = b.x + b.w / 2, r = 26 + Math.abs(a.y - b.y) / 3;
+      return `M${x1} ${a.y + off}C${x1 + r} ${a.y + off} ${x2 + r} ${b.y + off} ${x2} ${b.y + off}`;
+    }
+    const fwd = b.x > a.x;
+    const sx = fwd ? a.x + a.w / 2 : a.x - a.w / 2, tx = fwd ? b.x - b.w / 2 : b.x + b.w / 2, dx = (tx - sx) / 2;
+    return `M${sx} ${a.y + off}C${sx + dx} ${a.y + off} ${tx - dx} ${b.y + off} ${tx} ${b.y + off}`;
+  }
+
+  function nodeSvg(n) {
+    const w = n.w, ic = icon(n.icon || 'plug', 15).replace('<svg ', `<svg x="${-w / 2 + 8}" y="-7.5" `);
+    const dot = n.role === 'plugin' ? `<circle class="dot" cx="${w / 2 - 10}" cy="0" r="3.5"/>` : '';
+    return `<g class="node role-${esc(n.role)} state-${esc(n.state || 'none')}" data-node="${esc(n.id)}" transform="translate(${n.x} ${n.y})"`
+      + ` tabindex="0" role="button" aria-pressed="false" aria-label="${esc(nodeTip(n))}"><title>${esc(nodeTip(n))}</title>`
+      + `<rect x="${-w / 2}" y="-13" width="${w}" height="26" rx="7"/>${ic}<text x="${-w / 2 + 29}" y="4">${esc(cut(n.title, Math.floor((w - 48) / 6.6)))}</text>${dot}</g>`;
+  }
+
+  function connectionsSvg(m) {
+    const pairs = new Map();
+    m.links.forEach((l) => { const k = `${l.from}|${l.to}`; if (!pairs.has(k)) pairs.set(k, []); pairs.get(k).push(l.kind); });
+    pairs.forEach((kinds) => kinds.sort((a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b)));
+    const edges = m.links.map((l) => {
+      const kinds = pairs.get(`${l.from}|${l.to}`), off = (kinds.indexOf(l.kind) - (kinds.length - 1) / 2) * 3.2;
+      return `<path class="edge k-${esc(l.kind)}" data-link="${esc(linkKey(l))}" d="${edgeD(m.byId.get(l.from), m.byId.get(l.to), off)}"><title></title></path>`;
+    }).join('');
+    const heads = [['Asking', COLS.caller[0]], ['The platform', COLS.app[0]], ['Plugins', COLS.plugin[0]], ['Reached', COLS.outside[0]]]
+      .map(([s, x]) => `<text class="col-head" x="${x}" y="14" text-anchor="middle">${s}</text>`).join('');
+    return `<svg id="conn-svg" viewBox="0 0 800 ${m.H}" role="group" aria-label="Who talks to whom: ${m.nodes.length} parts, ${m.links.length} links">`
+      + `${heads}<g class="edges">${edges}</g><g class="pulses" id="conn-pulses"></g><g class="nodes">${m.nodes.map(nodeSvg).join('')}</g></svg>`;
+  }
+
+  function paintLinks(t) {  // each line's width, whether it moves, its words; the box picked and what it talks to
+    const svg = $('conn-svg');
+    if (!svg) return;
+    const byKey = new Map((t.links || []).map((l) => [linkKey(l), l]));
+    const near = new Set();
+    (t.links || []).forEach((l) => { if (l.from === focusNode) near.add(l.to); if (l.to === focusNode) near.add(l.from); });
+    svg.querySelectorAll('path.edge').forEach((p) => {
+      const l = byKey.get(p.dataset.link);
+      if (!l) return;
+      p.setAttribute('stroke-width', (1.2 + Math.min(3.6, Math.log10(l.count + 1) * 1.3)).toFixed(2));
+      p.classList.toggle('busy', t.now - l.last < 4);
+      p.classList.toggle('on', !!focusNode && (l.from === focusNode || l.to === focusNode));
+      p.firstElementChild.textContent = linkTip(t, l);
+    });
+    svg.classList.toggle('focused', !!focusNode);
+    svg.querySelectorAll('g.node').forEach((g) => {
+      const id = g.dataset.node;
+      g.classList.toggle('on', near.has(id));
+      g.classList.toggle('picked', id === focusNode);
+      g.setAttribute('aria-pressed', String(id === focusNode));
+    });
+  }
+
+  function pulses(t, since) {  // a dot along its line for each interaction newer than the last drawn
+    const g = $('conn-pulses');
+    if (!g || since < 0 || still()) return;
+    (t.recent || []).filter((r) => r.seq > since && !kindsOff.has(r.kind)).slice(0, 24).forEach((r, i) => {
+      const p = document.querySelector(`#conn-svg path.edge[data-link="${CSS.escape(linkKey(r))}"]`);
+      if (!p) return;
+      setTimeout(() => {
+        if (!p.isConnected) return;
+        g.insertAdjacentHTML('beforeend', `<circle class="pulse k-${esc(r.kind)}" r="3.4"><animateMotion dur="0.9s" fill="freeze" begin="indefinite" path="${p.getAttribute('d')}"/></circle>`);
+        const c = g.lastElementChild, a = c && c.firstElementChild;
+        if (a && a.beginElement) a.beginElement();
+        setTimeout(() => { if (c) c.remove(); }, 1000);
+      }, i * 70);
+    });
+  }
+
+  function summaryOf(t) {
+    const total = (t.links || []).reduce((s, l) => s + l.count, 0), failed = (t.links || []).reduce((s, l) => s + l.failed, 0);
+    return `since ${clockOf(t.since)} · ${total} interaction${total === 1 ? '' : 's'} on ${(t.links || []).length} link${(t.links || []).length === 1 ? '' : 's'}`
+      + ` · ${failed} failed · ${trafficPaused ? 'paused' : 'asked every 2 s'}`;
+  }
+
+  function rowsHtml(t, since) {
+    const rows = (t.recent || []).filter((r) => !kindsOff.has(r.kind) && (!focusNode || r.from === focusNode || r.to === focusNode)).slice(0, 60);
+    if (!rows.length) return `<tr><td colspan="6" class="muted">${focusNode ? 'Nothing said to it or by it yet.' : 'Nothing yet.'}</td></tr>`;
+    return rows.map((r) => `<tr class="${since >= 0 && r.seq > since ? 'new' : ''}${r.ok ? '' : ' failed'}"><td class="mono small">${esc(clockOf(r.at))}</td>`
+      + `<td>${esc(nodeTitle(t, r.from))} → ${esc(nodeTitle(t, r.to))}</td><td><span class="kind k-${esc(r.kind)}">${esc(r.kind)}</span></td>`
+      + `<td class="mono small what">${esc(r.what)}</td><td class="num">${r.times > 1 ? `×${r.times}` : ''}</td>`
+      + `<td class="num">${r.ms ? `${r.ms} ms` : ''}${r.failed ? ` <span class="bad">${r.failed} failed</span>` : ''}</td></tr>`).join('');
+  }
+
+  function connectionsData() {
+    return `<div class="data-head"><h2>Connections</h2><button type="button" class="conn-pause" aria-pressed="${trafficPaused}">${trafficPaused ? 'Resume' : 'Pause'}</button></div>
+      <div class="muted small">who talks to whom on this platform, as it happens: a line for each kind of interaction between two parts</div>
+      <p class="error" id="err-connections"></p>
+      <div class="muted small" id="conn-summary" aria-live="off">${traffic ? esc(summaryOf(traffic)) : 'Asking the platform…'}</div>
+      <div class="conn-picture" id="conn-graph" aria-live="off"></div>
+      <div class="muted small" id="conn-note" aria-live="off"></div>
+      <h4>Latest</h4><div class="muted small">the newest first; the same thing said again within 30 s is one row, counted</div>
+      <table class="list conn-rows"><thead><tr><th>At</th><th>From → to</th><th>Class</th><th>What</th><th class="num">Times</th><th class="num">Took</th></tr></thead>
+      <tbody id="conn-rows" aria-live="off"></tbody></table>`;
+  }
+
+  function connectionsSide(t) {
+    const counts = {}, classes = (t && t.classes) || {};
+    ((t && t.links) || []).forEach((l) => { counts[l.kind] = (counts[l.kind] || 0) + l.count; });
+    const legend = CLASS_ORDER.filter((k) => classes[k]).map((k) => `<button type="button" class="legend-item k-${k}" data-kind="${k}" aria-pressed="${!kindsOff.has(k)}">`
+      + `<span class="swatch-line" aria-hidden="true"></span><span class="what"><span>${k} <span class="muted">${counts[k] || 0}</span></span><span class="sub">${esc(classes[k])}</span></span></button>`).join('');
+    const n = focusNode && t ? (t.nodes || []).find((x) => x.id === focusNode) : null;
+    let picked = '';
+    if (n) {
+      const mine = (t.links || []).filter((l) => l.from === n.id || l.to === n.id);
+      const rows = mine.map((l) => `<tr><td>${l.from === n.id ? `→ ${esc(nodeTitle(t, l.to))}` : `← ${esc(nodeTitle(t, l.from))}`}</td><td><span class="kind k-${esc(l.kind)}">${esc(l.kind)}</span></td>`
+        + `<td class="num">${l.count}${l.failed ? ` <span class="bad">(${l.failed} failed)</span>` : ''}</td><td class="num">${l.ms} ms</td></tr>`).join('');
+      picked = `<h4>${esc(n.title)}</h4><div class="muted small">${esc(n.sub || n.role)}${n.role === 'plugin' && n.state ? ` · ${esc(n.state)}` : ''}</div>
+        <div class="row">${n.role === 'plugin' && pluginOf(n.id) ? `<button type="button" data-select="${esc(n.id)}">Its page</button> ` : ''}<button type="button" class="conn-unpick">Every part</button></div>
+        ${rows ? `<table class="list conn-links"><thead><tr><th>With</th><th>Class</th><th class="num">Times</th><th class="num">Mean</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="small muted">Nothing said to it or by it yet.</div>'}`;
+    }
+    return `<h3>${icon('plug', 20)} Connections</h3><div class="muted small">the platform, its page, its login, its plugins and what they reach</div>${picked}
+      <h4>Classes</h4><div class="legend">${legend}</div><div class="muted small">A class switched off leaves the picture and the table.</div>
+      <h4>Reading it</h4><p class="small">Who asks is on the left: this page, or a program. The platform asks its plugins; the platform and its plugins
+      read and keep their settings through the login, under the platform; on the right, what they reach: programs, hosts, the framework's
+      other apps. A line's colour is its class and its width how often; it moves while it carried something in the last seconds, and a dot
+      runs along it for each new interaction. Pick a box to see its own links.</p>`;
+  }
+
+  function drawConnectionsSide() {  // drawn again with every answer; the legend's button that had the focus keeps it
+    const a = document.activeElement, kind = a && side.contains(a) ? a.dataset.kind || (a.classList.contains('conn-unpick') ? '*' : '') : '';
+    side.innerHTML = connectionsSide(traffic);
+    const again = kind === '*' ? side.querySelector('.conn-unpick') : kind ? side.querySelector(`[data-kind="${kind}"]`) : null;
+    if (again) again.focus({ preventScroll: true });
+  }
+
+  function updateConnections(rebuild) {
+    const t = traffic, graph = $('conn-graph');
+    if (!t || !graph || selected() !== CONNECTIONS) return;
+    const m = connectionsModel(t), shape = shapeOf(m);
+    if (rebuild || shape !== connShape || !$('conn-svg')) {
+      graph.innerHTML = connectionsSvg(m);
+      connShape = shape;
+    }
+    paintLinks(t);
+    const since = trafficSeq;
+    pulses(t, since);
+    $('conn-summary').textContent = summaryOf(t);
+    $('conn-note').textContent = (m.more ? `${m.more} more reached are not drawn (the table names them). ` : '')
+      + ((t.hidden || []).length ? `Not drawn: ${t.hidden.join(', ')} (disabled or not valid, and nothing said to them).` : '');
+    $('conn-rows').innerHTML = rowsHtml(t, since);
+    trafficSeq = t.seq;
+    drawConnectionsSide();
+  }
+
+  async function loadTraffic() {  // asked every 2 s while Connections is shown (one ask at a time)
+    clearTimeout(trafficTimer);
+    const g = ++trafficGen;
+    if (selected() !== CONNECTIONS || trafficPaused || document.hidden) return;
+    try {
+      const t = await api('GET', 'api/traffic?last=200');
+      if (g !== trafficGen || selected() !== CONNECTIONS) return;
+      traffic = t;
+      const err = $('err-connections');
+      if (err) err.textContent = '';
+      updateConnections(false);
+    } catch (e) {
+      if (g !== trafficGen) return;
+      const err = $('err-connections');
+      if (err) err.textContent = e.message;
+    }
+    if (g === trafficGen && selected() === CONNECTIONS && !trafficPaused && !document.hidden) trafficTimer = setTimeout(loadTraffic, 2000);
+  }
+
+  function pickNode(id) {
+    focusNode = focusNode === id ? null : id;
+    updateConnections(false);
+  }
+
   function drawData() {
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
@@ -613,7 +849,9 @@
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
     }
-    data.innerHTML = sel === 'machine' ? machineData() : m ? pluginData(m) : a ? assistantData(a) : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
+    data.innerHTML = sel === 'machine' ? machineData() : sel === CONNECTIONS ? connectionsData() : m ? pluginData(m) : a ? assistantData(a)
+      : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
+    if (sel === CONNECTIONS) updateConnections(true);
     Charts.draw(data);
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
     Object.entries(shells).forEach(([name, sh]) => sh.term.attach($(`shell-term-${name}`)));
@@ -672,6 +910,7 @@
   function drawSide() {
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
+    if (sel === CONNECTIONS) { drawConnectionsSide(); return; }
     side.innerHTML = sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : '';
   }
 
@@ -682,6 +921,8 @@
     drawData();
     drawSide();
     schedule();
+    if (selected() === CONNECTIONS) loadTraffic();
+    else { clearTimeout(trafficTimer); trafficGen += 1; }
   }
 
   async function render() {
@@ -982,6 +1223,21 @@
   }
 
   document.addEventListener('click', (e) => {
+    const pz = e.target.closest('button.conn-pause');  // Connections: pause or resume the asking
+    if (pz) {
+      trafficPaused = !trafficPaused;
+      pz.setAttribute('aria-pressed', String(trafficPaused));
+      pz.textContent = trafficPaused ? 'Resume' : 'Pause';
+      if (traffic) $('conn-summary').textContent = summaryOf(traffic);
+      if (trafficPaused) { clearTimeout(trafficTimer); trafficGen += 1; } else loadTraffic();
+      return;
+    }
+    const lg = e.target.closest('button.legend-item[data-kind]');  // a class switched off or on
+    if (lg) { const k = lg.dataset.kind; if (kindsOff.has(k)) kindsOff.delete(k); else kindsOff.add(k); updateConnections(true); return; }
+    if (e.target.closest('button.conn-unpick')) { focusNode = null; updateConnections(false); return; }
+    const nd = e.target.closest('#conn-svg [data-node]');  // a box picked, or picked again to let it go
+    if (nd) { pickNode(nd.dataset.node); return; }
+    if (e.target.closest('#conn-svg')) { if (focusNode) { focusNode = null; updateConnections(false); } return; }
     const sw = e.target.closest('button.switch[data-toggle]');
     if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
     const pick = e.target.closest('[data-select]');
@@ -1076,11 +1332,20 @@
     choose(next.dataset.machine, next.dataset.hook, next.dataset.value);
   });
 
+  // Connections: a box picked with Enter or Space too
+  data.addEventListener('keydown', (e) => {
+    const nd = e.target.closest && e.target.closest('#conn-svg [data-node]');
+    if (!nd || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    pickNode(nd.dataset.node);
+  });
+
   window.addEventListener('hashchange', draw);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { clearTimeout(live); return; }
+    if (document.hidden) { clearTimeout(live); clearTimeout(trafficTimer); return; }
     const m = shown();
     if (m) refresh(m.name);
+    if (selected() === CONNECTIONS) loadTraffic();
   });
 
   render();
