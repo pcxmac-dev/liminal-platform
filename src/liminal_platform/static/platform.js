@@ -614,7 +614,7 @@
   // interaction. A box picked shows its own links and rows; a class switched off leaves the picture and the table.
   const CONNECTIONS = 'connections';
   const CLASS_ORDER = ['read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'];
-  const COLS = { caller: [64, 112], app: [236, 136], plugin: [478, 168], outside: [704, 176] };  // x and width, of 800
+  const COLS = { caller: [64, 112], app: [236, 150], plugin: [478, 180], outside: [704, 176] };  // x and width, of 800
   let traffic = null;  // the last GET api/traffic
   let trafficTimer = null;
   let trafficGen = 0;  // the latest ask of it: an older one's answer is dropped
@@ -631,7 +631,7 @@
   const nodeTitle = (t, id) => { const n = ((t && t.nodes) || []).find((x) => x.id === id); return n ? n.title : id; };
   const nodeTip = (n) => `${n.title}${n.sub ? ` (${n.sub})` : ''}${n.role === 'plugin' && n.state ? `: ${n.state}` : ''}`;
   const linkTip = (t, l) => `${nodeTitle(t, l.from)} → ${nodeTitle(t, l.to)}: ${l.kind}, ${l.count} time${l.count === 1 ? '' : 's'}`
-    + `${l.failed ? ` (${l.failed} failed)` : ''}, ${l.ms} ms on average; the last ${ago(t.now - l.last)}: ${l.what}`;
+    + `${l.failed ? ` (${l.failed} failed)` : ''}${l.ms ? `, ${l.ms} ms on average` : ''}; the last ${ago(t.now - l.last)}: ${l.what}`;
 
   function connectionsModel(t) {  // the parts in their columns, the links between parts drawn
     const nodes = (t.nodes || []).map((n) => ({ ...n, title: String(n.title || n.id) }));
@@ -684,7 +684,21 @@
     const dot = n.role === 'plugin' ? `<circle class="dot" cx="${w / 2 - 10}" cy="0" r="3.5"/>` : '';
     return `<g class="node role-${esc(n.role)} state-${esc(n.state || 'none')}" data-node="${esc(n.id)}" transform="translate(${n.x} ${n.y})"`
       + ` tabindex="0" role="button" aria-pressed="false" aria-label="${esc(nodeTip(n))}"><title>${esc(nodeTip(n))}</title>`
-      + `<rect x="${-w / 2}" y="-13" width="${w}" height="26" rx="7"/>${ic}<text x="${-w / 2 + 29}" y="4">${esc(cut(n.title, Math.floor((w - 48) / 6.6)))}</text>${dot}</g>`;
+      + `<rect x="${-w / 2}" y="-13" width="${w}" height="26" rx="7"/>${ic}<text x="${-w / 2 + 29}" y="4" data-room="${w - 29 - (dot ? 20 : 8)}">${esc(n.title)}</text>${dot}</g>`;
+  }
+
+  function fitLabels(svg) {  // a label longer than its box cut to fit as drawn (its whole name in the box's tooltip)
+    svg.querySelectorAll('g.node text[data-room]').forEach((t) => {
+      const room = Number(t.dataset.room), full = t.textContent;
+      if (!room || t.getComputedTextLength() <= room) return;
+      let lo = 1, hi = full.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        t.textContent = cut(full, mid + 1);
+        if (t.getComputedTextLength() <= room) lo = mid; else hi = mid - 1;
+      }
+      t.textContent = cut(full, lo + 1);
+    });
   }
 
   function connectionsSvg(m) {
@@ -777,7 +791,7 @@
     if (n) {
       const mine = (t.links || []).filter((l) => l.from === n.id || l.to === n.id);
       const rows = mine.map((l) => `<tr><td>${l.from === n.id ? `→ ${esc(nodeTitle(t, l.to))}` : `← ${esc(nodeTitle(t, l.from))}`}</td><td><span class="kind k-${esc(l.kind)}">${esc(l.kind)}</span></td>`
-        + `<td class="num">${l.count}${l.failed ? ` <span class="bad">(${l.failed} failed)</span>` : ''}</td><td class="num">${l.ms} ms</td></tr>`).join('');
+        + `<td class="num">${l.count}${l.failed ? ` <span class="bad">(${l.failed} failed)</span>` : ''}</td><td class="num">${l.ms ? `${l.ms} ms` : ''}</td></tr>`).join('');
       picked = `<h4>${esc(n.title)}</h4><div class="muted small">${esc(n.sub || n.role)}${n.role === 'plugin' && n.state ? ` · ${esc(n.state)}` : ''}</div>
         <div class="row">${n.role === 'plugin' && pluginOf(n.id) ? `<button type="button" data-select="${esc(n.id)}">Its page</button> ` : ''}<button type="button" class="conn-unpick">Every part</button></div>
         ${rows ? `<table class="list conn-links"><thead><tr><th>With</th><th>Class</th><th class="num">Times</th><th class="num">Mean</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="small muted">Nothing said to it or by it yet.</div>'}`;
@@ -803,6 +817,7 @@
     const m = connectionsModel(t), shape = shapeOf(m);
     if (rebuild || shape !== connShape || !$('conn-svg')) {
       graph.innerHTML = connectionsSvg(m);
+      fitLabels($('conn-svg'));
       connShape = shape;
     }
     paintLinks(t);
