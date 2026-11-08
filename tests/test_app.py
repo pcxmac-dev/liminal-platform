@@ -147,6 +147,60 @@ def test_a_plugins_actions_are_its_hooks_asked_by_name_from_buttons():
         app.stop()
 
 
+def test_a_tables_own_choices_and_buttons_ask_its_hooks():
+    """A table's options and actions (0.7.0): a choice group above its rows (the hw-stats plugin's ports listed) and
+    buttons under it asking a hook by name (its Refresh) or opening a form; a form with confirm false is asked once
+    filled. The page draws only what the platform may ask of the plugin."""
+    from liminal_libs.machines import MachinePlugin as Machine
+
+    class Listed(Machine):
+        name, title, about, api, order = "listed", "Listed", "a stand-in with a table's own choices", "2.1", 903
+        HOOKS = (*Machine.HOOKS, "choose", "reread")
+
+        def __init__(self):
+            self.chosen, self.reads = "a", 0
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "summary": f"listing {self.chosen}",
+                    "tables": [{"title": "Things", "columns": [{"title": "Thing"}], "rows": [[self.chosen]],
+                                "options": [{"title": "Listed", "hook": "choose", "value": self.chosen,
+                                             "choices": [{"value": "a", "title": "A"}, {"value": "b", "title": "B", "note": "the other"}]},
+                                            {"title": "Not offered", "hook": "missing", "value": "x", "choices": []}],
+                                "actions": [{"hook": "reread", "args": [], "title": "Refresh", "note": "reads them again"},
+                                            {"form": "other", "title": "Other…"}]}],
+                    "forms": [{"id": "other", "hook": "choose", "title": "Other", "confirm": False,
+                               "fields": [{"name": "value", "label": "Value", "type": "text", "required": True}]}]}
+
+        def choose(self, value):
+            self.chosen = value
+            return {"said": f"listing {value}"}
+
+        def reread(self):
+            self.reads += 1
+            return {"said": "read again"}
+
+    p = Listed()
+    app = PlatformApp(log=lambda m: None, machines={"listed": p}, assistants={})
+    port = _port(app.start(0))
+    try:
+        m = _call(port, "GET", "/api/machines/listed")[1]
+        table = m["status"]["tables"][0]
+        assert table["options"][0]["hook"] == "choose" and table["actions"][0] == {"hook": "reread", "args": [], "title": "Refresh", "note": "reads them again"}
+        assert {"choose", "reread"} <= set(m["asks"]) and "missing" not in m["asks"]
+        assert _call(port, "POST", "/api/machines/listed/ask", {"hook": "choose", "args": ["b"]}) == (200, {"answer": {"said": "listing b"}})
+        assert _call(port, "POST", "/api/machines/listed/ask", {"hook": "reread", "args": []})[0] == 200 and p.reads == 1
+        assert _call(port, "GET", "/api/machines/listed")[1]["status"]["tables"][0]["rows"] == [["b"]]
+        page = _call(port, "GET", "/platform.js")[1]
+        assert b"function choicesHtml" in page and b"function askButton" in page and b"groupsOf(t.options, can)" in page
+        assert b"b && b.form ? formButton(m, b, forms) : askButton(m, b, can)" in page  # a table's buttons ask or open forms
+        assert b"dlg.form.confirm === false" in page  # a form changing nothing on the machine is asked once filled
+    finally:
+        app.stop()
+
+
 class Risky(ValueError):
     """A plugin's refusal that names the argument accepting it (as the Namecheap plugin's zone.Refusal does)."""
 

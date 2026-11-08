@@ -136,30 +136,44 @@
   }
 
   // a plugin's own tables (status.tables: a title, the columns, the rows; a cell its text or {text, sub}, or a button
-  // opening one of its forms, {form, title, values, label}; a table's `actions`, buttons opening forms under it)
+  // opening one of its forms, {form, title, values, label}). Under a table, its `actions`: buttons opening forms
+  // ({form, title, values}) or asking a hook by name ({hook, args, title, note}: the hw-stats plugin's Refresh); above
+  // its rows, its own `options` (a choice group, as status.options: the hw-stats plugin's ports listed) (0.7.0)
   const cellHtml = (c, m, forms) => (c && typeof c === 'object' ? (c.form ? formButton(m, c, forms)
     : `${esc(c.text)}${c.sub ? `<div class="sub">${esc(c.sub)}</div>` : ''}`) : esc(c));
   const longWord = (c) => String(c && typeof c === 'object' ? c.text ?? '' : c ?? '').split(/\s+/).some((w) => w.length > 16);  // may break
   function statTables(m) {
-    const forms = formsOf(m);
+    const forms = formsOf(m), can = new Set(m.asks || []);
     const under = (t) => {
-      const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => formButton(m, b, forms)).join('');
+      const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => (b && b.form ? formButton(m, b, forms) : askButton(m, b, can))).join('');
       return buttons ? `<div class="row table-actions">${buttons}</div>` : '';
     };
-    return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}`
+    const picks = (t) => groupsOf(t.options, can).map((o) => choicesHtml(m, o, `<div class="muted small choices-title">${esc(o.title)}</div>`)).join('');
+    return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}${picks(t)}`
       + ((t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
         + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
         : `<div class="muted small">${esc(t.empty || 'None.')}</div>`) + under(t)).join('');
   }
 
-  // a plugin's choices (status.options: a hook asked with the value chosen; the Preferences plugin's themes)
-  function optionsHtml(m) {
-    const can = new Set(m.asks || []);
-    return ((m.status && m.status.options) || []).filter((o) => can.has(o.hook)).map((o) => `<h4>${esc(o.title)}</h4>`
-      + `<div class="choices" role="radiogroup" aria-label="${esc(o.title)}">${o.choices.map((c) => `<button type="button" class="choice${c.value === o.value ? ' active' : ''}" role="radio"
+  // a choice group: a hook asked with the value chosen ({title, hook, value, choices: [{value, title, note, swatch}]}),
+  // those the platform may ask of the plugin now; drawn under `head`
+  const groupsOf = (groups, can) => (Array.isArray(groups) ? groups : []).filter((o) => o && can.has(o.hook) && Array.isArray(o.choices));
+  function choicesHtml(m, o, head) {
+    return head + `<div class="choices" role="radiogroup" aria-label="${esc(o.title)}">${o.choices.filter(Boolean).map((c) => `<button type="button" class="choice${c.value === o.value ? ' active' : ''}" role="radio"
           aria-checked="${c.value === o.value}" aria-label="${esc(c.title)}${c.note ? `, ${esc(c.note)}` : ''}" tabindex="${c.value === o.value ? 0 : -1}" data-machine="${esc(m.name)}" data-hook="${esc(o.hook)}" data-value="${esc(c.value)}">`
         + `<span class="swatch" aria-hidden="true">${(c.swatch || []).map((s) => `<span style="background:${/^#[0-9a-fA-F]{3,8}$/.test(s) ? s : 'transparent'}"></span>`).join('')}</span>`
-        + `<span class="what"><span>${esc(c.title)}</span>${c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</span></button>`).join('')}</div>`).join('');
+        + `<span class="what"><span>${esc(c.title)}</span>${c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</span></button>`).join('')}</div>`;
+  }
+
+  // a plugin's choices (status.options: the Preferences plugin's themes)
+  function optionsHtml(m) {
+    return groupsOf(m.status && m.status.options, new Set(m.asks || [])).map((o) => choicesHtml(m, o, `<h4>${esc(o.title)}</h4>`)).join('');
+  }
+
+  // a button asking one of a plugin's hooks by name ({hook, args, title, note}), when the platform may ask it now
+  function askButton(m, a, can) {
+    return a && can.has(a.hook) && Array.isArray(a.args || []) ? `<button type="button" class="ask" data-machine="${esc(m.name)}" `
+      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}>${esc(a.title || a.hook)}</button>` : '';
   }
 
   // a plugin's actions (status.actions: {hook, args, title, note}: one of its hooks asked by name from a button, the
@@ -167,9 +181,7 @@
   // platform may ask of it now, the rest left out
   function actionsHtml(m) {
     const can = new Set(m.asks || []), forms = formsOf(m);
-    const items = ((m.status && m.status.actions) || []).map((a) => (a && a.form ? formButton(m, a, forms)
-      : a && can.has(a.hook) && Array.isArray(a.args || []) ? `<button type="button" class="ask" data-machine="${esc(m.name)}" `
-        + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}>${esc(a.title || a.hook)}</button>` : '')).filter(Boolean);
+    const items = ((m.status && m.status.actions) || []).map((a) => (a && a.form ? formButton(m, a, forms) : askButton(m, a, can))).filter(Boolean);
     return items.length ? `<div class="row actions">${items.join('')}</div>` : '';
   }
 
@@ -183,7 +195,8 @@
   // the words is that field's value. A refusal naming a field of type accept (the error answer's `accept`) is offered as
   // a second, explicit confirmation (the field's title, words and yes) that sends the same arguments with that field
   // true (the Namecheap plugin's accept_ddns_reset); never before it. The page's one <dialog> holds the form, its
-  // confirmation and the answer, outside what is drawn again, so the tables asked again leave it as it is.
+  // confirmation and the answer, outside what is drawn again, so the tables asked again leave it as it is. A form
+  // whose `confirm` is false changes nothing on the machine (the ports a table lists): it is asked once filled (0.7.0).
   const EDITABLE = ['text', 'number', 'choice'];
   let dlg = null;  // the form open: {name, plugin, form, values, step, busy, accepted, accept, answer, words, opener, key}
 
@@ -382,6 +395,7 @@
       if (why && !first) first = c;
     });
     if (first) { first.focus(); return; }
+    if (dlg.form.confirm === false) { send(); return; }  // a choice changing nothing on the machine (0.7.0): asked at once
     dlg.step = 'confirm';
     drawDialog();
     focusStep();

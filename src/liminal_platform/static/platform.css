@@ -61,6 +61,7 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
 /* 0.6.0: a plugin's forms (status.forms): the buttons opening them (under a table, in a row), and the one dialog holding
    the form, its confirmation and the plugin's answer, in the page's theme */
 .table-actions { margin: 6px 0 2px; }
+.choices-title { margin: 8px 0 0; }  /* 0.7.0: a table's own choices (the ports it lists) */
 td .form-open { margin-right: 4px; white-space: nowrap; }
 /* a plugin table's long words (a DKIM record's host name, an address: td.long) wrap, so a row's buttons stay in the column */
 .app-data table.stats td.long { overflow-wrap: anywhere; }

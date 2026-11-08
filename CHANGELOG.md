@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 (2026-11-08)
+
+A table's own choices and buttons (the user, on the hw-stats plugin's Ports table: "there needs to be a refresh button
+and port selector for PORTS"): a plugin table's `options` (a choice group, as status.options: a hook asked with the
+value chosen) are drawn above its rows, and its `actions` may ask a hook by name (`{hook, args, title, note}`, as
+status.actions) beside the buttons opening forms. A form whose `confirm` is false changes nothing on the machine (the
+ports a table lists): it is asked as soon as it is filled. One choice-group and one ask-button maker serve the plugin's
+own options and actions and its tables'.
+
 ## 0.6.0 (2026-11-08)
 
 A plugin's forms: its status's `forms` are drawn as forms for one of its hooks, so the page can change what a plugin
