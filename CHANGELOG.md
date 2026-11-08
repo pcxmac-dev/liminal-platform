@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0 (2026-11-08)
+
+A plugin's paths (the user, on the hw-stats plugin's port checks: "the check needs to validate the computer, the
+router/gateway to the computer, then the internet to the computer, and graphically show traffic moving between the
+three different checks"): a plugin's status may hold `paths`, each its hops in a row (`nodes`: id, title, sub, state)
+and the links between them (`links`: from, to, title, state), drawn as a picture: the internet a globe, a router a box
+with its antennas, a computer a screen; each in its state (idle, checking, done, ok, warn, fail, unknown) in the
+theme's colours. Traffic moves along a link being checked (and, slower, one it got through); a link that stopped it
+is crossed; beneath, the conclusion (`said`) and what each hop showed (`lines`). A path is drawn again only when it
+changed, so the moving traffic is not restarted by every refresh, and the plugin is asked again every second while a
+path is checked (`running`). Moving traffic stays still for those who ask for reduced motion.
+A confirmation's title fills its `{field}`s too ("Check the way in to port 8795?").
+
 ## 0.7.0 (2026-11-08)
 
 A table's own choices and buttons (the user, on the hw-stats plugin's Ports table: "there needs to be a refresh button

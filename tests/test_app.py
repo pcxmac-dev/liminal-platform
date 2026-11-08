@@ -201,6 +201,41 @@ def test_a_tables_own_choices_and_buttons_ask_its_hooks():
         app.stop()
 
 
+def test_a_plugins_paths_are_drawn_hop_by_hop_with_their_traffic():
+    """status.paths (0.8.0): a plugin's hops and the links between them, in their states (the hw-stats plugin's way in
+    to a port); the page asks again every second while one is checked and draws it again only when it changed."""
+    from liminal_libs.machines import MachinePlugin as Machine
+
+    class Pathed(Machine):
+        name, title, about, api, order = "pathed", "Pathed", "a stand-in with a path", "2.1", 904
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "summary": "a path", "paths": [{
+                "id": "path-8795", "title": "Port 8795: the way in", "running": True, "stage": "router", "said": "checking router…",
+                "lines": ["the router answered a ping in 3 ms"],
+                "nodes": [{"id": "internet", "title": "The internet", "state": "idle"}, {"id": "router", "title": "Router", "state": "checking"},
+                          {"id": "computer", "title": "This computer", "sub": "192.168.1.20:8795", "state": "done"}],
+                "links": [{"from": "internet", "to": "router", "state": "idle"}, {"from": "router", "to": "computer", "state": "checking"}]}]}
+
+    app = PlatformApp(log=lambda m: None, machines={"pathed": Pathed()}, assistants={})
+    port = _port(app.start(0))
+    try:
+        m = _call(port, "GET", "/api/machines/pathed")[1]
+        [p] = m["status"]["paths"]
+        assert p["running"] and [n["state"] for n in p["nodes"]] == ["idle", "checking", "done"]
+        page, css = _call(port, "GET", "/platform.js")[1], _call(port, "GET", "/platform.css")[1]
+        assert b"function pathHtml" in page and b"function hopGlyph" in page and b"'paths'" in page  # not a fact of its own
+        assert b"pathRunning(m) ? 1" in page  # asked again every second while a path is checked
+        assert b"html !== drawnPaths[m.name]" in page  # drawn again only when it changed
+        assert b"head(filled(c.title || f.title || f.hook, f, values))" in page  # a confirmation's title says the port asked
+        assert b"@keyframes path-flow" in css and b"prefers-reduced-motion" in css
+    finally:
+        app.stop()
+
+
 class Risky(ValueError):
     """A plugin's refusal that names the argument accepting it (as the Namecheap plugin's zone.Refusal does)."""
 

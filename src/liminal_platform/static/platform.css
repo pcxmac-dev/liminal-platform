@@ -62,6 +62,41 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
    the form, its confirmation and the plugin's answer, in the page's theme */
 .table-actions { margin: 6px 0 2px; }
 .choices-title { margin: 8px 0 0; }  /* 0.7.0: a table's own choices (the ports it lists) */
+/* 0.8.0: a plugin's paths (status.paths): its hops in a row, the links between them in their state, traffic moving
+   along a link being checked; the colours are the theme's (up: passes, down: stops it, the amber series: in doubt) */
+.path { margin: 10px 0 16px; }
+.path-picture { position: relative; max-width: 680px; padding-bottom: 64px; }
+.path svg { display: block; width: 100%; height: auto; overflow: visible; }
+.path .glyph { fill: none; stroke: var(--muted); stroke-width: 2; }
+.path .led { fill: var(--muted); }
+.path .hop.checking .glyph { stroke: var(--accent); animation: path-pulse 1s ease-in-out infinite; }
+.path .hop.done .glyph { stroke: var(--text); }
+.path .hop.ok .glyph, .path .hop.ok .led { stroke: var(--up); }
+.path .hop.ok .led { fill: var(--up); }
+.path .hop.warn .glyph { stroke: var(--series-4); }
+.path .hop.fail .glyph { stroke: var(--down); }
+.path .wire { stroke: var(--border); stroke-width: 2; stroke-dasharray: 4 5; }
+.path .arrow { fill: none; stroke: var(--border); stroke-width: 2; stroke-linecap: round; }
+.path .link.checking .wire { stroke: var(--accent); opacity: .35; stroke-dasharray: none; }
+.path .link.ok .wire, .path .link.ok .arrow { stroke: var(--up); stroke-dasharray: none; }
+.path .link.warn .wire, .path .link.warn .arrow { stroke: var(--series-4); }
+.path .link.fail .wire, .path .link.fail .arrow { stroke: var(--down); stroke-dasharray: none; }
+.path .traffic { stroke: var(--accent); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 0.1 18; animation: path-flow .8s linear infinite; }
+.path .link.ok .traffic { stroke: var(--up); stroke-width: 4; animation-duration: 2.4s; }
+.path .cross { stroke: var(--down); stroke-width: 3; stroke-linecap: round; fill: none; }
+@keyframes path-flow { to { stroke-dashoffset: -18.1; } }
+@keyframes path-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .path .traffic, .path .hop.checking .glyph { animation: none; } }
+.hop-labels { position: absolute; left: 0; right: 0; top: calc(100% - 64px); }
+.hop-label { position: absolute; transform: translateX(-50%); width: 30%; text-align: center; display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.hop-label .state { color: var(--muted); font-size: 11px; }
+.hop-label.ok .state { color: var(--up); }
+.hop-label.warn .state { color: var(--series-4); }
+.hop-label.fail .state { color: var(--down); }
+.hop-label.checking .state { color: var(--accent); }
+.hop-label .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.path .said { margin: 6px 0 4px; }
+.path details { margin: 2px 0 0; }
 td .form-open { margin-right: 4px; white-space: nowrap; }
 /* a plugin table's long words (a DKIM record's host name, an address: td.long) wrap, so a row's buttons stay in the column */
 .app-data table.stats td.long { overflow-wrap: anywhere; }

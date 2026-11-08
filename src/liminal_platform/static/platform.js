@@ -155,6 +155,54 @@
         : `<div class="muted small">${esc(t.empty || 'None.')}</div>`) + under(t)).join('');
   }
 
+  // -- a plugin's paths (0.8.0, status.paths: the hw-stats plugin's way in to a port): its hops in a row and the links
+  // between them ({id, title, running, said, lines, at, nodes: [{id, title, sub, state}], links: [{from, to, state,
+  // title}]}), each in its state: idle, checking, done, ok, warn, fail, unknown. Traffic moves along a link being
+  // checked (and, slower, one it got through); a link that stopped it is crossed. Drawn again only when it changed, so
+  // the moving traffic is not restarted by every refresh; asked again every second while a path is checked.
+  const PATH_STATES = new Set(['idle', 'checking', 'done', 'ok', 'warn', 'fail', 'unknown']);
+  const PATH_WORDS = { idle: 'not checked yet', checking: 'being checked', done: 'checked', ok: 'passes', warn: 'in doubt',
+    fail: 'stops it', unknown: 'not known' };
+  const pathState = (s) => (PATH_STATES.has(s) ? s : 'unknown');
+  const drawnPaths = {};  // the paths drawn last, by plugin
+  const pathsOf = (m) => (m.status && Array.isArray(m.status.paths) ? m.status.paths : []).filter((p) => p && Array.isArray(p.nodes) && p.nodes.length);
+  const pathRunning = (m) => pathsOf(m).some((p) => p.running);
+  function hopGlyph(id, x, y) {  // the internet a globe, a router a box with its antennas, anything else a screen
+    if (id === 'internet') {
+      return `<circle cx="${x}" cy="${y}" r="20" class="glyph"/><ellipse cx="${x}" cy="${y}" rx="8" ry="20" class="glyph"/>`
+        + `<line x1="${x - 20}" y1="${y}" x2="${x + 20}" y2="${y}" class="glyph"/>`;
+    }
+    if (id === 'router') {
+      return `<rect x="${x - 22}" y="${y - 6}" width="44" height="18" rx="4" class="glyph"/><line x1="${x - 12}" y1="${y - 6}" x2="${x - 17}" y2="${y - 21}" class="glyph"/>`
+        + `<line x1="${x + 12}" y1="${y - 6}" x2="${x + 17}" y2="${y - 21}" class="glyph"/><circle cx="${x - 9}" cy="${y + 3}" r="2" class="led"/><circle cx="${x}" cy="${y + 3}" r="2" class="led"/>`;
+    }
+    return `<rect x="${x - 22}" y="${y - 18}" width="44" height="28" rx="3" class="glyph"/><line x1="${x}" y1="${y + 10}" x2="${x}" y2="${y + 17}" class="glyph"/>`
+      + `<line x1="${x - 12}" y1="${y + 18}" x2="${x + 12}" y2="${y + 18}" class="glyph"/>`;
+  }
+  function pathHtml(p) {
+    const W = 640, Y = 34, xs = p.nodes.map((_, i) => Math.round(80 + i * ((W - 160) / Math.max(1, p.nodes.length - 1))));
+    const at = {};
+    p.nodes.forEach((n, i) => { if (n && typeof n.id === 'string') at[n.id] = xs[i]; });
+    const links = (Array.isArray(p.links) ? p.links : []).filter((l) => l && at[l.from] !== undefined && at[l.to] !== undefined).map((l) => {
+      const s = pathState(l.state), x1 = at[l.from] + 34, x2 = at[l.to] - 34, mid = (x1 + x2) / 2;
+      return `<g class="link ${s}"><title>${esc(l.title || '')}: ${esc(PATH_WORDS[s])}</title><line x1="${x1}" y1="${Y}" x2="${x2}" y2="${Y}" class="wire"/>`
+        + (s === 'checking' || s === 'ok' ? `<line x1="${x1}" y1="${Y}" x2="${x2}" y2="${Y}" class="traffic"/>` : '')
+        + (s === 'fail' ? `<path d="M${mid - 7} ${Y - 7} L${mid + 7} ${Y + 7} M${mid + 7} ${Y - 7} L${mid - 7} ${Y + 7}" class="cross"/>` : '')
+        + `<path d="M${x2 - 8} ${Y - 5} L${x2} ${Y} L${x2 - 8} ${Y + 5}" class="arrow"/></g>`;
+    }).join('');
+    const hops = p.nodes.map((n, i) => `<g class="hop ${pathState(n.state)}"><title>${esc(n.title)}: ${esc(PATH_WORDS[pathState(n.state)])}</title>${hopGlyph(n.id, xs[i], Y)}</g>`).join('');
+    const labels = p.nodes.map((n, i) => `<div class="hop-label ${pathState(n.state)}" style="left:${(xs[i] / W * 100).toFixed(2)}%"><strong>${esc(n.title)}</strong>`
+      + `<span class="state">${esc(PATH_WORDS[pathState(n.state)])}</span>${n.sub ? `<span class="sub">${esc(n.sub)}</span>` : ''}</div>`).join('');
+    const lines = (Array.isArray(p.lines) ? p.lines : []).filter((l) => typeof l === 'string' && l);
+    return `<section class="path${p.running ? ' running' : ''}"><h4>${esc(p.title || 'A path')}</h4>`
+      + `<div class="path-picture"><svg viewBox="0 0 ${W} ${Y * 2}" role="img" aria-label="${esc(p.said || p.title || '')}">${links}${hops}</svg>`
+      + `<div class="hop-labels">${labels}</div></div>`
+      + (p.said ? `<p class="said${p.running ? ' muted' : ''}" role="status">${esc(cap(String(p.said)))}</p>` : '')
+      + (lines.length ? `<details open><summary class="muted small">What each hop showed${p.at ? ` · ${esc(p.at)}` : ''}</summary><ul class="lines">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>` : '')
+      + '</section>';
+  }
+  const pathsHtml = (m) => pathsOf(m).map(pathHtml).join('');
+
   // a choice group: a hook asked with the value chosen ({title, hook, value, choices: [{value, title, note, swatch}]}),
   // those the platform may ask of the plugin now; drawn under `head`
   const groupsOf = (groups, can) => (Array.isArray(groups) ? groups : []).filter((o) => o && can.has(o.hook) && Array.isArray(o.choices));
@@ -332,7 +380,7 @@
         + valuesList({ fields: f.fields.filter((x) => x && x.type === 'fixed') }, values) + f.fields.map((x, i) => fieldHtml(x, i, values)).join('')
         + `<div class="row end buttons">${btn('close', 'Cancel')}<button type="submit" class="accent">${esc(f.submit || 'Review')}</button></div></form>`;
     } else if (step === 'confirm') {
-      html = head(c.title || f.title || f.hook) + (c.words ? `<p class="words">${esc(filled(c.words, f, values))}</p>` : '') + valuesList(f, values)
+      html = head(filled(c.title || f.title || f.hook, f, values)) + (c.words ? `<p class="words">${esc(filled(c.words, f, values))}</p>` : '') + valuesList(f, values)
         + asking + `<div class="row end buttons">${btn('close', 'Cancel')}${back}${btn('yes', c.yes || 'Yes', c.danger ? 'danger' : 'accent')}</div>`;
     } else if (step === 'accept') {  // the second confirmation: the plugin's refusal, then what accepting it means
       const x = f.fields.find((y) => y && y.name === dlg.accept) || {};
@@ -518,8 +566,9 @@
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
         + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
-    return head + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>`
-      + (logged || jobs[m.name] ? setupLog(m) : '');
+    drawnPaths[m.name] = pathsHtml(m);
+    return head + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`
+      + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '');
   }
 
   function assistantData(a) {
@@ -549,7 +598,7 @@
   // -- the right: the selected one's specifics ----------------------------------------------------------
   function facts(s) {
     // a status's own facts: neither its lists, its charts, its choices nor its summary
-    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'actions', 'forms', 'summary', 'present', 'problem', 'valid', 'why']);
+    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'actions', 'forms', 'paths', 'summary', 'present', 'problem', 'valid', 'why']);
     const flat = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v !== '' && v !== null && typeof v !== 'object');
     const nested = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length);
     const show = (v) => (v === true ? 'yes' : v === false ? 'no' : typeof v === 'object' ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(', ') : v);
@@ -630,13 +679,13 @@
   };
   function shown() {
     const m = st && st.machines[selected()];
-    return m && !off(m) && m.status && (m.status.charts || tabled(m)) ? m : null;
+    return m && !off(m) && m.status && (m.status.charts || tabled(m) || pathsOf(m).length) ? m : null;
   }
   function schedule() {
     clearTimeout(live);
     const m = shown();
     if (!m || document.hidden) return;
-    const every = !m.status.charts ? TABLES_EVERY : span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
+    const every = pathRunning(m) ? 1 : !m.status.charts ? TABLES_EVERY : span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
     live = setTimeout(() => refresh(m.name), every * 1000);
   }
   async function refresh(name) {
@@ -666,7 +715,11 @@
     if (again) again.focus({ preventScroll: true });
   }
   function redrawShown(m) {
-    const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`);
+    const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`), pz = $(`paths-${m.name}`);
+    if (pz && !off(m)) {  // its paths drawn again only when they changed: the moving traffic goes on
+      const html = pathsHtml(m);
+      if (html !== drawnPaths[m.name]) { pz.innerHTML = html; drawnPaths[m.name] = html; }
+    }
     keepFocus(() => {
       if (!off(m) && !m.status.charts && t) {
         t.innerHTML = tables(m) + statTables(m);  // its tables alone: a terminal or a job's panel beside them stays as it is
