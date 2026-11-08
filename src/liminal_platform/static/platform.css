@@ -9,3 +9,18 @@ tr.pick { cursor: pointer; }
 .app-side .summary { color: var(--text); }
 td .ask { margin-right: 4px; }
 .app-data td.mono.small { overflow-wrap: anywhere; min-width: 14em; }  /* a long command line wraps in its cell, nothing else breaks */
+/* 0.2.0: a plugin's page head with its switch; its charts' range; its own tables; its choices (the themes) */
+.data-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.data-head h2 { margin: 0; }
+.app-data p.error:empty { display: none; }
+.stats-head { display: flex; align-items: center; gap: 12px; margin: 14px 0 2px; }
+table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.app-data .note { overflow-wrap: anywhere; }
+.app-list .item.off .what > span:first-child { color: var(--muted); }
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 4px; }
+.choice { display: flex; align-items: center; gap: 10px; padding: 8px 10px; text-align: left; border: 1px solid var(--border); border-radius: 8px; }
+.choice[aria-checked="true"] { border-color: var(--accent); color: var(--accent); background: var(--hover); }
+.choice .what { display: flex; flex-direction: column; }
+.choice .sub { color: var(--muted); font-size: 11px; }
+.swatch { display: inline-grid; grid-template-columns: repeat(2, 12px); grid-template-rows: repeat(2, 12px); border-radius: 4px; overflow: hidden;
+  border: 1px solid var(--border); flex: none; }

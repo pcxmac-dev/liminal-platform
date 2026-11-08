@@ -1,6 +1,6 @@
 """`liminal-platform serve [--port] [--no-browser] [--until-quiet]`: the platform's page at its port (8775,
 LIMINAL_PLATFORM_PORT); `status`: the machine and the machine plugins; `machine NAME status | setup [STEP
-...] | run -- COMMAND | instances`: one machine plugin from the command line."""
+...] | run -- COMMAND | instances | enable | disable`: one machine plugin from the command line."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ from liminal_libs import docker as docker_mod
 from liminal_libs.logs import Logger
 
 from . import __version__
-from .app import PlatformApp, facts
+from .app import PlatformApp, facts, platform_dir
 
 QUIET_SECONDS = 600.0
 
@@ -23,9 +23,7 @@ def _app(log=print) -> PlatformApp:
 
 
 def cmd_serve(args) -> int:
-    from liminal_libs.layout import data_dir
-
-    folder = data_dir() / "platform"
+    folder = platform_dir()
     app = _app(Logger(folder / "logs" / "platform.log"))
     port = args.port if args.port is not None else app.port()
     print(f"platform: its page at {app.url(port)} (Ctrl+C to stop)", flush=True)
@@ -43,6 +41,9 @@ def cmd_status(args) -> int:
     d = docker_mod.Docker(env={}).describe()
     print("docker on this machine: " + (f"engine {d['engine']}" if d["available"] else d.get("problem", "not installed")))
     for name, m in app.machines().items():
+        if not app.enabled(name):
+            print(f"{name}: {m.title}; disabled")
+            continue
         st = app.machine_status(m)["status"]
         engine = st.get("engine") or {}
         print(f"{name}: {m.title}; " + ("present" if st.get("present") else "not present")
@@ -60,9 +61,16 @@ def cmd_machine(args) -> int:
     except Exception as e:  # noqa: BLE001 - said
         print(str(e), file=sys.stderr)
         return 2
+    if args.action in ("enable", "disable"):
+        app.set_enabled(m.name, args.action == "enable")
+        print(f"{m.name}: {args.action}d")
+        return 0
     if args.action == "status":
         print(json.dumps(app.machine_status(m)["status"], indent=1))
         return 0
+    if not app.enabled(m.name):
+        print(f"{m.name} is disabled: liminal-platform machine {m.name} enable", file=sys.stderr)
+        return 2
     if args.action == "setup":
         done = m.setup(log=print, steps=args.rest or None)
         return 0 if all(d["ok"] is not False for d in done) else 1
@@ -90,9 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_serve)
     st = sub.add_parser("status", help="the machine, Docker, the machine plugins and the Docker instances")
     st.set_defaults(func=cmd_status)
-    m = sub.add_parser("machine", help="one machine plugin: status | setup [STEP ...] | run -- COMMAND | instances")
+    m = sub.add_parser("machine", help="one machine plugin: status | setup [STEP ...] | run -- COMMAND | instances | enable | disable")
     m.add_argument("name")
-    m.add_argument("action", choices=("status", "setup", "run", "instances"))
+    m.add_argument("action", choices=("status", "setup", "run", "instances", "enable", "disable"))
     m.add_argument("rest", nargs="*")
     m.set_defaults(func=cmd_machine)
     return p

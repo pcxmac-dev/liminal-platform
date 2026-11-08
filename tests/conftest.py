@@ -93,6 +93,14 @@ def _no_docker_or_wsl_here(monkeypatch):
     monkeypatch.setattr(docker_mod, "wsl", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _folders_of_the_tests_own(monkeypatch, tmp_path):
+    """The platform's folder (which plugins are disabled) and the UI's preferences: the test's own, never this
+    machine's."""
+    monkeypatch.setenv("LIMINAL_PLATFORM_DIR", str(tmp_path / "platform"))
+    monkeypatch.setenv("LIMINAL_UI_FILE", str(tmp_path / "ui.json"))
+
+
 def _port(url: str) -> int:
     return int(url.split("127.0.0.1:", 1)[1].split("/", 1)[0])
 

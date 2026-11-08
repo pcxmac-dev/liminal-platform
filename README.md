@@ -16,6 +16,12 @@ framework"; "it also has an icon just like the chart/login and integrator"). An 
   the machine plugins' engines.
 - The platform plugins attached (the machines and the AI assistants).
 
+Plugins can be disabled: a right click on a plugin's icon in the tray offers Disable, and the switch at the head
+of a plugin's page enables or disables it (disabled: asked nothing, out of the tray, detached; kept in the
+platform's folder, `plugins.json`). A plugin's own charts, tables and choices are drawn in the middle (the
+hardware stats' charts and tables; the Preferences plugin's themes), and every page is painted in the UI's
+theme (the library's `theme.js`, the data folder's `ui.json`).
+
 ## Run
 
 ```

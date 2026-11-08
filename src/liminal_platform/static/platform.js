@@ -4,7 +4,12 @@
 // column"; "active plugins, will be part of the tray on the very right side"; "use the black boundary (around the
 // icon) to serve as the tray border, it can stretch vertically to include more icons or plugins"):
 //   the list (this machine, its machine plugins, the AI assistants) | the selected one's data | its specifics | the tray
-// The tray is the platform's chip, a divider, then an icon per active plugin, all in the one dark box. The
+// The tray is the platform's chip, a divider, then an icon per active plugin, all in the one dark box. A right click
+// on a plugin's icon offers to disable it ("allow me to right click on the icons to disable them on the right icon
+// menu"); the switch at the head of a plugin's page enables or disables it ("enable disable switch (left to right) on
+// the plugin description when selected in the left menu"). A plugin's own figures are drawn in the middle: its
+// status's `charts` (the library's charts.js, asked again at the plugin's interval while shown), `tables`, and
+// `options` (choices it is asked to make: the Preferences plugin's themes, applied to this page at once). The
 // selection is the address's #name (#wsl-ubuntu), so a reload or a link keeps it. API paths are relative, so the
 // page works under a super app's prefix too.
 (() => {
@@ -14,11 +19,15 @@
   const $ = (id) => document.getElementById(id);
   const esc = window.LiminalIcons.esc;
   const icon = window.LiminalIcons.icon;
+  const Charts = window.LiminalCharts;
   const list = $('list'), data = $('data'), side = $('side'), rail = $('rail');
   if (new URLSearchParams(location.search).get('embedded') === '1') document.body.classList.add('embedded');
   const polls = {};
   let st = null;  // the last GET api/status
   let tray = null;  // the last GET api/tray
+  let span = 'recent';  // the charts' range: the last ten minutes, or the last day
+  const day = {};  // a plugin's charts of the last day, by name (asked apart: they move every 30 s)
+  let live = null;  // the timer asking the shown plugin again
   const selected = () => decodeURIComponent(location.hash.slice(1)) || 'machine';
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
 
@@ -30,27 +39,32 @@
     return out;
   }
 
-  const chipOf = (m) => (m.status && m.status.present ? '<span class="chip up">active</span>' : '<span class="chip">not present</span>');
-  const stateLine = (m) => (m.status && m.status.summary) || (m.status && m.status.present ? 'present' : 'not present');
+  const off = (m) => m.enabled === false;
+  const chipOf = (m) => (off(m) ? '<span class="chip">disabled</span>' : m.status && m.status.present ? '<span class="chip up">active</span>' : '<span class="chip">not present</span>');
+  const stateLine = (m) => (off(m) ? 'disabled' : (m.status && m.status.summary) || (m.status && m.status.present ? 'present' : 'not present'));
+  function say(name, text) {  // a plugin's trouble, at the head of its page
+    const el = $(`err-${name}`);
+    if (el) el.textContent = text || '';
+  }
 
   // -- the tray: the chip, a divider, an icon per active plugin, in the one dark box ------------------------
   function drawRail() {
     const sel = selected();
     const items = ((tray && tray.items) || []).filter((i) => i.kind === 'plugin');
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
-      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)}">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
+      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: disable)">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
   }
 
   // -- the list: this machine, its machine plugins, the AI assistants -----------------------------------
   function drawList() {
     const sel = selected();
-    const item = (id, ic, title, sub) => `<button type="button" class="item${sel === id ? ' active' : ''}" data-select="${esc(id)}">${icon(ic, 20)}
+    const item = (id, ic, title, sub, cls = '') => `<button type="button" class="item${sel === id ? ' active' : ''}${cls}" data-select="${esc(id)}">${icon(ic, 20)}
       <span class="what"><span>${esc(title)}</span><span class="sub">${esc(sub)}</span></span></button>`;
     const f = st.machine;
     const machines = Object.values(st.machines);
     list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>`
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
-      + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m))).join('')
+      + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), off(m) ? ' off' : '')).join('')
         : '<div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
       + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, 'analysis', a.title, a.vendor || a.about)).join('') : '');
   }
@@ -99,9 +113,45 @@
     return out.join('');
   }
 
+  // a plugin's own tables (status.tables: a title, the columns, the rows; a cell its text or {text, sub})
+  const cellHtml = (c) => (c && typeof c === 'object' ? `${esc(c.text)}${c.sub ? `<div class="sub">${esc(c.sub)}</div>` : ''}` : esc(c));
+  function statTables(items) {
+    return (items || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}`
+      + ((t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
+        + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : ''}>${cellHtml(c)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
+        : `<div class="muted small">${esc(t.empty || 'None.')}</div>`)).join('');
+  }
+
+  // a plugin's choices (status.options: a hook asked with the value chosen; the Preferences plugin's themes)
+  function optionsHtml(m) {
+    const can = new Set(m.asks || []);
+    return ((m.status && m.status.options) || []).filter((o) => can.has(o.hook)).map((o) => `<h4>${esc(o.title)}</h4>`
+      + `<div class="choices" role="radiogroup" aria-label="${esc(o.title)}">${o.choices.map((c) => `<button type="button" class="choice${c.value === o.value ? ' active' : ''}" role="radio"
+          aria-checked="${c.value === o.value}" tabindex="${c.value === o.value ? 0 : -1}" data-machine="${esc(m.name)}" data-hook="${esc(o.hook)}" data-value="${esc(c.value)}">`
+        + `<span class="swatch" aria-hidden="true">${(c.swatch || []).map((s) => `<span style="background:${/^#[0-9a-fA-F]{3,8}$/.test(s) ? s : 'transparent'}"></span>`).join('')}</span>`
+        + `<span class="what"><span>${esc(c.title)}</span>${c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</span></button>`).join('')}</div>`).join('');
+  }
+
+  const chartsOf = (m) => (span === 'day' && day[m.name]) || (m.status && m.status.charts);
+  function chartsBlock(m) {
+    if (!m.status || !m.status.charts) return '';
+    const btn = (v, text) => `<button type="button" data-span="${v}" aria-pressed="${span === v}">${text}</button>`;
+    const drawn = Charts.cards(chartsOf(m), { id: m.name });
+    return `<div class="stats-head"><div class="spans" role="group" aria-label="The charts' range">${btn('recent', 'Last 10 minutes')}${btn('day', 'Last day')}</div></div>`
+      + `<div class="charts${span === 'day' && !day[m.name] ? ' loading' : ''}" id="charts-${esc(m.name)}">${drawn || '<div class="muted small">The charts begin with the second sample.</div>'}</div>`;
+  }
+
+  function switchRow(m) {
+    const on = !off(m);
+    return `<label class="switch-row"><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"></button>${on ? 'Enabled' : 'Disabled'}</label>`;
+  }
+
   function pluginData(m) {
-    return `<h2>${esc(m.title)}</h2><div class="muted small">${esc(m.about)}</div>${tables(m)}
-      <h4>Setup log</h4><pre class="setup-log" id="log-${esc(m.name)}">${m.setup ? esc(m.setup.lines.join('\n')) : 'Nothing run yet: the steps are on the right.'}</pre>`;
+    const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
+    if (off(m)) return `${head}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
+    const logged = (m.steps || []).length || m.setup;
+    return head + optionsHtml(m) + chartsBlock(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
+      + (logged ? `<h4>Setup log</h4><pre class="setup-log" id="log-${esc(m.name)}">${m.setup ? esc(m.setup.lines.join('\n')) : 'Nothing run yet: the steps are on the right.'}</pre>` : '');
   }
 
   function assistantData(a) {
@@ -112,13 +162,16 @@
   function drawData() {
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
+    const scrolled = data.scrollTop;
     data.innerHTML = sel === 'machine' ? machineData() : m ? pluginData(m) : a ? assistantData(a) : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
+    Charts.draw(data);
+    data.scrollTop = scrolled;
   }
 
   // -- the right: the selected one's specifics ----------------------------------------------------------
   function facts(s) {
-    // a status's own facts: neither its lists nor its summary
-    const skip = new Set(['rules', 'services', 'startups', 'processes', 'summary', 'present', 'problem']);
+    // a status's own facts: neither its lists, its charts, its choices nor its summary
+    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'summary', 'present', 'problem']);
     const flat = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v !== '' && v !== null && typeof v !== 'object');
     const nested = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length);
     const show = (v) => (v === true ? 'yes' : v === false ? 'no' : typeof v === 'object' ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(', ') : v);
@@ -137,14 +190,16 @@
         <dt>Docker here</dt><dd>${d.available ? `engine ${esc(d.engine)} (${esc(d.command)})` : esc(d.problem || 'not installed')}${d.wsl ? ` · WSL 2 ${d.wsl.present ? 'present' : 'absent'}` : ''}</dd>
       </dl>
       <h4>Active plugins</h4><div class="small">${(st.active || []).length ? st.active.map(esc).join(', ') : 'none'}</div>
+      ${(st.disabled || []).length ? `<h4>Disabled</h4><div class="small">${st.disabled.map(esc).join(', ')}</div>` : ''}
       <h4>Platform</h4><div class="small">${esc(st.app.title)} ${esc(st.app.api ? 'API ' + st.app.api : '')} at ${esc(st.app.url)}</div>`;
   }
 
   function pluginSide(m) {
+    const head = `<h3>${icon(m.icon || 'chip', 20)} ${esc(m.title)} ${chipOf(m)}</h3><div class="muted small">${esc(m.name)}${m.version ? ` · ${esc(m.version)}` : ''}</div>`;
+    if (off(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>`;
     const running = m.setup && m.setup.running;
     const steps = m.steps || [];
-    return `<h3>${icon(m.icon || 'chip', 20)} ${esc(m.title)} ${chipOf(m)}</h3><div class="muted small">${esc(m.name)}${m.version ? ` · ${esc(m.version)}` : ''}</div>
-      <p class="summary">${esc(stateLine(m))}</p>${m.status.problem ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
+    return `${head}<p class="summary">${esc(stateLine(m))}</p>${m.status.problem ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
       ${facts(m.status)}
       ${steps.length ? `<h4>Set up</h4><div class="steps"><button type="button" class="setup accent" data-machine="${esc(m.name)}" ${running ? 'disabled' : ''}>Everything</button>
         ${steps.map((s) => `<button type="button" class="step" data-machine="${esc(m.name)}" data-step="${esc(s)}" ${running ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
@@ -168,6 +223,7 @@
     drawList();
     drawData();
     drawSide();
+    schedule();
   }
 
   async function render() {
@@ -177,14 +233,89 @@
     Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running) watch(m.name); });
   }
 
+  // -- the shown plugin's figures, asked again at its interval (the day's every 30 s), drawn in place ------------
+  function shown() {
+    const m = st && st.machines[selected()];
+    return m && !off(m) && m.status && m.status.charts ? m : null;
+  }
+  function schedule() {
+    clearTimeout(live);
+    const m = shown();
+    if (!m || document.hidden) return;
+    const every = span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
+    live = setTimeout(() => refresh(m.name), every * 1000);
+  }
+  async function refresh(name) {
+    clearTimeout(live);
+    if (selected() !== name) return;
+    try {
+      const [m, d] = await Promise.all([api('GET', `api/machines/${encodeURIComponent(name)}`),
+        span === 'day' ? api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: 'charts', args: ['day'] }) : null]);
+      if (d) day[name] = d.answer;
+      st.machines[name] = m;
+      if (selected() === name) redrawShown(m);
+    } catch (e) { say(name, e.message); }
+    schedule();
+  }
+  function redrawShown(m) {
+    const box = $(`charts-${m.name}`);
+    if (off(m) || !box || !Charts.update(box, chartsOf(m), { id: m.name })) { drawData(); }  // other charts: drawn anew
+    else {
+      box.classList.remove('loading');
+      const t = $(`tables-${m.name}`);
+      if (t) t.innerHTML = tables(m) + statTables(m.status.tables);
+    }
+    drawSide();
+    const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
+    if (sub) sub.textContent = stateLine(m);
+  }
+  function setSpan(v) {
+    if (v === span) return;
+    span = v;
+    drawData();  // the frame kept, faded while the day is asked
+    const m = shown();
+    if (m) refresh(m.name);
+  }
+
+  // -- what the page asks -------------------------------------------------------------------------------
   async function ask(name, hook, args) {
-    try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args }); render(); }
-    catch (e) { const log = $(`log-${name}`); if (log) log.textContent = e.message; }
+    try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args }); }
+    catch (e) { const log = $(`log-${name}`); if (log) log.textContent = e.message; else say(name, e.message); return false; }
+    await render();
+    return true;
+  }
+
+  async function choose(name, hook, value) {
+    if (await ask(name, hook, [value]) && window.LiminalTheme) await window.LiminalTheme.load();  // a UI preference: this page follows
+    const again = data.querySelector(`button.choice[data-hook="${CSS.escape(hook)}"][data-value="${CSS.escape(value)}"]`);
+    if (again) again.focus({ preventScroll: true });
+  }
+
+  async function setEnabled(name, on, refocus) {
+    // the switch moves at once and a disabled plugin's icon leaves the tray; the rest follows once the platform
+    // has asked every plugin again (WSL's take a few seconds)
+    const sw = data.querySelector(`button.switch[data-toggle="${CSS.escape(name)}"]`);
+    const words = (text) => { if (sw && sw.parentElement.lastChild) sw.parentElement.lastChild.textContent = text; };
+    if (sw) { sw.setAttribute('aria-checked', String(on)); sw.disabled = true; words(on ? 'Enabling…' : 'Disabling…'); }
+    if (!on) { const b = rail.querySelector(`button[data-select="${CSS.escape(name)}"]`); if (b) b.remove(); }
+    try { await api('POST', `api/machines/${encodeURIComponent(name)}/enabled`, { on }); }
+    catch (e) {
+      say(name, e.message);
+      if (sw) { sw.setAttribute('aria-checked', String(!on)); sw.disabled = false; words(on ? 'Disabled' : 'Enabled'); }
+      drawRail();
+      return;
+    }
+    delete day[name];
+    await render();
+    if (refocus) {
+      const again = data.querySelector(`button.switch[data-toggle="${CSS.escape(name)}"]`);
+      if (again) again.focus({ preventScroll: true });
+    }
   }
 
   async function setup(name, steps) {
     try { await api('POST', `api/machines/${encodeURIComponent(name)}/setup`, steps ? { steps } : {}); await render(); watch(name); }
-    catch (e) { const log = $(`log-${name}`); if (log) log.textContent = e.message; }
+    catch (e) { const log = $(`log-${name}`); if (log) log.textContent = e.message; else say(name, e.message); }
   }
 
   function watch(name) {
@@ -200,14 +331,49 @@
   }
 
   document.addEventListener('click', (e) => {
+    const sw = e.target.closest('button.switch[data-toggle]');
+    if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
     const pick = e.target.closest('[data-select]');
     if (pick) { location.hash = pick.dataset.select === 'machine' ? '' : pick.dataset.select; return; }
+    const sp = e.target.closest('button[data-span]');
+    if (sp) { setSpan(sp.dataset.span); return; }
+    const c = e.target.closest('button.choice[data-hook]');
+    if (c) { if (c.getAttribute('aria-checked') !== 'true') choose(c.dataset.machine, c.dataset.hook, c.dataset.value); return; }
     const go = e.target.closest('button.setup, button.step');
     if (go) { setup(go.dataset.machine, go.dataset.step ? [go.dataset.step] : null); return; }
     const a = e.target.closest('button.ask');
     if (a) ask(a.dataset.machine, a.dataset.hook, JSON.parse(a.dataset.args));
   });
+
+  // a right click on a plugin's icon in the tray: disable it (the platform's own icon keeps the browser's menu)
+  rail.addEventListener('contextmenu', (e) => {
+    const b = e.target.closest('button[data-select]');
+    const m = b && st && st.machines[b.dataset.select];
+    if (!m || b.dataset.select === 'machine' || !window.LiminalMenu) return;
+    e.preventDefault();
+    const r = b.getBoundingClientRect();
+    const keyboard = e.clientX === 0 && e.clientY === 0;  // the menu key, or Shift+F10: beside the icon
+    window.LiminalMenu.open({ x: keyboard ? r.left - 170 : e.clientX, y: keyboard ? r.top : e.clientY, title: m.title,
+      items: [{ label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
+  });
+
+  // the radio group's arrow keys move the choice, as a radio group's do
+  data.addEventListener('keydown', (e) => {
+    const c = e.target.closest && e.target.closest('button.choice[data-hook]');
+    if (!c || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) return;
+    const all = [...c.parentElement.querySelectorAll('button.choice')];
+    const next = all[(all.indexOf(c) + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length];
+    e.preventDefault();
+    next.focus();
+    choose(next.dataset.machine, next.dataset.hook, next.dataset.value);
+  });
+
   window.addEventListener('hashchange', draw);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { clearTimeout(live); return; }
+    const m = shown();
+    if (m) refresh(m.name);
+  });
 
   render();
 })();

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 (2026-11-07)
+
+A plugin disabled and enabled (the user: "allow me to right click on the icons to disable them on the right icon
+menu, also allow for enable disable switch (left to right) on the plugin description when selected in the left
+menu"): a right click on a plugin's icon in the tray offers Disable (the library's menu.js), and a switch at the
+head of its page enables or disables it. Disabled, the platform asks it nothing, runs nothing on it, leaves its
+icon out of the tray and detaches it (a plugin that samples stops); kept in the platform's folder
+(LIMINAL_PLATFORM_DIR, else the data folder's platform/, `plugins.json`) across restarts. `POST
+/api/machines/<name>/enabled {on}`, `liminal-platform machine NAME enable|disable`. A plugin's own figures drawn
+in the middle: its status's `charts` (the library's charts.js, asked again at its interval while shown, the last
+ten minutes or the last day), `tables` and `options` (choices, such as the Preferences plugin's themes). Every
+page painted in the UI's theme (the library's theme.js, `GET /api/ui`). Asks that only read are not logged.
+
 ## 0.1.2 (2026-11-07)
 
 The page as the user laid it out: "the specifics are on the right hand side before the icons on the very

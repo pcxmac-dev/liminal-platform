@@ -20,3 +20,13 @@ def test_status_and_a_machine_from_the_command_line(monkeypatch, capsys):
     assert cli.main(["machine", "box", "run"]) == 2
     assert cli.main(["machine", "box", "instances"]) == 0 and '"name": "box"' in capsys.readouterr().out
     assert cli.main(["machine", "nothing", "status"]) == 2 and "no machine plugin named" in capsys.readouterr().err
+
+
+def test_a_machine_disabled_and_enabled_from_the_command_line(monkeypatch, capsys):
+    box = Box()
+    monkeypatch.setattr(cli, "_app", lambda log=print: PlatformApp(log=lambda m: None, machines={"box": box}))
+    assert cli.main(["machine", "box", "disable"]) == 0 and capsys.readouterr().out == "box: disabled\n"
+    assert cli.main(["status"]) == 0 and "box: A box; disabled" in capsys.readouterr().out
+    assert cli.main(["machine", "box", "setup"]) == 2 and "box is disabled" in capsys.readouterr().err and box.setups == []
+    assert cli.main(["machine", "box", "enable"]) == 0 and capsys.readouterr().out == "box: enabled\n"
+    assert cli.main(["status"]) == 0 and "box: A box; present" in capsys.readouterr().out
