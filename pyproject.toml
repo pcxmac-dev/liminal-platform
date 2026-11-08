@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "liminal-platform"
-version = "0.4.0"  # the platform app's own release (CHANGELOG.md)
+version = "0.4.1"  # the platform app's own release (CHANGELOG.md)
 description = "The Liminal platform: the interface to the software and hardware under the framework, with its machine plugins (WSL distributions with Docker inside), the Docker instances and the AI assistants."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["liminal-libs>=1.26.0"]
+dependencies = ["liminal-libs>=1.26.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

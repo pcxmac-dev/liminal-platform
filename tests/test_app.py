@@ -297,7 +297,8 @@ class FakeTerminal:
     def alive(self):
         return not self.closed
 
-    def read(self, since=0):
+    def read(self, since=0, wait=0.0):
+        self.waited = wait
         self.seen = time.monotonic()
         text, start, end = self.output.read(since)
         return {"text": text, "from": start, "offset": end, "alive": self.alive, "title": self.title}
@@ -371,9 +372,11 @@ def test_a_login_terminal_into_the_environment():
         assert status == 200 and opened["text"] == "liminal@pc:~$ " and opened["alive"] and made[0].argv == ["wsl", "-d", "Liminal-Distro"]
         assert _call(port, "GET", "/api/machines/distro")[1]["terminal"] == {"open": True}
         assert _call(port, "POST", "/api/machines/distro/terminal/input", {"data": "ls\r"})[1] == {"sent": 3}
-        got = _call(port, "GET", f"/api/machines/distro/terminal?since={opened['offset']}")[1]
-        assert got["text"] == "ls\r\n" and made[0].typed == "ls\r"
-        assert _call(port, "POST", "/api/machines/distro/terminal", {})[1]["alive"] and len(made) == 1  # the one open, kept
+        got = _call(port, "GET", f"/api/machines/distro/terminal?since={opened['offset']}&wait=9")[1]
+        assert got["text"] == "ls\r\n" and made[0].typed == "ls\r" and made[0].waited == 5.0  # held at most five seconds
+        again = _call(port, "POST", "/api/machines/distro/terminal", {})[1]
+        assert again["from"] == 0 and again["text"].endswith("ls\r\n")  # come back to: its last lines shown
+        assert len(made) == 1  # the one open, kept
         assert _call(port, "POST", "/api/machines/distro/terminal/input", {"data": 5})[0] == 400
         assert _call(port, "POST", "/api/machines/distro/terminal/close", {})[1] == {"closed": True} and made[0].closed
         assert _call(port, "GET", "/api/machines/distro/terminal")[0] == 404

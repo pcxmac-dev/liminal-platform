@@ -24,6 +24,15 @@ PLUGINS_FILE = "plugins.json"
 TERMINAL_IDLE_S = 120.0  # a terminal no page has read for this long is closed
 PREPARING = ("wsl", "update", "version")  # setup steps that prepare this PC: never locked by a plugin's check
 MAX_INPUT = 8192  # characters of keys a page sends at once
+MAX_WAIT = 5.0  # seconds a page's read may be held until there is output (the echo at once, one read at a time)
+KEPT_SHOWN = 4000  # characters of a terminal open already a page is shown when it comes back to it
+
+
+def _wait(query: dict) -> float:
+    try:
+        return min(max(float(query.get("wait") or 0), 0.0), MAX_WAIT)
+    except ValueError:
+        return 0.0
 
 
 def platform_dir() -> Path:
@@ -458,7 +467,7 @@ class PlatformApp(App):
         self._close_idle()
         current = self.terminal_of(name)
         if current is not None and current.alive:
-            return current.read(current.output.end)
+            return current.read(max(0, current.output.end - KEPT_SHOWN))  # where it was: its last lines
         try:
             argv = m.terminal()
         except Exception as e:  # noqa: BLE001 - not installed: its words
@@ -509,6 +518,8 @@ class PlatformApp(App):
                 with self._lock:
                     setup = self._setups.get(name)
                 since = int(query.get("since") or 0) if action == "job" else None
+                if setup is not None and since is not None and setup.running and _wait(query):
+                    setup.output.wait(since, _wait(query))  # held until it prints more, or ends
                 return 200, (setup.describe(since=since) if setup else {"machine": name, "running": False, "lines": [], "done": None,
                                                                        "text": "", "from": 0, "offset": 0})
             if method == "GET" and action == "check":
@@ -525,7 +536,7 @@ class PlatformApp(App):
                 term = self.terminal_of(name)
                 if term is None:
                     raise Refused(HTTPStatus.NOT_FOUND, f"no terminal is open into {name}")
-                got = term.read(int(query.get("since") or 0))
+                got = term.read(int(query.get("since") or 0), _wait(query))
                 self._close_idle()
                 return 200, got
             if action == "terminal/input" and method == "POST":

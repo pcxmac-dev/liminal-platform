@@ -206,7 +206,9 @@
     return `<div class="term-panel shell" data-panel="shell-${esc(m.name)}"><div class="term-head"><span>${esc(sh.title || 'Terminal')}</span>`
       + `<span class="muted small state">${sh.alive ? 'click, then type; Ctrl+Shift+C copies' : 'ended'}</span>`
       + `<button type="button" class="shell-close" data-machine="${esc(m.name)}" aria-label="Close the terminal">×</button></div>`
-      + `<pre class="term interactive" id="shell-term-${esc(m.name)}" data-machine="${esc(m.name)}" tabindex="0" aria-label="${esc(sh.title || 'Terminal')}"></pre></div>`;
+      + `<pre class="term interactive" id="shell-term-${esc(m.name)}" data-machine="${esc(m.name)}" aria-hidden="true"></pre>`
+      + `<textarea class="term-input" id="shell-in-${esc(m.name)}" data-machine="${esc(m.name)}" aria-label="Type into ${esc(sh.title || 'the terminal')}" `
+      + `autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" rows="1"></textarea></div>`;
   }
 
   function pluginData(m) {
@@ -233,7 +235,7 @@
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
-    const typing = document.activeElement && document.activeElement.matches && document.activeElement.matches('.term.interactive');
+    const typing = document.activeElement && document.activeElement.matches && document.activeElement.matches('.term-input');
     if (m && hasHook(m, 'check') && !userOff(m)) {  // its check of this PC: asked when shown, again after a minute
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
@@ -242,7 +244,7 @@
     Charts.draw(data);
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
     Object.entries(shells).forEach(([name, sh]) => sh.term.attach($(`shell-term-${name}`)));
-    if (typing && m && shells[m.name]) { const el = $(`shell-term-${m.name}`); if (el) el.focus({ preventScroll: true }); }
+    if (typing && m && shells[m.name]) { const el = $(`shell-in-${m.name}`); if (el) el.focus({ preventScroll: true }); }
     data.scrollTop = scrolled;
   }
 
@@ -478,24 +480,37 @@
     pollJob(name);
   }
 
-  async function pollJob(name) {
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  // what came after `offset`, never what was drawn already (two answers can overlap): the text to draw, the new offset
+  function fresh(offset, got) {
+    const skip = Math.max(0, offset - (got.from ?? offset));
+    return [got.text && got.text.length > skip ? got.text.slice(skip) : '', Math.max(offset, got.offset ?? offset)];
+  }
+
+  async function pollJob(name) {  // one read at a time, held by the platform until the job prints more (or 2 s)
     const j = jobs[name];
-    if (!j) return;
-    clearTimeout(j.timer);
-    try {
-      const got = await api('GET', `api/machines/${enc(name)}/job?since=${j.offset}`);
-      if (got.text) j.term.write(got.text);
-      j.offset = got.offset ?? j.offset;
-      j.running = !!got.running;
-      j.ok = got.ok;
-      if (got.error) j.term.write(`\n${got.error}\n`);
-    } catch (e) {
-      j.term.write(`\n${e.message}\n`);
-      j.running = false;
+    if (!j || j.reading) return;
+    j.reading = true;
+    while (jobs[name] === j) {
+      try {
+        const got = await api('GET', `api/machines/${enc(name)}/job?since=${j.offset}&wait=2`);
+        const [text, offset] = fresh(j.offset, got);
+        j.term.write(text);
+        j.offset = offset;
+        j.running = !!got.running;
+        j.ok = got.ok;
+        if (!j.running && got.error) j.term.write(`\n${got.error}\n`);
+      } catch (e) {
+        j.term.write(`\n${e.message}\n`);
+        j.running = false;
+      }
+      const state = document.querySelector(`[data-panel="job-${CSS.escape(name)}"] .state`);
+      if (state) state.textContent = jobState(j);
+      if (!j.running) break;
+      if (document.hidden) await pause(1000);
     }
-    const state = document.querySelector(`[data-panel="job-${CSS.escape(name)}"] .state`);
-    if (state) state.textContent = jobState(j);
-    if (j.running) { j.timer = setTimeout(() => pollJob(name), document.hidden ? 2000 : 500); return; }
+    j.reading = false;
+    if (jobs[name] !== j) return;
     delete checks[name];  // installed now, perhaps: asked again
     await render();
   }
@@ -511,37 +526,42 @@
 
   // -- a login terminal (the user: "the plugin also allows for a user to login through a terminal in to the environment")
   async function openShell(name) {
-    if (shells[name]) { const el = $(`shell-term-${name}`); if (el) el.focus(); return; }
+    if (shells[name]) { const el = $(`shell-in-${name}`); if (el) el.focus(); return; }
     let got;
     try { got = await api('POST', `api/machines/${enc(name)}/terminal`, {}); }
     catch (e) { say(name, e.message); return; }
-    const sh = { term: LiminalTerminal.create(null, { cursor: true }), offset: got.offset, alive: got.alive, title: got.title, queue: '', timer: null, sending: null };
+    const sh = { term: LiminalTerminal.create(null, { cursor: true }), offset: got.offset, alive: got.alive, title: got.title, queue: '', sending: null, reading: false };
     shells[name] = sh;
     sh.term.write(got.text);
     drawData();
-    const el = $(`shell-term-${name}`);
+    const el = $(`shell-in-${name}`);
     if (el) el.focus();
-    pollShell(name);
+    readShell(name);
   }
 
-  async function pollShell(name) {
+  // one read at a time, held open by the platform until the shell prints (its echo at once), nothing drawn twice
+  async function readShell(name) {
     const sh = shells[name];
-    if (!sh) return;
-    clearTimeout(sh.timer);
-    try {
-      const got = await api('GET', `api/machines/${enc(name)}/terminal?since=${sh.offset}`);
-      if (got.text) sh.term.write(got.text);
-      sh.offset = got.offset;
-      if (!got.alive) sh.alive = false;
-    } catch (e) {
-      sh.alive = false;
+    if (!sh || sh.reading) return;
+    sh.reading = true;
+    while (shells[name] === sh && sh.alive) {
+      try {
+        const got = await api('GET', `api/machines/${enc(name)}/terminal?since=${sh.offset}&wait=2`);
+        const [text, offset] = fresh(sh.offset, got);
+        sh.term.write(text);
+        sh.offset = offset;
+        if (!got.alive) sh.alive = false;
+      } catch (e) {
+        sh.alive = false;
+      }
+      if (document.hidden) await pause(1000);
     }
+    sh.reading = false;
     const state = document.querySelector(`[data-panel="shell-${CSS.escape(name)}"] .state`);
     if (state && !sh.alive) state.textContent = 'ended';
-    if (sh.alive) sh.timer = setTimeout(() => pollShell(name), document.hidden ? 2000 : 200);
   }
 
-  function type(name, keys) {  // the keys typed, sent in small batches; the echo comes back with the next read
+  function type(name, keys) {  // the keys typed, sent in small batches; the echo comes back through the read held open
     const sh = shells[name];
     if (!sh || !sh.alive || !keys) return;
     sh.queue += keys;
@@ -550,16 +570,15 @@
       const out = sh.queue;
       sh.queue = '';
       sh.sending = null;
-      try { await api('POST', `api/machines/${enc(name)}/terminal/input`, { data: out }); pollShell(name); }
+      try { await api('POST', `api/machines/${enc(name)}/terminal/input`, { data: out }); }
       catch (e) { sh.term.write(`\r\n${e.message}\r\n`); }
-    }, 25);
+    }, 8);
   }
 
   async function closeShell(name) {
     const sh = shells[name];
     if (!sh) return;
-    clearTimeout(sh.timer);
-    delete shells[name];
+    delete shells[name];  // its read ends with it
     try { await api('POST', `api/machines/${enc(name)}/terminal/close`, {}); } catch (e) { /* gone already */ }
     drawData();
   }
@@ -603,18 +622,36 @@
       items: [{ label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
   });
 
-  // keys typed into a login terminal go to it (Ctrl+Shift+C still copies); a paste is sent as typed
+  // typing into a login terminal, through its hidden text box (as web terminals do): the keys a terminal sends for
+  // Enter, the arrows, Tab, Backspace and Ctrl+letter at keydown; text from the box's input, so composed characters
+  // (dead keys, other layouts) and a paste arrive whole (Ctrl+Shift+C copies, Ctrl+Shift+V pastes)
   data.addEventListener('keydown', (e) => {
-    const t = e.target.closest && e.target.closest('.term.interactive[data-machine]');
-    if (!t) return;
+    const box = e.target.closest && e.target.closest('.term-input[data-machine]');
+    if (!box || e.isComposing) return;
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;  // a character: the input brings it
+    if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'V' || e.key === 'c' || e.key === 'v')) return;  // copy, paste
     const keys = LiminalTerminal.keys(e);
-    if (keys) { e.preventDefault(); type(t.dataset.machine, keys); }
+    if (keys) { e.preventDefault(); type(box.dataset.machine, keys); }
   });
-  data.addEventListener('paste', (e) => {
+  data.addEventListener('input', (e) => {
+    const box = e.target.closest && e.target.closest('.term-input[data-machine]');
+    if (!box || e.isComposing) return;
+    const text = box.value;
+    box.value = '';
+    if (text) type(box.dataset.machine, text.replace(/\r?\n/g, '\r'));
+  });
+  data.addEventListener('compositionend', (e) => {
+    const box = e.target.closest && e.target.closest('.term-input[data-machine]');
+    if (!box) return;
+    const text = box.value;
+    box.value = '';
+    if (text) type(box.dataset.machine, text);
+  });
+  data.addEventListener('mouseup', (e) => {  // a click in the terminal types into it (a selection made is left to copy)
     const t = e.target.closest && e.target.closest('.term.interactive[data-machine]');
-    if (!t) return;
-    e.preventDefault();
-    type(t.dataset.machine, (e.clipboardData.getData('text') || '').replace(/\r?\n/g, '\r'));
+    if (!t || String(window.getSelection() || '')) return;
+    const box = $(`shell-in-${t.dataset.machine}`);
+    if (box) box.focus({ preventScroll: true });
   });
 
   // the radio group's arrow keys move the choice, as a radio group's do

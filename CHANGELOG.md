@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1 (2026-11-08)
+
+The terminal's typing (the user: "in the terminal, characters repeat"; "the character entry is not great for the term"):
+the page keeps one read open, held by the platform until the shell prints (`?wait=`, at most five seconds), so the echo
+shows at once and nothing is drawn twice (two reads at once had drawn the same output twice); the keys go through a
+hidden text box, as web terminals do, so composed characters, other layouts and a paste arrive whole; a terminal open
+again shows its last lines. A job's panel is read the same way.
+
 ## 0.4.0 (2026-11-07)
 
 A plugin that installs a system shows its check of this PC and unlocks the install only when every criterion is met (the
