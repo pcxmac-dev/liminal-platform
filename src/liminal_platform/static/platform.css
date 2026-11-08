@@ -8,6 +8,8 @@ tr.pick { cursor: pointer; }
 .app-side p { margin: 6px 0; }
 .app-side .summary { color: var(--text); }
 td .ask { margin-right: 4px; }
+.row.actions { margin: 8px 0 4px; }  /* 0.5.0: a plugin's actions (status.actions) */
+button.ask[aria-busy="true"] { cursor: progress; opacity: .7; }
 .app-data td.mono.small { overflow-wrap: anywhere; min-width: 14em; }  /* a long command line wraps in its cell, nothing else breaks */
 /* 0.2.0: a plugin's page head with its switch; its charts' range; its own tables; its choices (the themes) */
 .data-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

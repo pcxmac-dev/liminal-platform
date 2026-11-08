@@ -8,8 +8,9 @@
 // on a plugin's icon offers to disable it ("allow me to right click on the icons to disable them on the right icon
 // menu"); the switch at the head of a plugin's page enables or disables it ("enable disable switch (left to right) on
 // the plugin description when selected in the left menu"). A plugin's own figures are drawn in the middle: its
-// status's `charts` (the library's charts.js, asked again at the plugin's interval while shown), `tables`, and
-// `options` (choices it is asked to make: the Preferences plugin's themes, applied to this page at once). The
+// status's `charts` (the library's charts.js, asked again at the plugin's interval while shown), `tables`,
+// `options` (choices it is asked to make: the Preferences plugin's themes, applied to this page at once) and `actions`
+// (buttons asking one of its hooks by name: the Namecheap plugin's Refresh and Update DNS now). The
 // selection is the address's #name (#wsl-ubuntu), so a reload or a link keeps it. API paths are relative, so the
 // page works under a super app's prefix too.
 (() => {
@@ -147,6 +148,15 @@
         + `<span class="what"><span>${esc(c.title)}</span>${c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</span></button>`).join('')}</div>`).join('');
   }
 
+  // a plugin's actions (status.actions: {hook, args, title, note}: one of its hooks asked by name from a button, the
+  // Namecheap plugin's Refresh and Update DNS now): those the platform may ask of it now, the rest left out
+  function actionsHtml(m) {
+    const can = new Set(m.asks || []);
+    const items = ((m.status && m.status.actions) || []).filter((a) => a && can.has(a.hook) && Array.isArray(a.args || []));
+    return items.length ? `<div class="row actions">${items.map((a) => `<button type="button" class="ask" data-machine="${esc(m.name)}" `
+      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}>${esc(a.title || a.hook)}</button>`).join('')}</div>` : '';
+  }
+
   const chartsOf = (m) => (span === 'day' && day[m.name]) || (m.status && m.status.charts);
   function chartsBlock(m) {
     if (!m.status || !m.status.charts) return '';
@@ -225,7 +235,7 @@
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
         + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
-    return head + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
+    return head + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
       + (logged || jobs[m.name] ? setupLog(m) : '');
   }
 
@@ -256,7 +266,7 @@
   // -- the right: the selected one's specifics ----------------------------------------------------------
   function facts(s) {
     // a status's own facts: neither its lists, its charts, its choices nor its summary
-    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'summary', 'present', 'problem', 'valid', 'why']);
+    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'actions', 'summary', 'present', 'problem', 'valid', 'why']);
     const flat = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v !== '' && v !== null && typeof v !== 'object');
     const nested = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length);
     const show = (v) => (v === true ? 'yes' : v === false ? 'no' : typeof v === 'object' ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(', ') : v);
@@ -621,7 +631,11 @@
     const go = e.target.closest('button.setup, button.step');
     if (go) { setup(go.dataset.machine, go.dataset.step ? [go.dataset.step] : null); return; }
     const a = e.target.closest('button.ask');
-    if (a) ask(a.dataset.machine, a.dataset.hook, JSON.parse(a.dataset.args));
+    if (a && !a.disabled) {  // busy while it is asked (an action may take seconds); the page is drawn again once answered
+      a.disabled = true;
+      a.setAttribute('aria-busy', 'true');
+      ask(a.dataset.machine, a.dataset.hook, JSON.parse(a.dataset.args)).then((ok) => { if (!ok) { a.disabled = false; a.removeAttribute('aria-busy'); } });
+    }
   });
 
   // a right click on a plugin's icon in the tray: disable it (the platform's own icon keeps the browser's menu)

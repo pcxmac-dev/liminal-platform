@@ -107,6 +107,46 @@ def test_a_plugins_steps_summary_and_asks_by_name(served):
     assert _call(port, "GET", "/api/machines/box")[1]["steps"] == []  # a plugin without steps offers none
 
 
+def test_a_plugins_actions_are_its_hooks_asked_by_name_from_buttons():
+    """status.actions (0.5.0): what the page draws as buttons, each one of the plugin's hooks asked by name with its
+    arguments (the Namecheap plugin's Refresh and Update DNS now); the page draws only those it may ask."""
+    from liminal_libs.machines import MachinePlugin as Machine
+
+    class Poked(Machine):
+        name, title, about, api, order = "poked", "Poked", "a stand-in with an action", "2.1", 902
+        HOOKS = (*Machine.HOOKS, "poke")
+
+        def __init__(self):
+            self.pokes: list = []
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "summary": f"poked {len(self.pokes)} times",
+                    "actions": [{"hook": "poke", "args": [2], "title": "Poke", "note": "pokes it twice"},
+                                {"hook": "missing", "args": [], "title": "Not offered"}]}
+
+        def poke(self, n=1):
+            self.pokes.append(n)
+            return {"poked": len(self.pokes)}
+
+    p = Poked()
+    app = PlatformApp(log=lambda m: None, machines={"poked": p}, assistants={})
+    port = _port(app.start(0))
+    try:
+        m = _call(port, "GET", "/api/machines/poked")[1]
+        assert m["status"]["actions"][0] == {"hook": "poke", "args": [2], "title": "Poke", "note": "pokes it twice"}
+        assert "poke" in m["asks"] and "missing" not in m["asks"]  # the page leaves out an action it may not ask
+        status, out = _call(port, "POST", "/api/machines/poked/ask", {"hook": "poke", "args": [2]})
+        assert status == 200 and out == {"answer": {"poked": 1}} and p.pokes == [2]
+        assert _call(port, "POST", "/api/machines/poked/ask", {"hook": "missing", "args": []})[0] == 400
+        page = _call(port, "GET", "/platform.js")[1]
+        assert b"function actionsHtml" in page and b"m.status.actions" in page and b"head + actionsHtml(m)" in page
+    finally:
+        app.stop()
+
+
 def test_a_plugin_not_present_stays_out_of_the_tray(served):
     app, port, lines, box = served
     box.present = lambda: False

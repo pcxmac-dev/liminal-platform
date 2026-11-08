@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 (2026-11-08)
+
+A plugin's actions: its status's `actions` ({hook, args, title, note}) are drawn as buttons at the head of its page, each
+asking one of its hooks by name with its arguments, as a table's buttons do (the Namecheap plugin's Refresh and Update DNS
+now: plugin-platform-namecheap 0.1.0). Only the actions the platform may ask of it now are drawn. A button asked is busy
+until the answer comes (a plugin's action may take seconds), then the page is drawn again; a refusal shows at the head
+of the page and the button is free again.
+
 ## 0.4.3 (2026-11-08)
 
 A shown plugin's tables are asked again every 30 s while it is on the page (the user: "Yes, do it" to the page
