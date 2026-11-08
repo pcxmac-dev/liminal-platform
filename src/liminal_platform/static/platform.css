@@ -17,6 +17,10 @@ td .ask { margin-right: 4px; }
 table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .app-data .note { overflow-wrap: anywhere; }
 .app-list .item.off .what > span:first-child { color: var(--muted); }
+/* a disabled plugin is shaded darker in the list (the user, 2026-11-07: "on the left hand side, shade darker the
+   plugins that are not enabled"), brighter again while pointed at, focused or selected so it stays readable */
+.app-list .item.off { opacity: .45; }
+.app-list .item.off:hover, .app-list .item.off:focus-visible, .app-list .item.off.active { opacity: .8; }
 .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 4px; }
 .choice { display: flex; align-items: center; gap: 10px; padding: 8px 10px; text-align: left; border: 1px solid var(--border); border-radius: 8px; }
 .choice[aria-checked="true"] { border-color: var(--accent); color: var(--accent); background: var(--hover); }

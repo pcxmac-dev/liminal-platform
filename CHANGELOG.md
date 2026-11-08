@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2 (2026-11-07)
+
+A plugin disabled or enabled shows at once in every view: the tray, this machine's table and its lists, the list on
+the left, the plugin's page and switch (the user: "when i right click disable on icon menu it doesn't reflect in 'this
+machine' state or plugin on/off": the page waited for every plugin's status, 5 to 8 s, and a refresh of the shown
+plugin asked before the change could bring the old state back). The platform's answer for the plugin follows, then
+the rest; answers asked before a change are dropped. The tray's list follows a change without asking every plugin
+again. A disabled plugin is shaded darker in the list ("on the left hand side, shade darker the plugins that are not
+enabled"), brighter while pointed at, focused or selected.
+
 ## 0.2.1 (2026-11-07)
 
 A theme chosen is applied to the page at once (it waited for every plugin's status, 5 to 8 s with the WSL plugins);

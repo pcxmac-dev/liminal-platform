@@ -28,6 +28,7 @@
   let span = 'recent';  // the charts' range: the last ten minutes, or the last day
   const day = {};  // a plugin's charts of the last day, by name (asked apart: they move every 30 s)
   let live = null;  // the timer asking the shown plugin again
+  let gen = 0;  // bumped by every change of what the page holds: an answer asked before it is dropped
   const selected = () => decodeURIComponent(location.hash.slice(1)) || 'machine';
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
 
@@ -229,8 +230,12 @@
   }
 
   async function render() {
-    try { [st, tray] = await Promise.all([api('GET', 'api/status'), api('GET', 'api/tray')]); }
-    catch (e) { data.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+    const g = ++gen;
+    let fresh;
+    try { fresh = await Promise.all([api('GET', 'api/status'), api('GET', 'api/tray')]); }
+    catch (e) { if (g === gen) data.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+    if (g !== gen) return;  // something changed meanwhile: a newer answer is on its way
+    [st, tray] = fresh;
     draw();
     Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running) watch(m.name); });
   }
@@ -250,13 +255,16 @@
   async function refresh(name) {
     clearTimeout(live);
     if (selected() !== name) return;
+    const g = gen;
     try {
       const [m, d] = await Promise.all([api('GET', `api/machines/${encodeURIComponent(name)}`),
         span === 'day' ? api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: 'charts', args: ['day'] }) : null]);
-      if (d) day[name] = d.answer;
-      st.machines[name] = m;
-      if (selected() === name) redrawShown(m);
-    } catch (e) { say(name, e.message); }
+      if (g === gen) {  // nothing changed meanwhile (a plugin disabled or enabled, the page asked again)
+        if (d) day[name] = d.answer;
+        st.machines[name] = m;
+        if (selected() === name) redrawShown(m);
+      }
+    } catch (e) { if (g === gen) say(name, e.message); }
     schedule();
   }
   function redrawShown(m) {
@@ -306,26 +314,59 @@
     if (again && had) again.focus({ preventScroll: true });
   }
 
+  // a plugin's state in what the page holds (this machine's table, the list, its page and switch, the tray): `answer`
+  // is the platform's word on it; without one, the state expected until the platform answers
+  function mark(name, on, answer) {
+    const m = st.machines[name];
+    st.machines[name] = answer || { ...m, enabled: on, asks: on ? m.asks : [],
+      status: on ? { ...(m.status || {}), present: true, summary: 'enabling…' } : { present: null, summary: 'disabled: the platform asks it nothing' } };
+    const order = Object.keys(st.machines);
+    const present = on && !!(st.machines[name].status && st.machines[name].status.present);
+    st.disabled = order.filter((n) => (n === name ? !on : (st.disabled || []).includes(n)));
+    st.active = order.filter((n) => (n === name ? present : (st.active || []).includes(n)));
+    if (tray) {
+      const own = tray.items.filter((i) => i.kind !== 'plugin');
+      const plugins = tray.items.filter((i) => i.kind === 'plugin' && i.id !== name);
+      if (present) plugins.push({ id: name, icon: st.machines[name].icon || 'chip', title: st.machines[name].title, kind: 'plugin', app: tray.app });
+      plugins.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      tray = { ...tray, items: [...own, ...plugins] };
+    }
+  }
+
+  function focusSwitch(name) {
+    const again = data.querySelector(`button.switch[data-toggle="${CSS.escape(name)}"]`);
+    if (again) again.focus({ preventScroll: true });
+  }
+
   async function setEnabled(name, on, refocus) {
-    // the switch moves at once and a disabled plugin's icon leaves the tray; the rest follows once the platform
-    // has asked every plugin again (WSL's take a few seconds)
-    const sw = data.querySelector(`button.switch[data-toggle="${CSS.escape(name)}"]`);
-    const words = (text) => { if (sw && sw.parentElement.lastChild) sw.parentElement.lastChild.textContent = text; };
-    if (sw) { sw.setAttribute('aria-checked', String(on)); sw.disabled = true; words(on ? 'Enabling…' : 'Disabling…'); }
-    if (!on) { const b = rail.querySelector(`button[data-select="${CSS.escape(name)}"]`); if (b) b.remove(); }
-    try { await api('POST', `api/machines/${encodeURIComponent(name)}/enabled`, { on }); }
-    catch (e) {
+    // every view shows it at once (the tray, this machine's table, the list, the plugin's page and switch), then
+    // the platform's answer for the plugin; the rest (the Docker instances a machine runs) once the platform has
+    // asked every plugin again, which takes a few seconds with the WSL plugins
+    if (!st || !st.machines[name]) return;
+    const before = { machine: st.machines[name], active: st.active, disabled: st.disabled, tray };
+    gen++;
+    mark(name, on);
+    delete day[name];
+    draw();
+    if (refocus) focusSwitch(name);
+    let answer;
+    try { answer = await api('POST', `api/machines/${encodeURIComponent(name)}/enabled`, { on }); }
+    catch (e) {  // put back as it was
+      gen++;
+      st.machines[name] = before.machine;
+      st.active = before.active;
+      st.disabled = before.disabled;
+      tray = before.tray;
+      draw();
       say(name, e.message);
-      if (sw) { sw.setAttribute('aria-checked', String(!on)); sw.disabled = false; words(on ? 'Disabled' : 'Enabled'); }
-      drawRail();
       return;
     }
-    delete day[name];
-    await render();
-    if (refocus) {
-      const again = data.querySelector(`button.switch[data-toggle="${CSS.escape(name)}"]`);
-      if (again) again.focus({ preventScroll: true });
-    }
+    gen++;
+    mark(name, on, answer);
+    const focused = refocus || (document.activeElement && document.activeElement.matches && document.activeElement.matches('button.switch'));
+    draw();
+    if (focused) focusSwitch(name);
+    render();
   }
 
   async function setup(name, steps) {

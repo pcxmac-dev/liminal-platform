@@ -140,7 +140,14 @@ def test_a_plugin_disabled_and_enabled_again(served):
     assert json.loads((app.state_dir / "plugins.json").read_text(encoding="utf-8")) == {"disabled": ["box"]}
     again = PlatformApp(log=lambda m: None, machines={"box": box})
     assert again.disabled() == {"box"} and again.attach_plugins([box]) == [] and box.app is None
+    asked_tray: list = []
+    real_present = box.present
+    box.present = lambda: asked_tray.append(1) or real_present()
+    wall_asked: list = []
+    wall = app.machines()["wall"]
+    wall.present = lambda: wall_asked.append(1) or True
     status, m = _call(port, "POST", "/api/machines/box/enabled", {"on": True})
     assert status == 200 and m["enabled"] is True and m["status"]["present"] and box.app is app and asked
+    assert app.active() == ["box", "wall"] and wall_asked == []  # the tray's list followed: no other plugin asked again
     assert [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]] == ["platform", "box", "wall"]
     assert any("box disabled" in x for x in lines) and any("box enabled" in x for x in lines)

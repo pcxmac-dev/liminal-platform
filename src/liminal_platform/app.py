@@ -151,13 +151,21 @@ class PlatformApp(App):
         os.replace(part, folder / PLUGINS_FILE)
         with self._lock:
             self._disabled = names
-            self._active = None  # asked again: the tray follows
+            if self._active is not None:  # the tray follows without asking every plugin again
+                self._active = (self._active[0], [n for n in self._active[1] if n != name])
         if not on and self.plugin(name) is not None:
             self.detach(name)
         elif on and self._attaching and self.plugin(name) is None and getattr(m, "app", None) is None:
             self.attach(m)
         self.log(f"platform: {name} {'enabled' if on else 'disabled'}")
-        return self.machine_status(m)
+        answer = self.machine_status(m)
+        if on and answer["status"].get("present"):
+            order = list(self.machines())
+            with self._lock:
+                if self._active is not None:
+                    names_active = {*self._active[1], name}
+                    self._active = (self._active[0], [n for n in order if n in names_active])
+        return answer
 
     def _refuse_disabled(self, name: str) -> None:
         if not self.enabled(name):
