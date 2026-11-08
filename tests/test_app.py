@@ -39,7 +39,8 @@ def test_the_page_its_icon_and_the_machine(served):
     f = facts()
     assert f["cpus"] >= 1 and f["python"] and f["host"] and memory_mb() >= 0
     status, st = _call(port, "GET", "/api/status")
-    assert status == 200 and st["machine"]["cpus"] == f["cpus"] and "docker" in st and st["app"]["icon"] == "chip"
+    assert status == 200 and st["machine"]["cpus"] == f["cpus"] and st["app"]["icon"] == "chip"
+    assert st["docker"]["installed"] is False and st["docker"]["available"] is False  # no Docker here, as the fixture says
     assert st["machines"]["box"]["status"]["engine"]["running"] and st["machines"]["box"]["setup"] is None
     assert st["instances"] == [{"name": "box", "where": "the box", "command": "box docker", "context": "", "host": "", "source": "box"}]
     assert any("its page at" in m for m in lines)

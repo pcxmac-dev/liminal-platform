@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from liminal_libs import docker as docker_mod
 from liminal_libs.docker import Instance
 from liminal_libs.machines import MachinePlugin
 
@@ -39,6 +40,14 @@ class Box(MachinePlugin):
 
     def instances(self):
         return (Instance("box", "the box", command="box docker", source="box"),)
+
+
+@pytest.fixture(autouse=True)
+def _no_docker_or_wsl_here(monkeypatch):
+    """The tests never ask this machine's Docker or WSL: GitHub's runners have Docker installed, this PC
+    has WSL; the instances and the description then hold only what a test puts there."""
+    monkeypatch.setattr(docker_mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(docker_mod, "wsl", lambda: None)
 
 
 def _port(url: str) -> int:
