@@ -45,6 +45,33 @@ liminal-platform machine wsl-ubuntu run -- docker ps
 
 `GET /api/status`, `GET /api/machines`, `GET /api/machines/<name>`, `POST /api/machines/<name>/setup`
 (`{"steps": [...]}`, 202; `GET` the same path for the lines and the result), `POST /api/machines/<name>/run`
-(`{"command": [...]}`), `GET /api/instances`, and the frame's `/api/tray`, `/api/app`, `/api/plugins`,
+(`{"command": [...]}`), `POST /api/machines/<name>/ask` (`{"hook": ..., "args": [...]}`: one of a plugin's hooks by
+name; a refusal answers 400 and a failure 502, with the plugin's own `words` and, for a refusal that names the argument
+accepting it, `accept`), `GET /api/instances`, and the frame's `/api/tray`, `/api/app`, `/api/plugins`,
 `/api/interface`. Writes carry the write header, as in every Liminal app; only this machine's pages are
 answered.
+
+## What a plugin's status may hold for the page
+
+Beside its summary and facts: `tables` (a title, the columns, the rows), `charts`, `options` (choices), `actions`
+(buttons asking a hook by name) and `forms` (0.6.0): a hook asked with what the user fills in, once the user has
+confirmed the exact change.
+
+```
+{"id": "set:example.com", "hook": "set_record", "title": "Set a record in example.com",
+ "fields": [{"name": "domain", "label": "Domain", "type": "fixed", "value": "example.com"},
+            {"name": "host", "label": "Host", "type": "text", "required": true, "placeholder": "@, www, home"},
+            {"name": "rtype", "label": "Type", "type": "choice", "value": "A",
+             "choices": [{"value": "A", "title": "A", "note": "an IPv4 address"}]},
+            {"name": "ttl", "label": "TTL", "type": "number", "min": 60, "max": 60000, "empty": "1800"},
+            {"name": "mx", "label": "MX preference", "type": "number", "when": {"rtype": ["MX"]}},
+            {"name": "accept_ddns_reset", "type": "accept", "title": "Write anyway?", "words": "...", "yes": "Write anyway"}],
+ "confirm": {"title": "Set this record?", "words": "{host} {rtype} is set in {domain}; a backup first", "yes": "Set it"}}
+```
+
+The fields are the hook's arguments in order (one whose `when` is unmet, or left empty, is sent as null: the hook's
+default). A button names a form: an action `{"form": id, "title": ...}`, a table's `actions` (buttons under it), or a
+cell `{"form": id, "title": "Remove", "values": {...}, "label": ...}` whose values fill the fields by name. A form with
+nothing to fill goes straight to its confirmation. The answer is said by its `said` and `lines` (a fault when `ok` is
+false). A field of type accept is false unless the hook refuses naming it (`accept`), when the page asks a second,
+explicit confirmation with the field's words and sends the same arguments with it true.

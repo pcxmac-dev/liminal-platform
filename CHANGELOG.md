@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 (2026-11-08)
+
+A plugin's forms: its status's `forms` are drawn as forms for one of its hooks, so the page can change what a plugin
+manages with a confirmation instead of the command line (the Namecheap plugin's records set and removed:
+plugin-platform-namecheap 0.2.0). A form names the hook, its fields in the order of the hook's arguments (a label,
+text, a number, a choice with its notes, a fixed value, a default, a field shown only for some choices) and the words of
+its confirmation. A button opens it: one of the actions, a button under a table (a table's `actions`), or a button in a
+row's cell (`{form, title, values}`, the values filling its fields: a row's Remove). The page's one dialog holds the
+form, then the confirmation naming the exact change (the plugin's words with the values filled in, and each value by its
+label), then the plugin's answer in words (`said`, `lines`, a fault when `ok` is false); a refusal or a failure is said
+in the plugin's own words. A form with nothing to fill goes straight to its confirmation. The dialog sits outside what
+is drawn again, so the tables asked every 30 s leave what is typed as it is; a table button focused is focused again
+after they are drawn. A plugin table's long words (a DKIM record's host name, a long address) wrap in their cells, so a
+row's buttons stay in the column instead of behind a sideways scroll.
+
+A refusal can name the argument that accepts it (the exception's `accept`; the error answer of `POST
+api/machines/<name>/ask` carries it, and the plugin's own `words`, since this release): when the form has that argument
+as a field of type accept, the page offers it as a second, explicit confirmation (the field's own words) that sends the
+same arguments with it true, never before (the Namecheap plugin's `accept_ddns_reset`, for zones with Dynamic DNS hosts).
+An acceptance holds for the one change confirmed: a change made again (Back, Change it) is asked to be accepted again.
+
 ## 0.5.0 (2026-11-08)
 
 A plugin's actions: its status's `actions` ({hook, args, title, note}) are drawn as buttons at the head of its page, each

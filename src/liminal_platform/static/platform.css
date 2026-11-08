@@ -58,3 +58,31 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
 .term .t-5 { color: #3b8eea; } .term .t-6 { color: #d670d6; } .term .t-7 { color: #29b8db; } .term .t-8 { color: #e5e5e5; }
 .term .t-9 { color: #a0a0a0; } .term .t-10 { color: #ff6b6b; } .term .t-11 { color: #5af78e; } .term .t-12 { color: #f4f99d; }
 .term .t-13 { color: #6cb6ff; } .term .t-14 { color: #ff92d0; } .term .t-15 { color: #9aedfe; } .term .t-16 { color: #ffffff; }
+/* 0.6.0: a plugin's forms (status.forms): the buttons opening them (under a table, in a row), and the one dialog holding
+   the form, its confirmation and the plugin's answer, in the page's theme */
+.table-actions { margin: 6px 0 2px; }
+td .form-open { margin-right: 4px; white-space: nowrap; }
+/* a plugin table's long words (a DKIM record's host name, an address: td.long) wrap, so a row's buttons stay in the column */
+.app-data table.stats td.long { overflow-wrap: anywhere; }
+.form-dialog { width: min(540px, calc(100vw - 32px)); max-height: calc(100vh - 48px); box-sizing: border-box; padding: 18px 20px 16px;
+  color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0, 0, 0, .45); }
+.form-dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.form-dialog h3 { margin: 0 0 2px; font-size: 16px; font-weight: 600; }
+.form-dialog h3:focus { outline: none; }
+.form-dialog .note, .form-dialog .words { overflow-wrap: anywhere; }
+.form-dialog .field[hidden] { display: none; }  /* a field whose `when` is unmet (.field is a flex box) */
+.form-dialog .field input, .form-dialog .field select { width: 100%; box-sizing: border-box; border: 1px solid var(--border);
+  background: var(--field, var(--bg)); }
+.form-dialog .field input { cursor: text; }
+.form-dialog .field .sub { color: var(--muted); font-size: 12px; }
+.form-dialog .field .bad { color: var(--down); font-size: 12px; }
+.form-dialog .field .sub:empty, .form-dialog .field .bad:empty, .form-dialog [role="status"]:empty { display: none; }
+.form-dialog [aria-invalid="true"] { border-color: var(--down); }
+.form-dialog blockquote.words { margin: 6px 0 10px; padding: 8px 10px; border-left: 3px solid var(--down); border-radius: 4px;
+  background: var(--field, var(--bg)); }
+.form-dialog dl.change dd .sub { display: block; color: var(--muted); font-size: 12px; }
+.form-dialog .said { font-weight: 600; overflow-wrap: anywhere; }
+.form-dialog .said.fault { color: var(--down); }
+.form-dialog ul.lines { margin: 6px 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
+.form-dialog .buttons { margin-top: 14px; }
+.form-dialog[aria-busy="true"] .buttons button { cursor: progress; }

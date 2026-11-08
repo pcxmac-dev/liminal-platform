@@ -78,6 +78,28 @@ def _json_of(value):
     return value
 
 
+class HookRefused(Refused):
+    """A plugin's hook refusing what it was asked (400) or failing (502), its own words beside the frame's reason (0.6.0:
+    a form's answer said in words on the page). `accept`: a refusal naming the argument that accepts it (the Namecheap
+    plugin's accept_ddns_reset), which the page offers as a second, explicit confirmation."""
+
+    def __init__(self, status: int, reason: str, words: str, accept: str | None = None):
+        super().__init__(status, reason)
+        self.words, self.accept = words, accept
+
+    def answer(self) -> dict:
+        out = {"error": self.reason, "words": self.words}
+        if self.accept:
+            out["accept"] = self.accept
+        return out
+
+
+def _accepting(e: Exception) -> str | None:
+    """The argument a refusal names as accepting it (its `accept`), when it is a plain name."""
+    name = getattr(e, "accept", None)
+    return name if isinstance(name, str) and name.isidentifier() else None
+
+
 class Setup:
     """A machine plugin's job under way, in a thread: its setup, or its packages' update (`action`); what it prints as it
     comes (`output`, read from an offset by the page's terminal panel), its steps when done."""
@@ -390,7 +412,8 @@ class PlatformApp(App):
             return []
 
     def ask(self, name: str, hook: str, args: list):
-        """One of a machine plugin's hooks by name (asks), its answer as JSON (a rule, a startup: described)."""
+        """One of a machine plugin's hooks by name (asks), its answer as JSON (a rule, a startup: described). Its refusal
+        (400) or failure (502) is a HookRefused: the plugin's own words, and the argument accepting a refusal that names one."""
         m = self.machine(name)
         self._refuse_disabled(name)
         if hook not in self.asks(m):
@@ -400,9 +423,9 @@ class PlatformApp(App):
         try:
             answer = m.ask(hook, *args)
         except (TypeError, ValueError, LookupError) as e:
-            raise Refused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}") from None
+            raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e), _accepting(e)) from None
         except Exception as e:  # noqa: BLE001 - the plugin's own words
-            raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
+            raise HookRefused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}", str(e)) from None
         return _json_of(answer)
 
     def check(self, name: str) -> dict:
@@ -558,7 +581,10 @@ class PlatformApp(App):
                 hook, args = body.get("hook"), body.get("args") or []
                 if not isinstance(hook, str) or not isinstance(args, list):
                     raise Refused(HTTPStatus.BAD_REQUEST, "hook is a hook's name, args a list")
-                return 200, {"answer": self.ask(name, hook, args)}
+                try:
+                    return 200, {"answer": self.ask(name, hook, args)}
+                except HookRefused as e:  # the plugin's words, and what accepts a refusal (a form's second confirmation)
+                    return e.status, e.answer()
             if method == "POST" and action == "enabled":
                 on = body.get("on")
                 if not isinstance(on, bool):

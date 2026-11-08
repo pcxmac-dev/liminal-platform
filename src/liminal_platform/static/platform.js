@@ -9,10 +9,11 @@
 // menu"); the switch at the head of a plugin's page enables or disables it ("enable disable switch (left to right) on
 // the plugin description when selected in the left menu"). A plugin's own figures are drawn in the middle: its
 // status's `charts` (the library's charts.js, asked again at the plugin's interval while shown), `tables`,
-// `options` (choices it is asked to make: the Preferences plugin's themes, applied to this page at once) and `actions`
-// (buttons asking one of its hooks by name: the Namecheap plugin's Refresh and Update DNS now). The
-// selection is the address's #name (#wsl-ubuntu), so a reload or a link keeps it. API paths are relative, so the
-// page works under a super app's prefix too.
+// `options` (choices it is asked to make: the Preferences plugin's themes, applied to this page at once), `actions`
+// (buttons asking one of its hooks by name: the Namecheap plugin's Refresh and Update DNS now) and `forms` (one of
+// its hooks asked with what the user fills in, once the user has confirmed the exact change: the Namecheap plugin's
+// records set and removed). The selection is the address's #name (#wsl-ubuntu), so a reload or a link keeps it. API
+// paths are relative, so the page works under a super app's prefix too.
 (() => {
   'use strict';
 
@@ -44,7 +45,12 @@
     catch (e) { throw new Error(`The platform is not answering at ${location.host}: it may have stopped. Start it again, then reload this page.`); }
     let out = null;
     try { out = await r.json(); } catch (e) { out = null; }
-    if (!r.ok) throw new Error((out && out.error) || `the platform answered ${r.status}`);
+    if (!r.ok) {  // the answer kept: a hook's refusal holds the plugin's words and what accepts it (a form's)
+      const e = new Error((out && out.error) || `the platform answered ${r.status}`);
+      e.status = r.status;
+      e.answer = out;
+      throw e;
+    }
     return out;
   }
 
@@ -129,13 +135,21 @@
     return out.join('');
   }
 
-  // a plugin's own tables (status.tables: a title, the columns, the rows; a cell its text or {text, sub})
-  const cellHtml = (c) => (c && typeof c === 'object' ? `${esc(c.text)}${c.sub ? `<div class="sub">${esc(c.sub)}</div>` : ''}` : esc(c));
-  function statTables(items) {
-    return (items || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}`
+  // a plugin's own tables (status.tables: a title, the columns, the rows; a cell its text or {text, sub}, or a button
+  // opening one of its forms, {form, title, values, label}; a table's `actions`, buttons opening forms under it)
+  const cellHtml = (c, m, forms) => (c && typeof c === 'object' ? (c.form ? formButton(m, c, forms)
+    : `${esc(c.text)}${c.sub ? `<div class="sub">${esc(c.sub)}</div>` : ''}`) : esc(c));
+  const longWord = (c) => String(c && typeof c === 'object' ? c.text ?? '' : c ?? '').split(/\s+/).some((w) => w.length > 16);  // may break
+  function statTables(m) {
+    const forms = formsOf(m);
+    const under = (t) => {
+      const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => formButton(m, b, forms)).join('');
+      return buttons ? `<div class="row table-actions">${buttons}</div>` : '';
+    };
+    return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}`
       + ((t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
-        + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : ''}>${cellHtml(c)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
-        : `<div class="muted small">${esc(t.empty || 'None.')}</div>`)).join('');
+        + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
+        : `<div class="muted small">${esc(t.empty || 'None.')}</div>`) + under(t)).join('');
   }
 
   // a plugin's choices (status.options: a hook asked with the value chosen; the Preferences plugin's themes)
@@ -149,12 +163,267 @@
   }
 
   // a plugin's actions (status.actions: {hook, args, title, note}: one of its hooks asked by name from a button, the
-  // Namecheap plugin's Refresh and Update DNS now): those the platform may ask of it now, the rest left out
+  // Namecheap plugin's Refresh and Update DNS now; {form, title, values}: a button opening one of its forms): those the
+  // platform may ask of it now, the rest left out
   function actionsHtml(m) {
-    const can = new Set(m.asks || []);
-    const items = ((m.status && m.status.actions) || []).filter((a) => a && can.has(a.hook) && Array.isArray(a.args || []));
-    return items.length ? `<div class="row actions">${items.map((a) => `<button type="button" class="ask" data-machine="${esc(m.name)}" `
-      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}>${esc(a.title || a.hook)}</button>`).join('')}</div>` : '';
+    const can = new Set(m.asks || []), forms = formsOf(m);
+    const items = ((m.status && m.status.actions) || []).map((a) => (a && a.form ? formButton(m, a, forms)
+      : a && can.has(a.hook) && Array.isArray(a.args || []) ? `<button type="button" class="ask" data-machine="${esc(m.name)}" `
+        + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}>${esc(a.title || a.hook)}</button>` : '')).filter(Boolean);
+    return items.length ? `<div class="row actions">${items.join('')}</div>` : '';
+  }
+
+  // -- a plugin's forms (0.6.0, status.forms): one of its hooks asked with what the user fills in, once the user has
+  // confirmed the exact change; its answer said in words. A form: {id, hook, title, note, fields, submit, confirm: {title,
+  // words, yes, danger}}; a field: {name, label, type: text | number | choice | fixed | accept, value, choices: [{value,
+  // title, note}], placeholder, note, required, min, max, empty, when: {field: [values]}}, the fields in the order of the
+  // hook's arguments (a field whose `when` is unmet, or left empty, is sent as null: the hook's default). A button names
+  // a form: an action ({form, title, values}), a table's `actions` under it, a cell ({form, title, values, label}); its
+  // `values` fill the fields by name, and a form with nothing to fill goes straight to its confirmation, where `{name}` in
+  // the words is that field's value. A refusal naming a field of type accept (the error answer's `accept`) is offered as
+  // a second, explicit confirmation (the field's title, words and yes) that sends the same arguments with that field
+  // true (the Namecheap plugin's accept_ddns_reset); never before it. The page's one <dialog> holds the form, its
+  // confirmation and the answer, outside what is drawn again, so the tables asked again leave it as it is.
+  const EDITABLE = ['text', 'number', 'choice'];
+  let dlg = null;  // the form open: {name, plugin, form, values, step, busy, accepted, accept, answer, words, opener, key}
+
+  function formsOf(m) {  // a plugin's forms by id: those whose hook the platform may ask of it now
+    const can = new Set(m.asks || []), out = {};
+    ((m.status && m.status.forms) || []).forEach((f) => {
+      if (f && typeof f.id === 'string' && typeof f.hook === 'string' && can.has(f.hook) && Array.isArray(f.fields)) out[f.id] = f;
+    });
+    return out;
+  }
+  function formButton(m, b, forms) {  // a button opening one of its forms, with the values it fills in
+    const f = b && typeof b.form === 'string' && (forms || formsOf(m))[b.form];
+    if (!f) return '';
+    return `<button type="button" class="form-open" data-machine="${esc(m.name)}" data-form="${esc(b.form)}" data-values='${esc(JSON.stringify(b.values || {}))}'`
+      + `${b.label ? ` aria-label="${esc(b.label)}"` : ''}${b.note ? ` title="${esc(b.note)}"` : ''}>${esc(b.title || f.title || f.hook)}</button>`;
+  }
+
+  const given = (v) => v !== undefined && v !== null && v !== '';
+  const editableOf = (f) => f.fields.some((x) => x && EDITABLE.includes(x.type));
+  const whenMet = (values, x) => !x.when || typeof x.when !== 'object'
+    || Object.entries(x.when).every(([k, vs]) => (Array.isArray(vs) ? vs : [vs]).map(String).includes(String(values[k] ?? '')));
+  const choiceOf = (x, v) => (Array.isArray(x.choices) ? x.choices.find((c) => c && String(c.value) === String(v)) : null) || null;
+  function shownValue(x, v) {  // a field's value in words: a choice by its title, nothing by the field's `empty`
+    if (!given(v)) return x.empty || '–';
+    const c = choiceOf(x, v);
+    return String(c && c.title !== undefined ? c.title : v);
+  }
+  function filled(text, f, values) {  // `{name}` in a form's words: that field's value as shown (one pass: a value is never read again)
+    const by = {};
+    f.fields.forEach((x) => { if (x && typeof x.name === 'string') by[x.name] = shownValue(x, values[x.name]); });
+    return String(text || '').replace(/\{(\w+)\}/g, (all, k) => (Object.prototype.hasOwnProperty.call(by, k) ? by[k] : all));
+  }
+  function argsOf(f, values, accepted) {  // the hook's arguments, the fields' values in order
+    return f.fields.map((x) => {
+      if (!x) return null;
+      if (x.type === 'accept') return accepted.includes(x.name);  // true only through its own confirmation
+      if (!whenMet(values, x) || !given(values[x.name])) return null;  // not shown, or left empty: the hook's default
+      return x.type === 'number' ? Number(values[x.name]) : values[x.name];
+    });
+  }
+
+  function openForm(name, id, values, opener) {
+    const m = st && st.machines[name], f = m && formsOf(m)[id];
+    if (!f) return;
+    const start = {};
+    f.fields.forEach((x) => {
+      if (!x || typeof x.name !== 'string') return;
+      const v = values && Object.prototype.hasOwnProperty.call(values, x.name) ? values[x.name] : x.value;
+      start[x.name] = v !== undefined ? v : x.type === 'choice' && Array.isArray(x.choices) && x.choices[0] ? x.choices[0].value : null;
+    });
+    dlg = { name, plugin: m.title, form: f, values: start, step: editableOf(f) ? 'fill' : 'confirm', busy: false, accepted: [],
+      accept: null, answer: null, words: '', opener, key: opener ? `${opener.dataset.form}|${opener.dataset.values}` : '' };
+    const el = dialogEl();
+    drawDialog();
+    if (!el.open) el.showModal();
+    focusStep();
+  }
+
+  function dialogEl() {
+    let el = $('formDialog');
+    if (el) return el;
+    el = document.createElement('dialog');
+    el.id = 'formDialog';
+    el.className = 'form-dialog';
+    el.setAttribute('aria-labelledby', 'formDialogTitle');
+    el.addEventListener('cancel', (e) => { if (dlg && dlg.busy) e.preventDefault(); });  // Escape: not while it is asked
+    el.addEventListener('close', closed);
+    el.addEventListener('submit', (e) => { e.preventDefault(); review(); });
+    el.addEventListener('change', (e) => { if (e.target.matches('select, input')) syncFill(); });
+    el.addEventListener('input', (e) => {  // a field changed: its complaint goes
+      if (!e.target.matches('input')) return;
+      e.target.removeAttribute('aria-invalid');
+      const bad = $(`${e.target.id}-bad`);
+      if (bad) bad.textContent = '';
+    });
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-do]');
+      if (!b || b.disabled || !dlg) return;
+      const what = b.dataset.do;
+      if (what === 'close') el.close();
+      else if (what === 'back') { dlg.step = 'fill'; dlg.accepted = []; drawDialog(); focusStep(); }  // a changed change: accepted again
+      else if (what === 'yes') send();
+      else if (what === 'accept') { dlg.accepted.push(dlg.accept); send(); }
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function fieldHtml(x, i, values) {
+    if (!x || !EDITABLE.includes(x.type) || typeof x.name !== 'string') return '';
+    const id = `fd-${i}`, v = values[x.name], c = x.type === 'choice' ? choiceOf(x, v) : null;
+    const attrs = `id="${id}" name="${esc(x.name)}" aria-describedby="${id}-note ${id}-bad"${x.required ? ' aria-required="true"' : ''}`;
+    const hint = x.placeholder ? ` placeholder="${esc(x.placeholder)}"` : '';
+    const control = x.type === 'choice'
+      ? `<select ${attrs}>${(x.choices || []).filter(Boolean).map((o) => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.title !== undefined ? o.title : o.value)}</option>`).join('')}</select>`
+      : x.type === 'number'
+        ? `<input type="number" inputmode="numeric" step="1" ${attrs}${x.min !== undefined ? ` min="${esc(x.min)}"` : ''}${x.max !== undefined ? ` max="${esc(x.max)}"` : ''} value="${given(v) ? esc(v) : ''}"${hint}>`
+        : `<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`;
+    const optional = !x.required && x.type !== 'choice' ? ' <span class="muted">(optional)</span>' : '';
+    return `<div class="field" data-field="${esc(x.name)}"><label for="${id}">${esc(x.label || x.name)}${optional}</label>${control}`
+      + `<span class="sub" id="${id}-note">${esc((c && c.note) || x.note || '')}</span><span class="bad" id="${id}-bad"></span></div>`;
+  }
+  function valuesList(f, values) {  // the change asked: each field shown or fixed, by its label (a choice with its note)
+    const rows = f.fields.filter((x) => x && (x.type === 'fixed' || EDITABLE.includes(x.type)) && whenMet(values, x)).map((x) => {
+      const c = choiceOf(x, values[x.name]);
+      return `<dt>${esc(x.label || x.name)}</dt><dd>${esc(shownValue(x, values[x.name]))}${c && c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</dd>`;
+    });
+    return rows.length ? `<dl class="facts change">${rows.join('')}</dl>` : '';
+  }
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+  function answerHtml(a) {  // a hook's answer in words: its `said` and `lines` (a fault when `ok` is false), else what it holds
+    if (a && typeof a === 'object' && !Array.isArray(a) && (a.said || Array.isArray(a.lines))) {
+      const lines = (Array.isArray(a.lines) ? a.lines : []).filter((l) => typeof l === 'string' && l);
+      return (a.said ? `<p class="said${a.ok === false ? ' fault' : ''}">${esc(cap(String(a.said)))}</p>` : '')
+        + (lines.length ? `<ul class="lines">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : '');
+    }
+    if (typeof a === 'string' && a) return `<p class="said">${esc(a)}</p>`;
+    return (a && typeof a === 'object' && !Array.isArray(a) && facts(a)) || '<p class="said">Done.</p>';
+  }
+
+  function drawDialog() {
+    const el = $('formDialog');
+    if (!el || !dlg) return;
+    const { form: f, values, step } = dlg, c = f.confirm || {};
+    const head = (title) => `<h3 id="formDialogTitle" tabindex="-1">${esc(title)}</h3><div class="muted small">${esc(dlg.plugin)}</div>`;
+    const btn = (what, text, cls = '') => `<button type="button" data-do="${what}"${cls ? ` class="${cls}"` : ''}>${esc(text)}</button>`;
+    const back = editableOf(f) ? btn('back', 'Back') : '';
+    const asking = `<p class="muted small" role="status">${dlg.busy ? `Asked: waiting for ${esc(dlg.plugin)}…` : ''}</p>`;
+    const refusal = `<p>${esc(dlg.plugin)} refused it:</p><blockquote class="words">${esc(dlg.words)}</blockquote>`;
+    let html;
+    if (step === 'fill') {
+      html = `<form novalidate>${head(f.title || f.hook)}${f.note ? `<p class="muted small note">${esc(f.note)}</p>` : ''}`
+        + valuesList({ fields: f.fields.filter((x) => x && x.type === 'fixed') }, values) + f.fields.map((x, i) => fieldHtml(x, i, values)).join('')
+        + `<div class="row end buttons">${btn('close', 'Cancel')}<button type="submit" class="accent">${esc(f.submit || 'Review')}</button></div></form>`;
+    } else if (step === 'confirm') {
+      html = head(c.title || f.title || f.hook) + (c.words ? `<p class="words">${esc(filled(c.words, f, values))}</p>` : '') + valuesList(f, values)
+        + asking + `<div class="row end buttons">${btn('close', 'Cancel')}${back}${btn('yes', c.yes || 'Yes', c.danger ? 'danger' : 'accent')}</div>`;
+    } else if (step === 'accept') {  // the second confirmation: the plugin's refusal, then what accepting it means
+      const x = f.fields.find((y) => y && y.name === dlg.accept) || {};
+      html = head(x.title || 'Go on anyway?') + refusal + (x.words ? `<p class="words">${esc(filled(x.words, f, values))}</p>` : '') + valuesList(f, values)
+        + asking + `<div class="row end buttons">${btn('close', 'Cancel')}${back}${btn('accept', x.yes || 'Go on anyway', 'danger')}</div>`;
+    } else if (step === 'done') {
+      const fault = !!(dlg.answer && typeof dlg.answer === 'object' && dlg.answer.ok === false);
+      html = head(fault ? 'Done, with a fault' : 'Done') + answerHtml(dlg.answer) + `<div class="row end buttons">${btn('close', 'Done', 'accent')}</div>`;
+    } else if (step === 'refused') {
+      html = head('Refused') + refusal + `<div class="row end buttons">${btn('close', 'Close')}${editableOf(f) ? btn('back', 'Change it', 'accent') : ''}</div>`;
+    } else {  // failed: the plugin's words (it may have done part of it: the page is drawn again)
+      html = head('It failed') + `<p>${esc(dlg.plugin)} could not do it:</p><blockquote class="words">${esc(dlg.words)}</blockquote>`
+        + `<div class="row end buttons">${btn('close', 'Close', 'accent')}</div>`;
+    }
+    el.innerHTML = html;
+    if (dlg.busy) el.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    el.setAttribute('aria-busy', String(!!dlg.busy));
+    if (step === 'fill') syncFill();
+  }
+
+  function focusStep() {  // the fill's first field; else the step's heading, so Enter confirms nothing by itself
+    const el = $('formDialog');
+    if (!el || !dlg) return;
+    const target = (dlg.step === 'fill' && el.querySelector('form input, form select')) || $('formDialogTitle');
+    if (target) target.focus({ preventScroll: true });
+  }
+
+  function syncFill() {  // what the form holds kept; a field whose `when` is unmet hidden; a choice's note under it
+    const el = $('formDialog');
+    if (!el || !dlg || dlg.step !== 'fill') return;
+    el.querySelectorAll('form [name]').forEach((c) => { dlg.values[c.name] = c.value; });
+    el.querySelectorAll('.field[data-field]').forEach((div) => {
+      const x = dlg.form.fields.find((y) => y && y.name === div.dataset.field);
+      if (!x) return;
+      div.hidden = !whenMet(dlg.values, x);
+      const note = div.querySelector('.sub');
+      if (x.type === 'choice' && note) note.textContent = ((choiceOf(x, dlg.values[x.name]) || {}).note) || x.note || '';
+    });
+  }
+
+  function review() {  // the fill checked as its fields say (the plugin checks again), then the confirmation
+    if (!dlg || dlg.step !== 'fill') return;
+    syncFill();
+    let first = null;
+    dlg.form.fields.forEach((x, i) => {
+      const c = $(`fd-${i}`), bad = $(`fd-${i}-bad`);
+      if (!x || !c || !EDITABLE.includes(x.type) || !whenMet(dlg.values, x)) return;
+      const v = String(dlg.values[x.name] ?? '').trim();
+      const range = x.min !== undefined && x.max !== undefined ? `a whole number, ${x.min} to ${x.max}` : 'a whole number';
+      let why = '';
+      if (x.type === 'number' && c.validity && c.validity.badInput) why = range;
+      else if (!v) why = x.required ? `${x.label || x.name} is needed` : '';
+      else if (x.type === 'number') {
+        const n = Number(v);
+        if (!Number.isInteger(n) || (x.min !== undefined && n < x.min) || (x.max !== undefined && n > x.max)) why = range;
+      } else if (x.type === 'choice' && !choiceOf(x, v)) why = 'one of its choices';
+      dlg.values[x.name] = v;
+      if (why) c.setAttribute('aria-invalid', 'true'); else c.removeAttribute('aria-invalid');
+      if (bad) bad.textContent = why;
+      if (why && !first) first = c;
+    });
+    if (first) { first.focus(); return; }
+    dlg.step = 'confirm';
+    drawDialog();
+    focusStep();
+  }
+
+  async function send() {  // the hook asked with the fields' values; its answer, refusal or failure said in words
+    const d = dlg;
+    if (!d || d.busy) return;
+    d.busy = true;
+    drawDialog();
+    focusStep();
+    let out = null, err = null;
+    try { out = await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) }); }
+    catch (e) { err = e; }
+    d.busy = false;
+    if (dlg !== d) return;
+    if (!err) {
+      d.step = 'done';
+      d.answer = out && out.answer;
+    } else {
+      const a = err.answer || {}, refused = err.status >= 400 && err.status < 500;
+      d.words = a.words || err.message;
+      if (refused && typeof a.accept === 'string' && !d.accepted.includes(a.accept)
+          && d.form.fields.some((x) => x && x.type === 'accept' && x.name === a.accept)) {
+        d.step = 'accept';
+        d.accept = a.accept;
+      } else d.step = refused ? 'refused' : 'failed';
+    }
+    drawDialog();
+    focusStep();
+    if (d.step === 'done' || d.step === 'failed') render();  // what the plugin holds now: its tables drawn again
+  }
+
+  function closed() {  // the focus back on the button that opened it, or the same one drawn again
+    const d = dlg;
+    dlg = null;
+    const el = $('formDialog');
+    if (el) el.innerHTML = '';
+    if (!d) return;
+    const back = (d.opener && d.opener.isConnected && d.opener)
+      || [...data.querySelectorAll('button.form-open')].find((b) => `${b.dataset.form}|${b.dataset.values}` === d.key);
+    if (back) back.focus({ preventScroll: true });
   }
 
   const chartsOf = (m) => (span === 'day' && day[m.name]) || (m.status && m.status.charts);
@@ -235,7 +504,7 @@
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
         + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
-    return head + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
+    return head + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>`
       + (logged || jobs[m.name] ? setupLog(m) : '');
   }
 
@@ -266,7 +535,7 @@
   // -- the right: the selected one's specifics ----------------------------------------------------------
   function facts(s) {
     // a status's own facts: neither its lists, its charts, its choices nor its summary
-    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'actions', 'summary', 'present', 'problem', 'valid', 'why']);
+    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'actions', 'forms', 'summary', 'present', 'problem', 'valid', 'why']);
     const flat = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v !== '' && v !== null && typeof v !== 'object');
     const nested = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length);
     const show = (v) => (v === true ? 'yes' : v === false ? 'no' : typeof v === 'object' ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(', ') : v);
@@ -372,15 +641,27 @@
     } catch (e) { if (g === gen) say(name, e.message); }
     schedule();
   }
+  // a button focused in what is drawn again (a row's Remove, a service's Start) is focused again after: the same one
+  const keyOf = (b) => [b.className, b.dataset.machine, b.dataset.form || b.dataset.hook || '', b.dataset.values || b.dataset.args || ''].join('|');
+  function keepFocus(draw) {
+    const a = document.activeElement;
+    const key = a && data.contains(a) && a.matches && a.matches('button[data-machine]') ? keyOf(a) : null;
+    draw();
+    if (!key || data.contains(a)) return;
+    const again = [...data.querySelectorAll('button[data-machine]')].find((b) => keyOf(b) === key);
+    if (again) again.focus({ preventScroll: true });
+  }
   function redrawShown(m) {
     const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`);
-    if (!off(m) && !m.status.charts && t) {
-      t.innerHTML = tables(m) + statTables(m.status.tables);  // its tables alone: a terminal or a job's panel beside them stays as it is
-    } else if (off(m) || !box || !Charts.update(box, chartsOf(m), { id: m.name })) { drawData(); }  // other charts: drawn anew
-    else {
-      box.classList.remove('loading');
-      if (t) t.innerHTML = tables(m) + statTables(m.status.tables);
-    }
+    keepFocus(() => {
+      if (!off(m) && !m.status.charts && t) {
+        t.innerHTML = tables(m) + statTables(m);  // its tables alone: a terminal or a job's panel beside them stays as it is
+      } else if (off(m) || !box || !Charts.update(box, chartsOf(m), { id: m.name })) { drawData(); }  // other charts: drawn anew
+      else {
+        box.classList.remove('loading');
+        if (t) t.innerHTML = tables(m) + statTables(m);
+      }
+    });
     drawSide();
     const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
     if (sub) sub.textContent = stateLine(m);
@@ -630,6 +911,13 @@
     if (sc) { closeShell(sc.dataset.machine); return; }
     const go = e.target.closest('button.setup, button.step');
     if (go) { setup(go.dataset.machine, go.dataset.step ? [go.dataset.step] : null); return; }
+    const fo = e.target.closest('button.form-open[data-form]');
+    if (fo) {  // one of a plugin's forms, filled with the button's values: asked only once confirmed
+      let values = {};
+      try { values = JSON.parse(fo.dataset.values || '{}') || {}; } catch (err) { values = {}; }
+      openForm(fo.dataset.machine, fo.dataset.form, values, fo);
+      return;
+    }
     const a = e.target.closest('button.ask');
     if (a && !a.disabled) {  // busy while it is asked (an action may take seconds); the page is drawn again once answered
       a.disabled = true;

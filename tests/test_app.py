@@ -147,6 +147,92 @@ def test_a_plugins_actions_are_its_hooks_asked_by_name_from_buttons():
         app.stop()
 
 
+class Risky(ValueError):
+    """A plugin's refusal that names the argument accepting it (as the Namecheap plugin's zone.Refusal does)."""
+
+    def __init__(self, message, accept=None):
+        super().__init__(message)
+        self.accept = accept
+
+
+def test_a_plugins_forms_ask_its_hook_with_what_is_filled_in_and_say_the_answer_or_the_refusal():
+    """status.forms (0.6.0): a form the page draws for one of a plugin's hooks, its fields in the order of the hook's
+    arguments, asked through the ask route once the user has confirmed; the answer said in words (`said`, `lines`, `ok`);
+    a refusal or a failure in the plugin's own words, and a refusal naming the argument that accepts it (`accept`) offered
+    as a second confirmation, which sends the same arguments with that one true (the Namecheap plugin's records)."""
+    from liminal_libs.machines import MachinePlugin as Machine
+
+    form = {"id": "note", "hook": "note", "title": "Add a note",
+            "fields": [{"name": "topic", "label": "Topic", "type": "fixed", "value": "home"},
+                       {"name": "text", "label": "Text", "type": "text", "required": True},
+                       {"name": "times", "label": "Times", "type": "number", "min": 1, "max": 3},
+                       {"name": "accept_risk", "type": "accept", "title": "Note it anyway?", "words": "it may be risky",
+                        "yes": "Note it anyway"}],
+            "confirm": {"title": "Add this note?", "words": "{text} is noted under {topic}", "yes": "Add it"}}
+
+    class Noted(Machine):
+        name, title, about, api, order = "noted", "Noted", "a stand-in with a form", "2.1", 903
+        HOOKS = (*Machine.HOOKS, "note")
+
+        def __init__(self):
+            self.notes: list = []
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "summary": f"{len(self.notes)} notes",
+                    "forms": [form, {"id": "gone", "hook": "missing", "title": "Not offered", "fields": []}],
+                    "tables": [{"title": "Notes", "columns": [{"title": "Note"}, {"title": ""}],
+                                "rows": [[n, {"form": "note", "title": "Again", "values": {"text": n}, "label": f"Note {n} again"}]
+                                         for n in self.notes], "actions": [{"form": "note", "title": "Add a note…"}]}]}
+
+        def note(self, topic, text, times=None, accept_risk=False):
+            if text == "risky" and not accept_risk:
+                raise Risky("a risky note: nothing noted unless the risk is accepted", accept="accept_risk")
+            if text == "odd":
+                raise Risky("an odd note", accept="not a name")
+            if text == "boom":
+                raise RuntimeError("the notebook is on fire")
+            self.notes.extend([text] * (times or 1))
+            return {"said": f"noted {text} under {topic}", "lines": [f"{len(self.notes)} notes now"], "ok": True}
+
+    p, lines = Noted(), []
+    app = PlatformApp(log=lines.append, machines={"noted": p}, assistants={})
+    port = _port(app.start(0))
+    try:
+        m = _call(port, "GET", "/api/machines/noted")[1]
+        assert m["status"]["forms"][0] == form and "note" in m["asks"] and "missing" not in m["asks"]  # the page leaves "gone" out
+        ask = lambda *args: _call(port, "POST", "/api/machines/noted/ask", {"hook": "note", "args": list(args)})  # noqa: E731
+        # the fields' values in order, as the page sends them: a field left empty is null (the hook's default), accept false
+        status, out = ask("home", "milk", None, False)
+        assert status == 200 and out == {"answer": {"said": "noted milk under home", "lines": ["1 notes now"], "ok": True}}
+        assert ask("home", "eggs", 2, False)[0] == 200 and p.notes == ["milk", "eggs", "eggs"]
+        assert any("noted asked note home milk None False" in x for x in lines)
+        # refused, naming the argument that accepts it: nothing done; accepted, done
+        status, out = ask("home", "risky", None, False)
+        assert status == 400 and out == {"error": "Risky: a risky note: nothing noted unless the risk is accepted",
+                                          "words": "a risky note: nothing noted unless the risk is accepted", "accept": "accept_risk"}
+        assert "risky" not in p.notes and ask("home", "risky", None, True)[0] == 200 and p.notes[-1] == "risky"
+        status, out = ask("home", "odd", None, False)
+        assert status == 400 and out["words"] == "an odd note" and "accept" not in out  # not a name: nothing to accept
+        status, out = ask("home", "milk", None, False, "one too many")
+        assert status == 400 and out["error"].startswith("TypeError: ") and out["words"] and "accept" not in out
+        status, out = ask("home", "boom", None, False)  # a failure: its words, never an acceptance
+        assert status == 502 and out == {"error": "RuntimeError: the notebook is on fire", "words": "the notebook is on fire"}
+        assert _call(port, "POST", "/api/machines/noted/ask", {"hook": "missing", "args": []})[0] == 400
+        rows = _call(port, "GET", "/api/machines/noted")[1]["status"]["tables"][0]["rows"]
+        assert rows[0][1] == {"form": "note", "title": "Again", "values": {"text": "milk"}, "label": "Note milk again"}
+        page = _call(port, "GET", "/platform.js")[1]
+        for part in (b"function formsOf", b"m.status.forms", b"showModal()", b"function argsOf", b"btn('accept'",
+                     b"t.actions", b"button.form-open[data-form]", b"a.accept", b"statTables(m)",
+                     b"dlg.accepted = []"):  # a change changed after an acceptance is asked to be accepted again
+            assert part in page, part
+        assert b".form-dialog" in _call(port, "GET", "/platform.css")[1]
+    finally:
+        app.stop()
+
+
 def test_a_plugin_not_present_stays_out_of_the_tray(served):
     app, port, lines, box = served
     box.present = lambda: False
