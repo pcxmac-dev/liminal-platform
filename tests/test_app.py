@@ -355,7 +355,7 @@ def test_a_plugin_disabled_and_enabled_again(served):
     assert _call(port, "POST", "/api/machines/box/enabled", {"on": "no"})[0] == 400
     assert _call(port, "POST", "/api/machines/nothing/enabled", {"on": True})[0] == 404
     # kept in the platform's own folder: a restarted platform leaves it detached
-    assert json.loads((app.state_dir / "plugins.json").read_text(encoding="utf-8")) == {"disabled": ["box"]}
+    assert json.loads((app.state_dir / "plugins.json").read_text(encoding="utf-8")) == {"disabled": ["box"], "hidden": []}
     again = PlatformApp(log=lambda m: None, machines={"box": box})
     assert again.disabled() == {"box"} and again.attach_plugins([box]) == [] and box.app is None
     asked_tray: list = []
@@ -434,9 +434,15 @@ def test_the_ai_assistants_are_valid_with_a_key_and_enabled_or_disabled():
         (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
         assert (a["enabled"], a["valid"], a["state"], a["vendor"], a["icon"]) == (True, False, "invalid", "Bots", "copilot")
         assert a["why"] == "no key: BOT_API_KEY is not set (its Settings, on its page, set it)" and bot.app is None
+        assert [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]] == ["platform"]  # not valid: not in the dock
         bot.key = True
         (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
-        assert a["state"] == "active" and a["why"] == "" and bot.app is app
+        assert a["state"] == "active" and a["why"] == "" and bot.app is app and a["hidden"] is False
+        items = _call(port, "GET", "/api/tray")[1]["items"]  # an active assistant has its icon in the dock (0.10.2)
+        assert [(i["id"], i["icon"]) for i in items] == [("platform", "chip"), ("bot", "copilot")]
+        status, out = _call(port, "POST", "/api/plugins/bot/hidden", {"on": True})
+        assert status == 200 and [i["id"] for i in out["tray"]["items"]] == ["platform"] and bot.app is app
+        assert _call(port, "POST", "/api/plugins/bot/hidden", {"on": False})[1]["hidden"] is False
         bot.access = False
         assert app.assistant_status(bot)["why"] == "the free plan has no API access" and bot.app is None
         bot.access = True
@@ -729,3 +735,31 @@ def test_the_page_draws_the_connections(served):
     assert b"'read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'" in page
     css = _call(port, "GET", "/platform.css")[1]
     assert b".k-network { --k: var(--series-6); }" in css and b"prefers-reduced-motion" in css
+
+
+def test_a_plugin_hidden_from_the_dock_stays_as_it_was_and_comes_back(served):
+    """The user: "all plugins need a hide switch next to enable for the dock on the right". Hidden, a plugin's icon
+    leaves the tray while it stays enabled, attached and asked; kept across restarts beside the disabled ones, a disable
+    keeping the hidden and a hide the disabled; shown again, back in its place."""
+    app, port, lines, box = served
+    assert app.attach_plugins([box]) == ["box"]
+
+    def tray():
+        return [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]]
+
+    assert tray() == ["platform", "box", "wall"]
+    status, out = _call(port, "POST", "/api/plugins/box/hidden", {"on": True})
+    assert status == 200 and out["hidden"] is True and [i["id"] for i in out["tray"]["items"]] == ["platform", "wall"]
+    assert tray() == ["platform", "wall"] and box.app is app and app.enabled("box")  # still enabled and attached
+    m = _call(port, "GET", "/api/machines/box")[1]
+    assert m["hidden"] is True and m["state"] == "active" and m["asks"]  # asked as before
+    assert _call(port, "POST", "/api/machines/wall/enabled", {"on": False})[0] == 200
+    assert json.loads((app.state_dir / "plugins.json").read_text(encoding="utf-8")) == {"disabled": ["wall"], "hidden": ["box"]}
+    again = PlatformApp(log=lambda m: None, machines={"box": box})
+    assert again.hidden() == {"box"} and again.disabled() == {"wall"}
+    assert _call(port, "POST", "/api/plugins/box/hidden", {"on": False})[1]["hidden"] is False and tray() == ["platform", "box"]
+    assert _call(port, "POST", "/api/plugins/box/hidden", {"on": "yes"})[0] == 400
+    assert _call(port, "POST", "/api/plugins/nobody/hidden", {"on": True})[0] == 404
+    assert any("box hidden from the dock" in x for x in lines) and any("box shown in the dock" in x for x in lines)
+    page = _call(port, "GET", "/platform.js")[1]
+    assert b"data-hide=" in page and b"function setHidden" in page and b"'Hide from the dock'" in page

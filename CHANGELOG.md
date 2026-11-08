@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.2 (2026-11-08)
+
+A hide switch beside enable (the user: "all plugins need a hide switch next to enable for the dock on the right"): on
+every plugin's page, machine plugin or AI assistant, a second switch hides its icon from the dock on the right while the
+plugin stays as it was (enabled or not, attached, asked); off, the icon is back in its place once the plugin is active.
+The tray's right click offers Hide from the dock beside Disable. Kept in the platform's plugins.json beside the disabled
+ones (`hidden`); `POST /api/plugins/<name>/hidden {on}` answers with the tray as it is now; each status says `hidden`.
+The dock now holds the active AI assistants too, after the machine plugins, each by its maker's mark.
+
 ## 0.10.1 (2026-11-08)
 
 Each plugin by its maker's mark (the user: "for the AI icons, lets use the respective mascot/icon from the business,

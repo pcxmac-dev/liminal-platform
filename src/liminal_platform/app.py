@@ -184,6 +184,7 @@ class PlatformApp(App):
         self._settling = threading.Lock()
         self._state = Path(state) if state is not None else None  # the platform's folder; platform_dir() unless given
         self._disabled: set[str] | None = None  # read from the folder's plugins.json when first wanted
+        self._hidden: set[str] | None = None  # the plugins hidden from the dock, read with them
         self._attaching = False  # set once attach_plugins ran: an enabled plugin is attached again
         self._setups: dict[str, Setup] = {}
         self._lock = threading.Lock()
@@ -235,19 +236,53 @@ class PlatformApp(App):
     def state_dir(self) -> Path:
         return self._state if self._state is not None else platform_dir()
 
+    def _saved(self) -> None:
+        """The folder's plugins.json, read once (the lock held): the plugins disabled, and those hidden from the dock."""
+        if self._disabled is None:
+            try:
+                saved = json.loads((self.state_dir / PLUGINS_FILE).read_text(encoding="utf-8"))
+                self._disabled = {n for n in saved.get("disabled", []) if isinstance(n, str)}
+                self._hidden = {n for n in saved.get("hidden", []) if isinstance(n, str)}
+            except (OSError, ValueError, AttributeError):
+                self._disabled, self._hidden = set(), set()
+
     def disabled(self) -> set[str]:
         """The plugins disabled here, by name (the folder's plugins.json, kept across restarts)."""
         with self._lock:
-            if self._disabled is None:
-                try:
-                    saved = json.loads((self.state_dir / PLUGINS_FILE).read_text(encoding="utf-8"))
-                    self._disabled = {n for n in saved.get("disabled", []) if isinstance(n, str)}
-                except (OSError, ValueError, AttributeError):
-                    self._disabled = set()
+            self._saved()
             return set(self._disabled)
+
+    def hidden(self) -> set[str]:
+        """The plugins hidden from the dock here, by name (kept beside the disabled ones): enabled or not, their icon is
+        never in the tray."""
+        with self._lock:
+            self._saved()
+            return set(self._hidden or ())
+
+    def _keep(self, disabled: set[str], hidden: set[str]) -> None:
+        """plugins.json written whole (a part file renamed): the plugins disabled, and those hidden from the dock."""
+        folder = self.state_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        part = folder / (PLUGINS_FILE + ".part")
+        part.write_text(json.dumps({"disabled": sorted(disabled), "hidden": sorted(hidden)}, indent=1), encoding="utf-8")
+        os.replace(part, folder / PLUGINS_FILE)
+        with self._lock:
+            self._disabled, self._hidden = set(disabled), set(hidden)
 
     def enabled(self, name: str) -> bool:
         return name not in self.disabled()
+
+    def set_hidden(self, name: str, on: bool) -> dict:
+        """A plugin hidden from the dock on the right, or shown there again (the user, 2026-11-08: "all plugins need a
+        hide switch next to enable for the dock on the right"). Hidden, its icon leaves the tray while it stays as it
+        was: enabled or not, attached, asked; its row in the list, its page and Connections keep it. Kept across
+        restarts. The answer: hidden or not, and the tray as it is now."""
+        self.platform_plugin(name)
+        names = self.hidden()
+        (names.add if on else names.discard)(name)
+        self._keep(self.disabled(), names)
+        self.log(f"platform: {name} {'hidden from' if on else 'shown in'} the dock")
+        return {"name": name, "hidden": on, "tray": self.tray().as_dict()}
 
     def set_enabled(self, name: str, on: bool) -> dict:
         """A machine plugin enabled or disabled (the tray's right click, the switch on its page). Disabled, the
@@ -259,13 +294,8 @@ class PlatformApp(App):
             names.discard(name)
         else:
             names.add(name)
-        folder = self.state_dir
-        folder.mkdir(parents=True, exist_ok=True)
-        part = folder / (PLUGINS_FILE + ".part")
-        part.write_text(json.dumps({"disabled": sorted(names)}, indent=1), encoding="utf-8")
-        os.replace(part, folder / PLUGINS_FILE)
+        self._keep(names, self.hidden())
         with self._lock:
-            self._disabled = names
             if self._active is not None:  # the tray follows without asking every plugin again
                 self._active = (self._active[0], [n for n in self._active[1] if n != name])
         if not on and self.plugin(name) is not None:
@@ -332,10 +362,21 @@ class PlatformApp(App):
         return names
 
     def items(self) -> tuple[TrayItem, ...]:
-        """An icon per active machine plugin, after the platform's own (the frame's tray puts the chip first)."""
-        machines = self.machines()
-        return tuple(TrayItem(name, getattr(machines[name], "ICON", "") or "chip", machines[name].title, "plugin", self.NAME)
-                     for name in self.active() if name in machines)
+        """An icon per active plugin, the machine plugins then the AI assistants, after the platform's own (the frame's
+        tray puts the chip first); none the user hid from the dock."""
+        machines, hidden = self.machines(), self.hidden()
+        out = [TrayItem(name, getattr(machines[name], "ICON", "") or "chip", machines[name].title, "plugin", self.NAME)
+               for name in self.active() if name in machines and name not in hidden]
+        off = self.disabled()
+        for name, p in self.assistant_plugins().items():
+            if name in hidden or name in off:
+                continue
+            state = self._states.get(name)
+            if state is None:  # not asked yet: whether its key and its plan serve
+                state = "active" if self.assistant_validity(p)[0] else "invalid"
+            if state == "active":
+                out.append(TrayItem(name, getattr(p, "ICON", "") or "analysis", p.title, "plugin", self.NAME))
+        return tuple(out)
 
     def assistant_plugins(self) -> dict:
         """The AI assistants, by name: given, else every one the registry loaded (attached or not)."""
@@ -391,7 +432,7 @@ class PlatformApp(App):
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
                 "icon": getattr(p, "ICON", "") or "analysis",  # its maker's mark (0.10.1), else the chart
                 "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
-                "settings": self.settings_of(p)}
+                "hidden": p.name in self.hidden(), "settings": self.settings_of(p)}
 
     # -- a plugin's settings, entered on its page (the user, 2026-11-08: "i need a way to put my credentials in to the
     # namecheap plugin and allow it to function"): its keys (KeyVar), kept through the platform's login (Login.save:
@@ -524,7 +565,7 @@ class PlatformApp(App):
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
                 "icon": getattr(m, "ICON", "") or "chip", "enabled": on, "valid": valid, "why": why, "state": state,
-                "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
+                "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
                 "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m)}
 
@@ -678,6 +719,11 @@ class PlatformApp(App):
             if not isinstance(on, bool):
                 raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
             return 200, self.set_enabled(path[len("/api/plugins/"):-len("/enabled")], on)
+        if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/hidden"):
+            on = body.get("on")
+            if not isinstance(on, bool):
+                raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
+            return 200, self.set_hidden(path[len("/api/plugins/"):-len("/hidden")], on)
         if path.startswith("/api/machines/"):
             rest = path[len("/api/machines/"):]
             name, _, action = rest.partition("/")

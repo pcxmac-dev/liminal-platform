@@ -172,3 +172,5 @@ table.conn-rows tr.new td { animation: conn-new 1.6s ease-out; }
   .conn-picture .edge.busy { animation: none; stroke-dasharray: none; }
   table.conn-rows tr.new td { animation: none; }
 }
+/* 0.10.2: a plugin's two switches at the head of its page: enabled, and hidden from the dock on the right */
+.data-head .switches { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 18px; }

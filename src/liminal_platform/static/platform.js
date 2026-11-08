@@ -70,11 +70,23 @@
   }
 
   // -- the tray: the chip, a divider, an icon per active plugin, in the one dark box ------------------------
-  function drawRail() {
+  function drawRail() {  // the active plugins, none hidden from the dock (0.10.2: the machine plugins, then the AI assistants)
     const sel = selected();
-    const items = ((tray && tray.items) || []).filter((i) => i.kind === 'plugin' && !(st && st.machines[i.id] && off(st.machines[i.id])));
+    const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden)); });
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
-      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: disable)">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
+      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
+  }
+
+  // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants
+  function trayFollows(name, present) {
+    if (!tray || !st) return;
+    const p = pluginOf(name);
+    const order = [...Object.keys(st.machines), ...(st.assistants || []).map((a) => a.name)];
+    const own = tray.items.filter((i) => i.kind !== 'plugin');
+    const plugins = tray.items.filter((i) => i.kind === 'plugin' && i.id !== name);
+    if (present && p && !p.hidden) plugins.push({ id: name, icon: p.icon || 'chip', title: p.title, kind: 'plugin', app: tray.app });
+    plugins.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    tray = { ...tray, items: [...own, ...plugins] };
   }
 
   // -- the list: this machine, its machine plugins, the AI assistants -----------------------------------
@@ -525,7 +537,11 @@
 
   function switchRow(m) {
     const on = !off(m), held = invalid(m);  // not valid: off until it is, whatever the switch says
-    return `<label class="switch-row"${held ? ` title="${esc(notHere(m) ? `Not for this machine: ${whyOf(m)}` : `Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? (notHere(m) ? 'Disabled: not for this machine' : 'Disabled: not valid') : 'Disabled'}</label>`;
+    const enable = `<label class="switch-row"${held ? ` title="${esc(notHere(m) ? `Not for this machine: ${whyOf(m)}` : `Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? (notHere(m) ? 'Disabled: not for this machine' : 'Disabled: not valid') : 'Disabled'}</label>`;
+    // 0.10.2 (the user: "all plugins need a hide switch next to enable for the dock on the right"): on, its icon stays
+    // out of the dock while the plugin is as it was; a plugin not active is never in the dock, the switch keeps it out after
+    const hide = `<label class="switch-row" title="Its icon in the dock on the right: hidden, the plugin is still enabled and asked as before"><button type="button" class="switch" role="switch" aria-checked="${!!m.hidden}" aria-label="Hide ${esc(m.title)} from the dock" data-hide="${esc(m.name)}"></button>${m.hidden ? 'Hidden from the dock' : on ? 'In the dock' : 'In the dock once active'}</label>`;
+    return `<span class="switches">${enable}${hide}</span>`;
   }
 
   // a job's terminal panel: what an install or an update prints, as it comes (the user: "after the install is run a
@@ -1053,9 +1069,11 @@
   // a plugin's state in what the page holds (this machine's table, the list, its page and switch, the tray): `answer`
   // is the platform's word on it; without one, the state expected until the platform answers
   function mark(name, on, answer) {
-    if (!st.machines[name]) {  // an AI assistant: its row in the list
+    if (!st.machines[name]) {  // an AI assistant: its row in the list, its icon in the dock (0.10.2)
       st.assistants = (st.assistants || []).map((a) => (a.name !== name ? a : answer
         || { ...a, enabled: on, valid: on ? a.valid : null, why: on ? a.why : '', state: on ? (a.valid === false ? 'invalid' : 'active') : 'disabled' }));
+      const a = pluginOf(name);
+      trayFollows(name, !!a && !off(a));
       return;
     }
     const m = st.machines[name];
@@ -1065,13 +1083,35 @@
     const present = !off(st.machines[name]);
     st.disabled = order.filter((n) => (n === name ? !on : (st.disabled || []).includes(n)));
     st.active = order.filter((n) => (n === name ? present : (st.active || []).includes(n)));
-    if (tray) {
-      const own = tray.items.filter((i) => i.kind !== 'plugin');
-      const plugins = tray.items.filter((i) => i.kind === 'plugin' && i.id !== name);
-      if (present) plugins.push({ id: name, icon: st.machines[name].icon || 'chip', title: st.machines[name].title, kind: 'plugin', app: tray.app });
-      plugins.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-      tray = { ...tray, items: [...own, ...plugins] };
+    trayFollows(name, present);
+  }
+
+  // a plugin hidden from the dock or shown there again: at once on the page, then the platform's tray (0.10.2)
+  async function setHidden(name, on, refocus) {
+    const p = st && pluginOf(name);
+    if (!p) return;
+    const was = !!p.hidden;
+    const focusHide = () => { const b = data.querySelector(`button.switch[data-hide="${CSS.escape(name)}"]`); if (b) b.focus({ preventScroll: true }); };
+    p.hidden = on;
+    trayFollows(name, !off(p));
+    gen++;
+    draw();
+    if (refocus) focusHide();
+    try {
+      const answer = await api('POST', `api/plugins/${encodeURIComponent(name)}/hidden`, { on });
+      if (answer && answer.tray) tray = answer.tray;
+    } catch (e) {  // put back as it was
+      p.hidden = was;
+      trayFollows(name, !off(p));
+      gen++;
+      draw();
+      say(name, e.message);
+      return;
     }
+    gen++;
+    const focused = refocus || (document.activeElement && document.activeElement.matches && document.activeElement.matches('button.switch[data-hide]'));
+    draw();
+    if (focused) focusHide();
   }
 
   function focusSwitch(name) {
@@ -1255,6 +1295,8 @@
     if (e.target.closest('#conn-svg')) { if (focusNode) { focusNode = null; updateConnections(false); } return; }
     const sw = e.target.closest('button.switch[data-toggle]');
     if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
+    const hs = e.target.closest('button.switch[data-hide]');  // hidden from the dock, or shown there again
+    if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') !== 'true', document.activeElement === hs || e.detail === 0); return; }
     const pick = e.target.closest('[data-select]');
     if (pick) { location.hash = pick.dataset.select === 'machine' ? '' : pick.dataset.select; return; }
     const sp = e.target.closest('button[data-span]');
@@ -1292,16 +1334,17 @@
     }
   });
 
-  // a right click on a plugin's icon in the tray: disable it (the platform's own icon keeps the browser's menu)
+  // a right click on a plugin's icon in the tray: hide it from the dock, or disable it (the platform's own icon keeps the
+  // browser's menu); an AI assistant's too (0.10.2)
   rail.addEventListener('contextmenu', (e) => {
     const b = e.target.closest('button[data-select]');
-    const m = b && st && st.machines[b.dataset.select];
-    if (!m || b.dataset.select === 'machine' || !window.LiminalMenu) return;
+    const m = b && st && b.dataset.select !== 'machine' ? pluginOf(b.dataset.select) : null;
+    if (!m || !window.LiminalMenu) return;
     e.preventDefault();
     const r = b.getBoundingClientRect();
     const keyboard = e.clientX === 0 && e.clientY === 0;  // the menu key, or Shift+F10: beside the icon
     window.LiminalMenu.open({ x: keyboard ? r.left - 170 : e.clientX, y: keyboard ? r.top : e.clientY, title: m.title,
-      items: [{ label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
+      items: [{ label: 'Hide from the dock', run: () => setHidden(m.name, true, false) }, { label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
   });
 
   // typing into a login terminal, through its hidden text box (as web terminals do): the keys a terminal sends for
