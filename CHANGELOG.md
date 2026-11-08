@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3 (2026-11-08)
+
+A shown plugin's tables are asked again every 30 s while it is on the page (the user: "Yes, do it" to the page
+refreshing a WSL distribution's services table on its own): a WSL plugin's services (also while its distribution is
+stopped, so the table shows once it runs), an admin's services and startups, a firewall's rules. Only the tables are
+drawn again: a terminal or a job's panel beside them is left as it is. The day's figures are asked of a charted plugin
+only. Nothing is asked while the page is hidden.
+
 ## 0.4.2 (2026-11-08)
 
 A plugin not for this machine at all (its status says `applies` False: Linux administration on Windows or in WSL; the

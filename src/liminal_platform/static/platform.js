@@ -327,16 +327,23 @@
     Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running && !(jobs[m.name] && jobs[m.name].running)) follow(m.name, m.setup.action, m.setup.steps); });
   }
 
-  // -- the shown plugin's figures, asked again at its interval (the day's every 30 s), drawn in place ------------
+  // -- the shown plugin asked again while it is on the page, drawn in place: its figures at their interval (the day's
+  // every 30 s), its tables every TABLES_EVERY s (a WSL distribution's services, also while it is stopped, so they show once
+  // it runs; an admin's services and startups; a firewall's rules) -------------------------------------------------------
+  const TABLES_EVERY = 30;
+  const tabled = (m) => {
+    const s = m.status || {};
+    return (s.tables || []).length > 0 || ['rules', 'services', 'startups', 'processes'].some((k) => s[k] && typeof s[k] === 'object');
+  };
   function shown() {
     const m = st && st.machines[selected()];
-    return m && !off(m) && m.status && m.status.charts ? m : null;
+    return m && !off(m) && m.status && (m.status.charts || tabled(m)) ? m : null;
   }
   function schedule() {
     clearTimeout(live);
     const m = shown();
     if (!m || document.hidden) return;
-    const every = span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
+    const every = !m.status.charts ? TABLES_EVERY : span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
     live = setTimeout(() => refresh(m.name), every * 1000);
   }
   async function refresh(name) {
@@ -344,8 +351,9 @@
     if (selected() !== name) return;
     const g = gen;
     try {
+      const was = st.machines[name], charted = !!(was && was.status && was.status.charts);  // the day's figures: a charted plugin's
       const [m, d] = await Promise.all([api('GET', `api/machines/${encodeURIComponent(name)}`),
-        span === 'day' ? api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: 'charts', args: ['day'] }) : null]);
+        span === 'day' && charted ? api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: 'charts', args: ['day'] }) : null]);
       if (g === gen) {  // nothing changed meanwhile (a plugin disabled or enabled, the page asked again)
         if (d) day[name] = d.answer;
         st.machines[name] = m;
@@ -355,11 +363,12 @@
     schedule();
   }
   function redrawShown(m) {
-    const box = $(`charts-${m.name}`);
-    if (off(m) || !box || !Charts.update(box, chartsOf(m), { id: m.name })) { drawData(); }  // other charts: drawn anew
+    const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`);
+    if (!off(m) && !m.status.charts && t) {
+      t.innerHTML = tables(m) + statTables(m.status.tables);  // its tables alone: a terminal or a job's panel beside them stays as it is
+    } else if (off(m) || !box || !Charts.update(box, chartsOf(m), { id: m.name })) { drawData(); }  // other charts: drawn anew
     else {
       box.classList.remove('loading');
-      const t = $(`tables-${m.name}`);
       if (t) t.innerHTML = tables(m) + statTables(m.status.tables);
     }
     drawSide();
