@@ -55,7 +55,7 @@ class Wall(Firewall):
     order = 901
 
     def __init__(self):
-        self.rules = {}
+        self.rules = {"base": Rule("base", ports=(9000,), detail="a rule of Liminal's: the wall is valid")}
 
     def present(self):
         return True
@@ -109,7 +109,7 @@ def _port(url: str) -> int:
 def served():
     lines: list[str] = []
     box = Box()
-    app = PlatformApp(log=lines.append, machines={"box": box, "wall": Wall()})
+    app = PlatformApp(log=lines.append, machines={"box": box, "wall": Wall()}, assistants={})  # none of this PC's
     url = app.start(0)
     yield app, _port(url), lines, box
     app.stop()

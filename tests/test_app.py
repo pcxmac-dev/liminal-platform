@@ -8,6 +8,9 @@ from http.client import HTTPConnection
 
 from liminal_libs.web import WRITE_HEADER
 
+from liminal_libs.sources.plugin import PlatformPlugin
+
+from conftest import _port
 from liminal_platform.app import PlatformApp, facts, memory_mb
 
 
@@ -88,12 +91,12 @@ def test_a_machine_is_set_up_from_the_page_and_runs_a_command(served):
 def test_a_plugins_steps_summary_and_asks_by_name(served):
     app, port, lines, box = served
     status, wall = _call(port, "GET", "/api/machines/wall")
-    assert status == 200 and wall["steps"] == ["enable", "exposure", "rules"] and wall["status"]["summary"] == "the wall: on (all on); 0 Liminal rule(s)"
+    assert status == 200 and wall["steps"] == ["enable", "exposure", "rules"] and wall["status"]["summary"] == "the wall: on (all on); 1 Liminal rule(s)"
     assert {"allow", "remove", "wanted", "status", "present"} <= set(wall["asks"]) and "setup" not in wall["asks"] and "run" not in wall["asks"]
     assert wall["enabled"] is True
     status, out = _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": ["web", [8443]]})
     assert status == 200 and out["answer"]["label"] == "Liminal: web" and out["answer"]["ports"] == [8443]
-    assert _call(port, "GET", "/api/machines/wall")[1]["status"]["rules"][0]["name"] == "web"
+    assert "web" in [r["name"] for r in _call(port, "GET", "/api/machines/wall")[1]["status"]["rules"]]
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "remove", "args": ["web"]})[1] == {"answer": True}
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "setup", "args": []})[0] == 400  # its own route
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": ["Bad Name", [1]]})[0] == 400
@@ -151,3 +154,81 @@ def test_a_plugin_disabled_and_enabled_again(served):
     assert app.active() == ["box", "wall"] and wall_asked == []  # the tray's list followed: no other plugin asked again
     assert [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]] == ["platform", "box", "wall"]
     assert any("box disabled" in x for x in lines) and any("box enabled" in x for x in lines)
+
+
+def test_a_plugin_not_valid_is_disabled_until_it_is(served):
+    """The user: "if a plugin is not in a valid state it has to be disabled, and thus shaded out on the left side". Not
+    valid (its own word, else not present), it is shown disabled with why, asked nothing it cannot answer, out of the
+    tray, detached; its setup stays, being what makes it valid; valid again, it is active and attached."""
+    app, port, lines, box = served
+    assert app.attach_plugins([box]) == ["box"] and box.app is app
+    box.present = lambda: False
+    box.status = lambda: {"present": False, "summary": "not installed", "valid": False, "why": "no Liminal install: its setup installs it"}
+    st = _call(port, "GET", "/api/status")[1]
+    m = st["machines"]["box"]
+    assert (m["enabled"], m["valid"], m["state"], m["why"], m["asks"]) == (True, False, "invalid", "no Liminal install: its setup installs it", [])
+    assert box.app is None and st["active"] == ["wall"] and [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]] == ["platform", "wall"]
+    assert _call(port, "POST", "/api/machines/box/setup", {"steps": ["docker"]})[0] == 202  # its setup is what makes it valid
+    for _ in range(50):
+        if not _call(port, "GET", "/api/machines/box/setup")[1]["running"]:
+            break
+        time.sleep(0.05)
+    box.present = lambda: True
+    box.status = lambda: {"present": True, "summary": "installed"}
+    m = _call(port, "GET", "/api/machines/box")[1]
+    assert (m["valid"], m["state"], m["why"]) == (True, "active", "") and box.app is app and m["asks"]
+    box.status = lambda: {"present": False, "summary": "not present"}  # without its own word: present or not
+    m = _call(port, "GET", "/api/machines/box")[1]
+    assert (m["state"], m["why"]) == ("invalid", "not present") and box.app is None
+
+
+class Bot(PlatformPlugin):
+    """A stand-in AI assistant: its key set or not, its plan with API access or not."""
+
+    KIND = "assistant"
+    name = "bot"
+    title = "A bot"
+    about = "a stand-in assistant"
+    api = "2.1"
+    vendor = "Bots"
+    default_model = "bot-1"
+    key_names = ("BOT_API_KEY", "BOT_ACCOUNT")
+
+    def __init__(self):
+        self.key, self.access = False, True
+
+    def keys_set(self, settings):
+        return self.key
+
+    def served(self, settings):
+        return self.key and self.access
+
+    def free_note(self, settings):
+        return "" if self.access else "the free plan has no API access"
+
+
+def test_the_ai_assistants_are_valid_with_a_key_and_enabled_or_disabled():
+    """The user: "theres also no disable or enable on the AI assistants": an assistant has the switch too, and is valid
+    with its key set and a plan with API access; attached while both."""
+    bot = Bot()
+    app = PlatformApp(log=lambda m: None, machines={}, assistants={"bot": bot}, settings=lambda: object())
+    port = _port(app.start(0))
+    try:
+        assert app.attach_plugins([bot]) == ["bot"]
+        (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
+        assert (a["enabled"], a["valid"], a["state"], a["vendor"]) == (True, False, "invalid", "Bots")
+        assert a["why"] == "no key: BOT_API_KEY is not set (the charts app's Plugins view sets it)" and bot.app is None
+        bot.key = True
+        (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
+        assert a["state"] == "active" and a["why"] == "" and bot.app is app
+        bot.access = False
+        assert app.assistant_status(bot)["why"] == "the free plan has no API access" and bot.app is None
+        bot.access = True
+        status, a = _call(port, "POST", "/api/plugins/bot/enabled", {"on": False})
+        assert status == 200 and (a["state"], a["enabled"], a["valid"]) == ("disabled", False, None) and bot.app is None
+        status, a = _call(port, "POST", "/api/plugins/bot/enabled", {"on": True})
+        assert status == 200 and a["state"] == "active" and bot.app is app
+        assert _call(port, "POST", "/api/plugins/nobody/enabled", {"on": True})[0] == 404
+        assert _call(port, "POST", "/api/plugins/bot/enabled", {"on": 1})[0] == 400
+    finally:
+        app.stop()

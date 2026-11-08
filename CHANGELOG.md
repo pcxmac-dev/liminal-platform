@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-11-07)
+
+A plugin not in a valid state is disabled until it is (the user: "if a plugin is not in a valid state it has to be
+disabled, and thus shaded out on the left side"; "there are no WSL-liminally scoped installs, so all three WSL plugins
+are invalid"; "only hardware stats and preferences seem valid atm"): its state is active, disabled (the user's) or
+invalid, with why (the plugin's own word, liminal-libs 1.24.0, else not present); not valid, it is shaded in the list,
+out of the tray, detached, offered no asks, its switch held off with the reason; its setup stays, being what makes it
+valid, and it is active again by itself once valid. The AI assistants have the switch too ("theres also no disable or
+enable on the AI assistants"): valid with a key set and a plan with API access, attached while active; `POST
+/api/plugins/<name>/enabled` for any platform plugin.
+
 ## 0.2.2 (2026-11-07)
 
 A plugin disabled or enabled shows at once in every view: the tray, this machine's table and its lists, the list on

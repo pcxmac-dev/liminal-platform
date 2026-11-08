@@ -42,9 +42,15 @@
     return out;
   }
 
-  const off = (m) => m.enabled === false;
-  const chipOf = (m) => (off(m) ? '<span class="chip">disabled</span>' : m.status && m.status.present ? '<span class="chip up">active</span>' : '<span class="chip">not present</span>');
-  const stateLine = (m) => (off(m) ? 'disabled' : (m.status && m.status.summary) || (m.status && m.status.present ? 'present' : 'not present'));
+  // a plugin's state (the user: "if a plugin is not in a valid state it has to be disabled, and thus shaded out on the left
+  // side"): disabled by the user (the switch, the tray's right click), or not valid (set up for Liminal: its own word, why),
+  // disabled until it is; both shaded in the list and out of the tray
+  const userOff = (m) => m.enabled === false;
+  const invalid = (m) => !userOff(m) && (m.state === 'invalid' || m.valid === false);
+  const off = (m) => userOff(m) || invalid(m);
+  const whyOf = (m) => m.why || 'not valid';
+  const chipOf = (m) => (off(m) ? '<span class="chip">disabled</span>' : '<span class="chip up">active</span>');
+  const stateLine = (m) => (userOff(m) ? 'disabled' : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
   function say(name, text) {  // a plugin's trouble, at the head of its page
     const el = $(`err-${name}`);
     if (el) el.textContent = text || '';
@@ -53,7 +59,7 @@
   // -- the tray: the chip, a divider, an icon per active plugin, in the one dark box ------------------------
   function drawRail() {
     const sel = selected();
-    const items = ((tray && tray.items) || []).filter((i) => i.kind === 'plugin');
+    const items = ((tray && tray.items) || []).filter((i) => i.kind === 'plugin' && !(st && st.machines[i.id] && off(st.machines[i.id])));
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
       + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: disable)">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
   }
@@ -69,7 +75,7 @@
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
       + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), off(m) ? ' off' : '')).join('')
         : '<div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
-      + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, 'analysis', a.title, a.vendor || a.about)).join('') : '');
+      + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, 'analysis', a.title, off(a) ? stateLine(a) : (a.vendor || a.about), off(a) ? ' off' : '')).join('') : '');
   }
 
   // -- the middle: the selected one's data ------------------------------------------------------------
@@ -145,21 +151,29 @@
   }
 
   function switchRow(m) {
-    const on = !off(m);
-    return `<label class="switch-row"><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"></button>${on ? 'Enabled' : 'Disabled'}</label>`;
+    const on = !off(m), held = invalid(m);  // not valid: off until it is, whatever the switch says
+    return `<label class="switch-row"${held ? ` title="${esc(`Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? 'Disabled: not valid' : 'Disabled'}</label>`;
   }
+
+  const setupLog = (m) => `<h4>Setup log</h4><pre class="setup-log" id="log-${esc(m.name)}">${m.setup ? esc(m.setup.lines.join('\n')) : 'Nothing run yet: the steps are on the right.'}</pre>`;
 
   function pluginData(m) {
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
-    if (off(m)) return `${head}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
+    if (userOff(m)) return `${head}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
+    if (invalid(m)) {
+      return `${head}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}`
+        + 'It is enabled again by itself once it is valid.</p>' + (logged ? setupLog(m) : '');
+    }
     return head + optionsHtml(m) + chartsBlock(m) + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m.status && m.status.tables)}</div>`
-      + (logged ? `<h4>Setup log</h4><pre class="setup-log" id="log-${esc(m.name)}">${m.setup ? esc(m.setup.lines.join('\n')) : 'Nothing run yet: the steps are on the right.'}</pre>` : '');
+      + (logged ? setupLog(m) : '');
   }
 
   function assistantData(a) {
-    return `<h2>${esc(a.title)}</h2><div class="muted small">${esc(a.about)}</div>
-      <h4>Where it is set up</h4><div class="small">Its key, plan and model are set on the charts app's Plugins view; the platform hosts it.</div>`;
+    const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
+    const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
+      : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
+    return `${head}${said}<h4>Where it is set up</h4><div class="small">Its key, plan and model are set on the charts app's Plugins view; the platform hosts it.</div>`;
   }
 
   function drawData() {
@@ -174,7 +188,7 @@
   // -- the right: the selected one's specifics ----------------------------------------------------------
   function facts(s) {
     // a status's own facts: neither its lists, its charts, its choices nor its summary
-    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'summary', 'present', 'problem']);
+    const skip = new Set(['rules', 'services', 'startups', 'processes', 'tables', 'charts', 'options', 'summary', 'present', 'problem', 'valid', 'why']);
     const flat = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v !== '' && v !== null && typeof v !== 'object');
     const nested = Object.entries(s || {}).filter(([k, v]) => !skip.has(k) && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length);
     const show = (v) => (v === true ? 'yes' : v === false ? 'no' : typeof v === 'object' ? Object.entries(v).map(([a, b]) => `${a} ${b}`).join(', ') : v);
@@ -199,10 +213,11 @@
 
   function pluginSide(m) {
     const head = `<h3>${icon(m.icon || 'chip', 20)} ${esc(m.title)} ${chipOf(m)}</h3><div class="muted small">${esc(m.name)}${m.version ? ` · ${esc(m.version)}` : ''}</div>`;
-    if (off(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>`;
+    if (userOff(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>`;
     const running = m.setup && m.setup.running;
     const steps = m.steps || [];
-    return `${head}<p class="summary">${esc(stateLine(m))}</p>${m.status.problem ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
+    const said = invalid(m) ? `Disabled while not valid: ${whyOf(m)}` : stateLine(m);
+    return `${head}<p class="summary">${esc(said)}</p>${m.status && m.status.problem && !invalid(m) ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
       ${facts(m.status)}
       ${steps.length ? `<h4>Set up</h4><div class="steps"><button type="button" class="setup accent" data-machine="${esc(m.name)}" ${running ? 'disabled' : ''}>Everything</button>
         ${steps.map((s) => `<button type="button" class="step" data-machine="${esc(m.name)}" data-step="${esc(s)}" ${running ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
@@ -210,7 +225,8 @@
   }
 
   function assistantSide(a) {
-    return `<h3>${icon('analysis', 20)} ${esc(a.title)}</h3><div class="muted small">${esc(a.name)}${a.version ? ` · ${esc(a.version)}` : ''}</div>
+    return `<h3>${icon('analysis', 20)} ${esc(a.title)} ${chipOf(a)}</h3><div class="muted small">${esc(a.name)}${a.version ? ` · ${esc(a.version)}` : ''}</div>
+      <p class="summary">${esc(userOff(a) ? 'Disabled: enable it with the switch on its page.' : invalid(a) ? `Disabled while not valid: ${whyOf(a)}` : 'active')}</p>
       <dl class="facts"><dt>vendor</dt><dd>${esc(a.vendor || '')}</dd><dt>model</dt><dd>${esc(a.model || '')}</dd></dl>`;
   }
 
@@ -317,11 +333,16 @@
   // a plugin's state in what the page holds (this machine's table, the list, its page and switch, the tray): `answer`
   // is the platform's word on it; without one, the state expected until the platform answers
   function mark(name, on, answer) {
+    if (!st.machines[name]) {  // an AI assistant: its row in the list
+      st.assistants = (st.assistants || []).map((a) => (a.name !== name ? a : answer
+        || { ...a, enabled: on, valid: on ? a.valid : null, why: on ? a.why : '', state: on ? (a.valid === false ? 'invalid' : 'active') : 'disabled' }));
+      return;
+    }
     const m = st.machines[name];
-    st.machines[name] = answer || { ...m, enabled: on, asks: on ? m.asks : [],
+    st.machines[name] = answer || { ...m, enabled: on, valid: on ? true : null, why: '', state: on ? 'active' : 'disabled', asks: on ? m.asks : [],
       status: on ? { ...(m.status || {}), present: true, summary: 'enabling…' } : { present: null, summary: 'disabled: the platform asks it nothing' } };
     const order = Object.keys(st.machines);
-    const present = on && !!(st.machines[name].status && st.machines[name].status.present);
+    const present = !off(st.machines[name]);
     st.disabled = order.filter((n) => (n === name ? !on : (st.disabled || []).includes(n)));
     st.active = order.filter((n) => (n === name ? present : (st.active || []).includes(n)));
     if (tray) {
@@ -342,18 +363,19 @@
     // every view shows it at once (the tray, this machine's table, the list, the plugin's page and switch), then
     // the platform's answer for the plugin; the rest (the Docker instances a machine runs) once the platform has
     // asked every plugin again, which takes a few seconds with the WSL plugins
-    if (!st || !st.machines[name]) return;
-    const before = { machine: st.machines[name], active: st.active, disabled: st.disabled, tray };
+    if (!st || !(st.machines[name] || (st.assistants || []).some((a) => a.name === name))) return;
+    const before = { machine: st.machines[name], assistants: st.assistants, active: st.active, disabled: st.disabled, tray };
     gen++;
     mark(name, on);
     delete day[name];
     draw();
     if (refocus) focusSwitch(name);
     let answer;
-    try { answer = await api('POST', `api/machines/${encodeURIComponent(name)}/enabled`, { on }); }
+    try { answer = await api('POST', `api/plugins/${encodeURIComponent(name)}/enabled`, { on }); }
     catch (e) {  // put back as it was
       gen++;
-      st.machines[name] = before.machine;
+      if (before.machine) st.machines[name] = before.machine;
+      st.assistants = before.assistants;
       st.active = before.active;
       st.disabled = before.disabled;
       tray = before.tray;

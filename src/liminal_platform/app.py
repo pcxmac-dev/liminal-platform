@@ -104,9 +104,17 @@ class PlatformApp(App):
 
     ACTIVE_SECONDS = 60.0  # which plugins are active is asked again after this long (some ask WSL)
 
-    def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None):
+    SETTINGS_SECONDS = 30.0  # the app's settings (the assistants' keys and plans) are read again after this long
+
+    def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
+                 assistants: dict | None = None, settings=None):
         super().__init__(log, login if login is not None else EnvironmentLogin())
         self._machines = machines  # by name; None: the registry's
+        self._assistants = assistants  # by name; None: the registry's
+        self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login
+        self._settings_cache: tuple[float, object] | None = None
+        self._invalid: set[str] = set()  # the plugins found not valid by the last status: out of the tray
+        self._settling = threading.Lock()
         self._state = Path(state) if state is not None else None  # the platform's folder; platform_dir() unless given
         self._disabled: set[str] | None = None  # read from the folder's plugins.json when first wanted
         self._attaching = False  # set once attach_plugins ran: an enabled plugin is attached again
@@ -138,7 +146,7 @@ class PlatformApp(App):
         """A machine plugin enabled or disabled (the tray's right click, the switch on its page). Disabled, the
         platform asks it nothing, its icon leaves the tray and it is detached (a plugin that samples stops);
         enabled, it is attached again when the platform attaches its plugins. Kept across restarts."""
-        m = self.machine(name)
+        m = self.platform_plugin(name)
         names = self.disabled()
         if on:
             names.discard(name)
@@ -155,17 +163,36 @@ class PlatformApp(App):
                 self._active = (self._active[0], [n for n in self._active[1] if n != name])
         if not on and self.plugin(name) is not None:
             self.detach(name)
-        elif on and self._attaching and self.plugin(name) is None and getattr(m, "app", None) is None:
-            self.attach(m)
         self.log(f"platform: {name} {'enabled' if on else 'disabled'}")
-        answer = self.machine_status(m)
-        if on and answer["status"].get("present"):
+        if name not in self.machines():  # an AI assistant
+            return self.assistant_status(m)
+        answer = self.machine_status(m)  # attached again when it is valid (_settle)
+        if answer["state"] == "active":
             order = list(self.machines())
             with self._lock:
                 if self._active is not None:
                     names_active = {*self._active[1], name}
                     self._active = (self._active[0], [n for n in order if n in names_active])
         return answer
+
+    def _settle(self, p, active: bool) -> None:
+        """A plugin attached while it is active (enabled and valid) and detached otherwise, once the platform
+        attaches its plugins (the user: "if a plugin is not in a valid state it has to be disabled")."""
+        if not self._attaching:
+            return
+        with self._settling:
+            attached = self.plugin(p.name) is not None
+            if active and not attached and getattr(p, "app", None) is None:
+                self.attach(p)
+            elif not active and attached:
+                self.detach(p.name)
+
+    def platform_plugin(self, name: str):
+        """A machine plugin or an AI assistant of the platform, by name."""
+        p = self.machines().get(name) or self.assistant_plugins().get(name)
+        if p is None:
+            raise Refused(HTTPStatus.NOT_FOUND, f"no plugin named {name!r} here")
+        return p
 
     def _refuse_disabled(self, name: str) -> None:
         if not self.enabled(name):
@@ -181,7 +208,7 @@ class PlatformApp(App):
         if cached is not None and not fresh and now - cached[0] < self.ACTIVE_SECONDS:
             return list(cached[1])
         names = []
-        off = self.disabled()
+        off = self.disabled() | set(self._invalid)
         for name, m in self.machines().items():
             if name in off:
                 continue
@@ -200,11 +227,56 @@ class PlatformApp(App):
         return tuple(TrayItem(name, getattr(machines[name], "ICON", "") or "chip", machines[name].title, "plugin", self.NAME)
                      for name in self.active() if name in machines)
 
+    def assistant_plugins(self) -> dict:
+        """The AI assistants, by name: given, else every one the registry loaded (attached or not)."""
+        if self._assistants is not None:
+            return dict(self._assistants)
+        from liminal_libs.sources.registry import assistants
+
+        return assistants()
+
+    def settings_now(self):
+        """The app's settings (the assistants' keys and plans), read with the platform's login; kept SETTINGS_SECONDS."""
+        if self._settings_of is not None:
+            return self._settings_of()
+        now = time.monotonic()
+        with self._lock:
+            cached = self._settings_cache
+        if cached is not None and now - cached[0] < self.SETTINGS_SECONDS:
+            return cached[1]
+        from liminal_libs.config import load_settings
+
+        settings = load_settings(login=self.login)
+        with self._lock:
+            self._settings_cache = (now, settings)
+        return settings
+
+    def assistant_validity(self, p) -> tuple[bool, str]:
+        """An assistant is valid with its key set and its plan offering API access; else why not."""
+        try:
+            settings = self.settings_now()
+            if p.served(settings):
+                return True, ""
+            if not p.keys_set(settings):
+                names = [n for n in (getattr(p, "key_names", ()) or ()) if n.endswith("_API_KEY")] or list(getattr(p, "key_names", ()) or ())
+                return False, f"no key: {names[0] if names else 'its key'} is not set (the charts app's Plugins view sets it)"
+            return False, p.free_note(settings) or "its plan has no API access"
+        except Exception as e:  # noqa: BLE001 - one that cannot say is not valid
+            return False, f"cannot be read: {type(e).__name__}: {e}"
+
+    def assistant_status(self, p) -> dict:
+        """An AI assistant as the page shows it: who it is, enabled (the user's), valid (a key and a plan with API
+        access) and why not; attached while both (its keys and plans are set on the charts app's Plugins view)."""
+        on = self.enabled(p.name)
+        valid, why = self.assistant_validity(p) if on else (None, "")
+        state = "active" if on and valid else "disabled" if not on else "invalid"
+        self._settle(p, state == "active")
+        return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
+                "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state}
+
     def assistants(self) -> list[dict]:
-        """The AI assistants attached here: who they are (their keys and plans are set on the charts app's view)."""
-        return [{"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
-                 "model": str(getattr(p, "default_model", "") or "")}
-                for p in self._plugins.values() if getattr(p, "KIND", "") == "assistant"]
+        """The AI assistants and their state."""
+        return [self.assistant_status(p) for p in self.assistant_plugins().values()]
 
     def machines(self) -> dict:
         if self._machines is not None:
@@ -242,7 +314,7 @@ class PlatformApp(App):
     def status(self) -> dict:
         machines = {n: self.machine_status(m) for n, m in self.machines().items()}
         with self._lock:  # the presence just read is the freshest: the tray follows it
-            self._active = (time.monotonic(), [n for n, m in machines.items() if m["enabled"] and m["status"].get("present")])
+            self._active = (time.monotonic(), [n for n, m in machines.items() if m["state"] == "active"])
         return {"app": self.describe(), "machine": facts(), "docker": docker_mod.Docker(env={}).describe(),
                 "machines": machines, "active": self.active(), "disabled": sorted(self.disabled()), "assistants": self.assistants(),
                 "instances": self.instances(), "plugins": self.plugins()}
@@ -256,11 +328,19 @@ class PlatformApp(App):
                 status = m.status()
             except Exception as e:  # noqa: BLE001 - a plugin's trouble is shown, not raised
                 status = {"present": False, "problem": f"{type(e).__name__}: {e}"}
+        valid, why = None, ""
+        if on:  # its own word when it says (liminal-libs 1.24.0), else present without a problem
+            valid = bool(status["valid"]) if "valid" in status else bool(status.get("present")) and not status.get("problem")
+            why = "" if valid else str(status.get("why") or status.get("problem") or status.get("summary") or "not present")
+        state = "active" if on and valid else "disabled" if not on else "invalid"
+        with self._lock:
+            (self._invalid.add if state == "invalid" else self._invalid.discard)(m.name)
+        self._settle(m, state == "active")
         with self._lock:
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
-                "icon": getattr(m, "ICON", "") or "chip", "enabled": on,
-                "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if on else [],
+                "icon": getattr(m, "ICON", "") or "chip", "enabled": on, "valid": valid, "why": why, "state": state,
+                "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "setup": setup.describe() if setup else None}
 
     @staticmethod
@@ -309,6 +389,11 @@ class PlatformApp(App):
             return 200, {"machines": [self.machine_status(m) for m in self.machines().values()]}
         if method == "GET" and path == "/api/instances":
             return 200, {"instances": self.instances()}
+        if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/enabled"):
+            on = body.get("on")
+            if not isinstance(on, bool):
+                raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
+            return 200, self.set_enabled(path[len("/api/plugins/"):-len("/enabled")], on)
         if path.startswith("/api/machines/"):
             rest = path[len("/api/machines/"):]
             name, _, action = rest.partition("/")

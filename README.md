@@ -18,7 +18,10 @@ framework"; "it also has an icon just like the chart/login and integrator"). An 
 
 Plugins can be disabled: a right click on a plugin's icon in the tray offers Disable, and the switch at the head
 of a plugin's page enables or disables it (disabled: asked nothing, out of the tray, detached; kept in the
-platform's folder, `plugins.json`). A plugin's own charts, tables and choices are drawn in the middle (the
+platform's folder, `plugins.json`). A plugin not in a valid state (set up for Liminal: a WSL plugin with its own Liminal-named distribution, a firewall
+with Liminal's rules, an admin with the rights; an AI assistant with a key and a plan with API access) is disabled
+until it is: shaded, out of the tray, its switch held off with the reason, its setup still there. A plugin's own
+charts, tables and choices are drawn in the middle (the
 hardware stats' charts and tables; the Preferences plugin's themes), and every page is painted in the UI's
 theme (the library's `theme.js`, the data folder's `ui.json`).
 
