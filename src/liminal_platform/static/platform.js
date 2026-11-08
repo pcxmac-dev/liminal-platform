@@ -32,7 +32,9 @@
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
 
   async function api(method, path, body) {
-    const r = await fetch(path, { method, headers: method === 'GET' ? {} : WRITE, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'same-origin' });
+    let r;
+    try { r = await fetch(path, { method, headers: method === 'GET' ? {} : WRITE, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'same-origin' }); }
+    catch (e) { throw new Error(`The platform is not answering at ${location.host}: it may have stopped. Start it again, then reload this page.`); }
     let out = null;
     try { out = await r.json(); } catch (e) { out = null; }
     if (!r.ok) throw new Error((out && out.error) || `the platform answered ${r.status}`);
@@ -127,7 +129,7 @@
     const can = new Set(m.asks || []);
     return ((m.status && m.status.options) || []).filter((o) => can.has(o.hook)).map((o) => `<h4>${esc(o.title)}</h4>`
       + `<div class="choices" role="radiogroup" aria-label="${esc(o.title)}">${o.choices.map((c) => `<button type="button" class="choice${c.value === o.value ? ' active' : ''}" role="radio"
-          aria-checked="${c.value === o.value}" tabindex="${c.value === o.value ? 0 : -1}" data-machine="${esc(m.name)}" data-hook="${esc(o.hook)}" data-value="${esc(c.value)}">`
+          aria-checked="${c.value === o.value}" aria-label="${esc(c.title)}${c.note ? `, ${esc(c.note)}` : ''}" tabindex="${c.value === o.value ? 0 : -1}" data-machine="${esc(m.name)}" data-hook="${esc(o.hook)}" data-value="${esc(c.value)}">`
         + `<span class="swatch" aria-hidden="true">${(c.swatch || []).map((s) => `<span style="background:${/^#[0-9a-fA-F]{3,8}$/.test(s) ? s : 'transparent'}"></span>`).join('')}</span>`
         + `<span class="what"><span>${esc(c.title)}</span>${c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</span></button>`).join('')}</div>`).join('');
   }
@@ -286,9 +288,22 @@
   }
 
   async function choose(name, hook, value) {
-    if (await ask(name, hook, [value]) && window.LiminalTheme) await window.LiminalTheme.load();  // a UI preference: this page follows
+    // the choice shows at once, and a UI preference (the theme) is applied to this page as soon as the plugin has
+    // it; the rest (its facts, the list) follows once the platform has asked every plugin again (a few seconds)
+    const had = document.activeElement && document.activeElement.matches && document.activeElement.matches('button.choice');
+    data.querySelectorAll(`button.choice[data-hook="${CSS.escape(hook)}"]`).forEach((b) => {
+      const on = b.dataset.value === value;
+      b.setAttribute('aria-checked', String(on));
+      b.classList.toggle('active', on);
+      b.tabIndex = on ? 0 : -1;
+    });
+    try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args: [value] }); }
+    catch (e) { say(name, e.message); return; }
+    say(name, '');
+    if (window.LiminalTheme) await window.LiminalTheme.load();
+    await render();
     const again = data.querySelector(`button.choice[data-hook="${CSS.escape(hook)}"][data-value="${CSS.escape(value)}"]`);
-    if (again) again.focus({ preventScroll: true });
+    if (again && had) again.focus({ preventScroll: true });
   }
 
   async function setEnabled(name, on, refocus) {

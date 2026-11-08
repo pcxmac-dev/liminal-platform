@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 (2026-11-07)
+
+A theme chosen is applied to the page at once (it waited for every plugin's status, 5 to 8 s with the WSL plugins);
+the choice shows at once; each choice has its name for a screen reader. A platform that stopped answering is said in
+words ("The platform is not answering ...") rather than the browser's "Failed to fetch" (the user, 2026-11-07:
+"says failed to fetch when i click on a theme": the preview had been stopped under the open page).
+
 ## 0.2.0 (2026-11-07)
 
 A plugin disabled and enabled (the user: "allow me to right click on the icons to disable them on the right icon
