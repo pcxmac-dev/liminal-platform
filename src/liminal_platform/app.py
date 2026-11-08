@@ -11,7 +11,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from liminal_libs import docker as docker_mod
-from liminal_libs.apps import App, EnvironmentLogin, Refused, attach_registry
+from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, attach_registry
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
@@ -91,11 +91,46 @@ class PlatformApp(App):
     PORT_VAR = "LIMINAL_PLATFORM_PORT"
     STATIC = Path(__file__).parent / "static"
 
+    ACTIVE_SECONDS = 60.0  # which plugins are active is asked again after this long (some ask WSL)
+
     def __init__(self, log=print, login=None, machines: dict | None = None):
         super().__init__(log, login if login is not None else EnvironmentLogin())
         self._machines = machines  # by name; None: the registry's
         self._setups: dict[str, Setup] = {}
         self._lock = threading.Lock()
+        self._active: tuple[float, list[str]] | None = None
+
+    # -- the tray: the chip, then an icon per active plugin (the user, 2026-11-07: "active plugins, will be part
+    # of the tray on the very right side") ------------------------------------------------------------------
+    def active(self, fresh: bool = False) -> list[str]:
+        """The machine plugins present, by name (asked at most once a minute unless `fresh`)."""
+        now = time.monotonic()
+        with self._lock:
+            cached = self._active
+        if cached is not None and not fresh and now - cached[0] < self.ACTIVE_SECONDS:
+            return list(cached[1])
+        names = []
+        for name, m in self.machines().items():
+            try:
+                if m.present():
+                    names.append(name)
+            except Exception:  # noqa: BLE001 - a plugin that cannot say is not active
+                continue
+        with self._lock:
+            self._active = (now, names)
+        return names
+
+    def items(self) -> tuple[TrayItem, ...]:
+        """An icon per active machine plugin, after the platform's own (the frame's tray puts the chip first)."""
+        machines = self.machines()
+        return tuple(TrayItem(name, getattr(machines[name], "ICON", "") or "chip", machines[name].title, "plugin", self.NAME)
+                     for name in self.active() if name in machines)
+
+    def assistants(self) -> list[dict]:
+        """The AI assistants attached here: who they are (their keys and plans are set on the charts app's view)."""
+        return [{"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
+                 "model": str(getattr(p, "default_model", "") or "")}
+                for p in self._plugins.values() if getattr(p, "KIND", "") == "assistant"]
 
     def machines(self) -> dict:
         if self._machines is not None:
@@ -118,8 +153,11 @@ class PlatformApp(App):
         return [i.describe() for i in docker_mod.instances(machines=self.machines().values())]
 
     def status(self) -> dict:
+        machines = {n: self.machine_status(m) for n, m in self.machines().items()}
+        with self._lock:  # the presence just read is the freshest: the tray follows it
+            self._active = (time.monotonic(), [n for n, m in machines.items() if m["status"].get("present")])
         return {"app": self.describe(), "machine": facts(), "docker": docker_mod.Docker(env={}).describe(),
-                "machines": {n: self.machine_status(m) for n, m in self.machines().items()},
+                "machines": machines, "active": self.active(), "assistants": self.assistants(),
                 "instances": self.instances(), "plugins": self.plugins()}
 
     def machine_status(self, m) -> dict:
@@ -130,6 +168,7 @@ class PlatformApp(App):
         with self._lock:
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
+                "icon": getattr(m, "ICON", "") or "chip",
                 "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m),
                 "setup": setup.describe() if setup else None}
 

@@ -1,4 +1,11 @@
 body.embedded #rail { display: none; }
-.machine .engine { font-family: ui-monospace, monospace; }
-.setup-log { max-height: 20em; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.9em; }
-.steps button { margin-right: 0.4em; }
+.small { font-size: 12px; }
+.app-data table.list, .app-side table.list { margin: 4px 0 8px; }
+tr.pick { cursor: pointer; }
+.setup-log { max-height: 24em; overflow: auto; white-space: pre-wrap; margin: 4px 0; padding: 8px 10px; border-radius: 7px;
+  background: var(--panel); border: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.app-side p { margin: 6px 0; }
+.app-side .summary { color: var(--text); }
+td .ask { margin-right: 4px; }
+.app-data td.mono.small { overflow-wrap: anywhere; min-width: 14em; }  /* a long command line wraps in its cell, nothing else breaks */

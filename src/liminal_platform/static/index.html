@@ -9,9 +9,13 @@
 </head>
 <body>
   <div class="app-page">
-    <main class="app-main" id="main" aria-live="polite"></main>
+    <main class="app-main cols" id="main" aria-live="polite">
+      <nav class="app-list" id="list" aria-label="This machine and its plugins"></nav>
+      <section class="app-data" id="data" aria-label="What the selected one shows"></section>
+      <aside class="app-side" id="side" aria-label="The selected one's specifics"></aside>
+    </main>
     <nav id="rail" aria-label="Platform">
-      <button type="button" id="railChip" class="master active" title="Platform: the software and hardware under the framework"></button>
+      <button type="button" id="railChip" class="master active" data-select="machine" title="Platform: this machine"></button>
     </nav>
   </div>
   <script src="icons.js"></script>

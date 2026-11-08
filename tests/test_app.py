@@ -32,9 +32,15 @@ def test_the_page_its_icon_and_the_machine(served):
     app, port, lines, box = served
     status, body = _call(port, "GET", "/")
     assert status == 200 and b'id="railChip"' in body and b"<title>Liminal Platform</title>" in body
+    # the list, the selected one's data, its specifics before the tray (the user's layout)
+    for part in (b'class="app-main cols"', b'class="app-list" id="list"', b'class="app-data" id="data"', b'class="app-side" id="side"'):
+        assert part in body
     assert b"window.LiminalIcons" in _call(port, "GET", "/icons.js")[1] and _call(port, "GET", "/platform.js")[0] == 200
     status, tray = _call(port, "GET", "/api/tray")
     assert tray["app"] == "platform" and tray["icon"] == "chip" and tray["items"][0]["kind"] == "app"
+    # the active plugins after the chip, each with its icon
+    assert [(i["id"], i["icon"], i["kind"], i["app"]) for i in tray["items"][1:]] == [("box", "chip", "plugin", "platform"),
+                                                                                   ("wall", "shield", "plugin", "platform")]
     assert _call(port, "GET", "/api/app")[1]["port"] == 8775 and app.port() == 8775
     f = facts()
     assert f["cpus"] >= 1 and f["python"] and f["host"] and memory_mb() >= 0
@@ -42,6 +48,7 @@ def test_the_page_its_icon_and_the_machine(served):
     assert status == 200 and st["machine"]["cpus"] == f["cpus"] and st["app"]["icon"] == "chip"
     assert st["docker"]["installed"] is False and st["docker"]["available"] is False  # no Docker here, as the fixture says
     assert st["machines"]["box"]["status"]["engine"]["running"] and st["machines"]["box"]["setup"] is None and "wall" in st["machines"]
+    assert st["active"] == ["box", "wall"] and st["machines"]["wall"]["icon"] == "shield" and st["assistants"] == []
     assert st["instances"] == [{"name": "box", "where": "the box", "command": "box docker", "context": "", "host": "", "source": "box"}]
     assert any("its page at" in m for m in lines)
 
@@ -86,6 +93,13 @@ def test_a_plugins_steps_summary_and_asks_by_name(served):
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": "x"})[0] == 400
     assert any("wall asked allow web" in m for m in lines)
     assert _call(port, "GET", "/api/machines/box")[1]["steps"] == []  # a plugin without steps offers none
+
+
+def test_a_plugin_not_present_stays_out_of_the_tray(served):
+    app, port, lines, box = served
+    box.present = lambda: False
+    assert app.active(fresh=True) == ["wall"] and [i.id for i in app.items()] == ["wall"]
+    assert [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]] == ["platform", "wall"]
 
 
 def test_the_registry_is_asked_when_no_machines_are_given():
