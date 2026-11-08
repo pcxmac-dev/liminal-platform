@@ -13,7 +13,7 @@ from pathlib import Path
 
 from liminal_libs import docker as docker_mod
 from liminal_libs import layout
-from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem
+from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, saved_variables
 from liminal_libs.machines.terminal import Output, Terminal
 
 PORT = 8775
@@ -24,6 +24,7 @@ PLUGINS_FILE = "plugins.json"
 TERMINAL_IDLE_S = 120.0  # a terminal no page has read for this long is closed
 PREPARING = ("wsl", "update", "version")  # setup steps that prepare this PC: never locked by a plugin's check
 MAX_INPUT = 8192  # characters of keys a page sends at once
+MAX_SETTING = 4096  # characters of one setting entered on a plugin's page
 MAX_WAIT = 5.0  # seconds a page's read may be held until there is output (the echo at once, one read at a time)
 KEPT_SHOWN = 4000  # characters of a terminal open already a page is shown when it comes back to it
 
@@ -156,7 +157,9 @@ class PlatformApp(App):
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
                  assistants: dict | None = None, settings=None, terminal=None):
-        super().__init__(log, login if login is not None else EnvironmentLogin())
+        # its login: the user's environment variables, those saved after it started too (a setting entered on a page
+        # holds across a restart), until the login app holds them (Login.save keeps one)
+        super().__init__(log, login if login is not None else EnvironmentLogin(saved=saved_variables))
         self._machines = machines  # by name; None: the registry's
         self._assistants = assistants  # by name; None: the registry's
         self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login
@@ -309,7 +312,7 @@ class PlatformApp(App):
                 return True, ""
             if not p.keys_set(settings):
                 names = [n for n in (getattr(p, "key_names", ()) or ()) if n.endswith("_API_KEY")] or list(getattr(p, "key_names", ()) or ())
-                return False, f"no key: {names[0] if names else 'its key'} is not set (the charts app's Plugins view sets it)"
+                return False, f"no key: {names[0] if names else 'its key'} is not set (its Settings, on its page, set it)"
             return False, p.free_note(settings) or "its plan has no API access"
         except Exception as e:  # noqa: BLE001 - one that cannot say is not valid
             return False, f"cannot be read: {type(e).__name__}: {e}"
@@ -322,7 +325,67 @@ class PlatformApp(App):
         state = "active" if on and valid else "disabled" if not on else "invalid"
         self._settle(p, state == "active")
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
-                "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state}
+                "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
+                "settings": self.settings_of(p)}
+
+    # -- a plugin's settings, entered on its page (the user, 2026-11-08: "i need a way to put my credentials in to the
+    # namecheap plugin and allow it to function"): its keys (KeyVar), kept through the platform's login (Login.save:
+    # the user's environment variables until the login app holds them); a value never shown back, never logged ----------
+    def settings_of(self, p) -> list[dict]:
+        """A plugin's settings as its page shows them: each key it declares, set or not (never its value)."""
+        keys = [k for k in (getattr(p, "keys", None) or ()) if getattr(k, "name", "")]
+        if not keys:
+            return []
+        try:
+            have = set(self.login.variables([n for k in keys for n in k.names]))
+        except Exception:  # noqa: BLE001 - a login that cannot say: none is said set
+            have = set()
+        return [{"variable": k.name, "label": k.label, "secret": bool(k.secret), "hint": k.hint or "",
+                 "set": any(n in have for n in k.names)} for k in keys]
+
+    def save_settings(self, name: str, body: dict) -> dict:
+        """A plugin's settings kept: only its own keys; a value left empty keeps it as it is; `forget` drops one.
+        The plugin reads them anew (its settings_changed, when it has one) and the platform's settings too."""
+        p = self.machines().get(name) or self.assistant_plugins().get(name)
+        if p is None:
+            raise Refused(HTTPStatus.NOT_FOUND, f"no plugin named {name!r}")
+        values, forget = body.get("values") or {}, body.get("forget") or []
+        if not isinstance(values, dict) or not isinstance(forget, list):
+            raise Refused(HTTPStatus.BAD_REQUEST, "values is {variable: value}, forget a list of variables")
+        allowed = {k.name for k in (getattr(p, "keys", None) or ()) if getattr(k, "name", "")}
+        unknown = [str(v) for v in [*values, *forget] if v not in allowed]
+        if unknown:
+            raise Refused(HTTPStatus.BAD_REQUEST, f"not {p.title}'s settings: {', '.join(unknown)}")
+        changes = []
+        for variable, value in values.items():
+            if value is None:
+                continue
+            if not isinstance(value, str) or len(value) > MAX_SETTING:
+                raise Refused(HTTPStatus.BAD_REQUEST, f"{variable} is text, at most {MAX_SETTING} characters")
+            if value.strip():
+                changes.append((variable, value.strip()))
+        changes += [(v, None) for v in forget]
+        if not changes:
+            raise Refused(HTTPStatus.BAD_REQUEST, "nothing to keep: every field was left empty (an empty field keeps its value)")
+        where = ""
+        for variable, value in changes:
+            try:
+                where = self.login.save(variable, value)
+            except Unauthorized as e:
+                raise Refused(HTTPStatus(e.status) if 400 <= e.status < 600 else HTTPStatus.INTERNAL_SERVER_ERROR, e.reason) from None
+        with self._lock:
+            self._settings_cache = None
+        changed = getattr(p, "settings_changed", None)
+        if callable(changed):
+            try:
+                changed()
+            except Exception:  # noqa: BLE001 - the plugin reads them on its own then
+                pass
+        kept, dropped = [v for v, x in changes if x is not None], [v for v, x in changes if x is None]
+        self.log(f"platform: {name} settings kept: {', '.join(kept) or '-'}; forgotten: {', '.join(dropped) or '-'}")  # names only
+        lines = ([f"kept: {', '.join(kept)}"] if kept else []) + ([f"forgotten: {', '.join(dropped)}"] if dropped else [])
+        return {"said": f"{p.title}'s settings kept in {where}", "lines": lines + [f"{p.title} reads them now"], "ok": True,
+                "kept": kept, "forgotten": dropped}
 
     def assistants(self) -> list[dict]:
         """The AI assistants and their state."""
@@ -374,6 +437,8 @@ class PlatformApp(App):
         if not on:  # asked nothing
             status = {"present": None, "summary": "disabled: the platform asks it nothing"}
         else:
+            if getattr(m, "login", None) is None:  # the platform's login lent, attached or not: its settings read through it
+                m.login = self.login
             try:
                 status = m.status()
             except Exception as e:  # noqa: BLE001 - a plugin's trouble is shown, not raised
@@ -392,7 +457,7 @@ class PlatformApp(App):
                 "icon": getattr(m, "ICON", "") or "chip", "enabled": on, "valid": valid, "why": why, "state": state,
                 "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
-                "terminal": {"open": self.terminal_of(m.name) is not None}}
+                "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m)}
 
     @staticmethod
     def hooks(m) -> list[str]:
@@ -526,6 +591,8 @@ class PlatformApp(App):
             return 200, {"machines": [self.machine_status(m) for m in self.machines().values()]}
         if method == "GET" and path == "/api/instances":
             return 200, {"instances": self.instances()}
+        if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/settings"):
+            return 200, self.save_settings(path[len("/api/plugins/"):-len("/settings")], body)
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/enabled"):
             on = body.get("on")
             if not isinstance(on, bool):

@@ -142,7 +142,7 @@ def test_a_plugins_actions_are_its_hooks_asked_by_name_from_buttons():
         assert status == 200 and out == {"answer": {"poked": 1}} and p.pokes == [2]
         assert _call(port, "POST", "/api/machines/poked/ask", {"hook": "missing", "args": []})[0] == 400
         page = _call(port, "GET", "/platform.js")[1]
-        assert b"function actionsHtml" in page and b"m.status.actions" in page and b"head + actionsHtml(m)" in page
+        assert b"function actionsHtml" in page and b"m.status.actions" in page and b"head + settingsButton(m) + actionsHtml(m)" in page
     finally:
         app.stop()
 
@@ -432,7 +432,7 @@ def test_the_ai_assistants_are_valid_with_a_key_and_enabled_or_disabled():
         assert app.attach_plugins([bot]) == ["bot"]
         (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
         assert (a["enabled"], a["valid"], a["state"], a["vendor"]) == (True, False, "invalid", "Bots")
-        assert a["why"] == "no key: BOT_API_KEY is not set (the charts app's Plugins view sets it)" and bot.app is None
+        assert a["why"] == "no key: BOT_API_KEY is not set (its Settings, on its page, set it)" and bot.app is None
         bot.key = True
         (a,) = _call(port, "GET", "/api/status")[1]["assistants"]
         assert a["state"] == "active" and a["why"] == "" and bot.app is app
@@ -596,5 +596,58 @@ def test_a_login_terminal_into_the_environment():
         assert _call(port, "POST", "/api/machines/distro/terminal/close", {})[1] == {"closed": True} and made[0].closed
         assert _call(port, "GET", "/api/machines/distro/terminal")[0] == 404
         assert _call(port, "POST", "/api/machines/distro/terminal/input", {"data": "x"})[0] == 409
+    finally:
+        app.stop()
+
+
+def test_a_plugins_settings_are_entered_on_its_page_and_kept_through_the_login():
+    """Settings… (0.9.0; the user: "i need a way to put my credentials in to the namecheap plugin and allow it to
+    function"): a plugin's keys described set or not, never a value; kept through the platform's login (Login.save);
+    only its own keys; an empty field keeps a value; the plugin told; no value in an answer or the log."""
+    from liminal_libs.apps import EnvironmentLogin
+    from liminal_libs.machines import MachinePlugin as Machine
+    from liminal_libs.sources.keys import KeyVar
+
+    class Keyed(Machine):
+        name, title, about, api, order = "keyed", "Keyed", "a stand-in with settings", "2.1", 905
+        keys = (KeyVar("KEYED_API_USER", label="API user", secret=False, hint="your username"), KeyVar("KEYED_API_KEY", label="API key"))
+
+        def __init__(self):
+            self.changed = 0
+
+        def present(self):
+            return True
+
+        def status(self):
+            have = self.login.variables(["KEYED_API_USER", "KEYED_API_KEY"]) if self.login else {}
+            return {"present": True, "valid": len(have) == 2, "why": "not set up", "summary": f"{len(have)} of 2 set"}
+
+        def settings_changed(self):
+            self.changed += 1
+
+    kept, said = {}, []
+    p = Keyed()
+    app = PlatformApp(log=said.append, login=EnvironmentLogin(env=kept), machines={"keyed": p}, assistants={})
+    port = _port(app.start(0))
+    try:
+        m = _call(port, "GET", "/api/machines/keyed")[1]
+        assert m["state"] == "invalid" and p.login is app.login  # its settings read through the platform's login, before it is attached
+        assert m["settings"] == [{"variable": "KEYED_API_USER", "label": "API user", "secret": False, "hint": "your username", "set": False},
+                                 {"variable": "KEYED_API_KEY", "label": "API key", "secret": True, "hint": "", "set": False}]
+        status, out = _call(port, "POST", "/api/plugins/keyed/settings", {"values": {"KEYED_API_USER": " tester ", "KEYED_API_KEY": "s3cret-value"}})
+        assert status == 200 and out["ok"] and out["kept"] == ["KEYED_API_USER", "KEYED_API_KEY"] and p.changed == 1
+        assert kept == {"KEYED_API_USER": "tester", "KEYED_API_KEY": "s3cret-value"}
+        assert "s3cret-value" not in json.dumps(out) and not any("s3cret-value" in line for line in said)
+        m = _call(port, "GET", "/api/machines/keyed")[1]
+        assert m["state"] == "active" and [s["set"] for s in m["settings"]] == [True, True]  # valid once its settings are there
+        assert _call(port, "POST", "/api/plugins/keyed/settings", {"values": {"KEYED_API_KEY": ""}})[0] == 400  # nothing to keep
+        assert kept["KEYED_API_KEY"] == "s3cret-value"  # an empty field keeps it
+        assert _call(port, "POST", "/api/plugins/keyed/settings", {"values": {"OTHER_KEY": "x"}})[0] == 400  # not its own
+        assert _call(port, "POST", "/api/plugins/keyed/settings", {"values": {"KEYED_API_KEY": "x" * 5000}})[0] == 400
+        assert _call(port, "POST", "/api/plugins/nobody/settings", {"values": {}})[0] == 404
+        assert _call(port, "POST", "/api/plugins/keyed/settings", {"forget": ["KEYED_API_KEY"]})[1]["forgotten"] == ["KEYED_API_KEY"]
+        assert "KEYED_API_KEY" not in kept
+        page = _call(port, "GET", "/platform.js")[1]
+        assert b"function settingsForm" in page and b"api/plugins/${enc(d.name)}/settings" in page and b'type="password"' in page
     finally:
         app.stop()

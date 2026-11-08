@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0 (2026-11-08)
+
+A plugin's settings entered on its page (the user: "i need a way to put my credentials in to the namecheap plugin and
+allow it to function"): **Settings…** on a plugin's page (a machine plugin, valid or not yet; an AI assistant) asks for
+each key it declares (KeyVar), a secret typed hidden; a field left empty keeps its value and no value is ever shown
+back or logged. `POST /api/plugins/<name>/settings {values, forget}` keeps them through the platform's login
+(liminal-libs 1.31.0's `Login.save`: the user's environment variables until the login app holds them), only the
+plugin's own keys, then tells the plugin (`settings_changed`, when it has one); `GET /api/machines/<name>` says each
+setting set or not. The platform's login reads the variables saved after it started too (`EnvironmentLogin(saved=
+saved_variables)`), and is lent to a plugin not yet attached, so its settings make it valid. An assistant's missing key
+now points to its Settings.
+
 ## 0.8.0 (2026-11-08)
 
 A plugin's paths (the user, on the hw-stats plugin's port checks: "the check needs to validate the computer, the

@@ -245,7 +245,26 @@
   // true (the Namecheap plugin's accept_ddns_reset); never before it. The page's one <dialog> holds the form, its
   // confirmation and the answer, outside what is drawn again, so the tables asked again leave it as it is. A form
   // whose `confirm` is false changes nothing on the machine (the ports a table lists): it is asked once filled (0.7.0).
-  const EDITABLE = ['text', 'number', 'choice'];
+  const EDITABLE = ['text', 'number', 'choice', 'password'];
+  // a plugin's settings (0.9.0: its keys, from the platform: m.settings), entered in the same dialog and kept through
+  // the platform's login: a secret typed hidden, a value never shown back, a field left empty keeping its value
+  const SETTINGS = '__settings';
+  function settingsForm(m) {
+    const set = (m.settings || []).filter((s) => s.set).length;
+    return { id: SETTINGS, hook: '', route: 'settings', title: `${m.title}: settings`, submit: 'Keep them', confirm: false,
+      note: `${set} of ${(m.settings || []).length} set. Kept with you: your user environment variables today, the login app once it holds them. `
+        + 'A field left empty keeps its value; a key is never shown back.',
+      fields: (m.settings || []).map((s) => ({ name: s.variable, label: s.label || s.variable, type: s.secret ? 'password' : 'text',
+        placeholder: s.set ? 'set: type to replace it' : 'not set', note: [s.variable, s.hint].filter(Boolean).join(' · ') })) };
+  }
+  function settingsButton(m) {
+    const all = m.settings || [];
+    if (!all.length) return '';
+    const set = all.filter((s) => s.set).length;
+    return `<div class="row actions"><button type="button" class="settings-open" data-machine="${esc(m.name)}">Settings…</button>`
+      + `<span class="muted small">${set} of ${all.length} set</span></div>`;
+  }
+  const pluginOf = (name) => st && (st.machines[name] || (st.assistants || []).find((a) => a.name === name));
   let dlg = null;  // the form open: {name, plugin, form, values, step, busy, accepted, accept, answer, words, opener, key}
 
   function formsOf(m) {  // a plugin's forms by id: those whose hook the platform may ask of it now
@@ -287,7 +306,7 @@
   }
 
   function openForm(name, id, values, opener) {
-    const m = st && st.machines[name], f = m && formsOf(m)[id];
+    const m = pluginOf(name), f = m && (id === SETTINGS ? settingsForm(m) : formsOf(m)[id]);
     if (!f) return;
     const start = {};
     f.fields.forEach((x) => {
@@ -342,7 +361,9 @@
       ? `<select ${attrs}>${(x.choices || []).filter(Boolean).map((o) => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.title !== undefined ? o.title : o.value)}</option>`).join('')}</select>`
       : x.type === 'number'
         ? `<input type="number" inputmode="numeric" step="1" ${attrs}${x.min !== undefined ? ` min="${esc(x.min)}"` : ''}${x.max !== undefined ? ` max="${esc(x.max)}"` : ''} value="${given(v) ? esc(v) : ''}"${hint}>`
-        : `<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`;
+        : x.type === 'password'
+          ? `<input type="password" autocomplete="new-password" spellcheck="false" ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`
+          : `<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`;
     const optional = !x.required && x.type !== 'choice' ? ' <span class="muted">(optional)</span>' : '';
     return `<div class="field" data-field="${esc(x.name)}"><label for="${id}">${esc(x.label || x.name)}${optional}</label>${control}`
       + `<span class="sub" id="${id}-note">${esc((c && c.note) || x.note || '')}</span><span class="bad" id="${id}-bad"></span></div>`;
@@ -456,7 +477,11 @@
     drawDialog();
     focusStep();
     let out = null, err = null;
-    try { out = await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) }); }
+    try {
+      out = d.form.route === 'settings'  // a plugin's settings: kept by the platform, the values typed only
+        ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: Object.fromEntries(Object.entries(d.values).filter(([, v]) => given(v))) }) }
+        : await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
+    }
     catch (e) { err = e; }
     d.busy = false;
     if (dlg !== d) return;
@@ -555,19 +580,20 @@
 
   function pluginData(m) {
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
-    if (userOff(m)) return `${head}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
+    if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
     if (notHere(m)) {
       return `${head}<p class="muted">Not for this machine: ${esc(whyOf(m))}. It stays disabled here; no setup is offered, since none can make it valid on this machine.</p>`
         + (m.setup || jobs[m.name] ? setupLog(m) : '');
     }
     if (invalid(m)) {
-      return `${head}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${hasHook(m, 'check') ? 'Its install, below, can make it valid. '
+      return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings (Settings…, above) can make it valid. '
+        : hasHook(m, 'check') ? 'Its install, below, can make it valid. '
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
         + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
     drawnPaths[m.name] = pathsHtml(m);
-    return head + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`
+    return head + settingsButton(m) + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`
       + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '');
   }
 
@@ -575,7 +601,7 @@
     const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
-    return `${head}${said}<h4>Where it is set up</h4><div class="small">Its key, plan and model are set on the charts app's Plugins view; the platform hosts it.</div>`;
+    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are set with Settings…, above; its plan and model on the charts app's Plugins view. The platform hosts it.</div>`;
   }
 
   function drawData() {
@@ -978,6 +1004,8 @@
     if (sc) { closeShell(sc.dataset.machine); return; }
     const go = e.target.closest('button.setup, button.step');
     if (go) { setup(go.dataset.machine, go.dataset.step ? [go.dataset.step] : null); return; }
+    const se = e.target.closest('button.settings-open[data-machine]');
+    if (se) { openForm(se.dataset.machine, SETTINGS, {}, se); return; }
     const fo = e.target.closest('button.form-open[data-form]');
     if (fo) {  // one of a plugin's forms, filled with the button's values: asked only once confirmed
       let values = {};
