@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 (2026-11-09)
+
+A table chosen from by a click on a row, its tasks above it (the user: "instead of chosen, put task and for the tasks lets
+do terminal, start, pause, stop, allow selection of the linux install by clicking on the list"; "tasks also include
+uninstall"): a table with `select` {hook, value} (liminal-libs 1.37.0: a WSL plugin's installs) draws its rows to click,
+the chosen one marked, its name a button for the keyboard; a click asks the hook with the row's key and draws the plugin
+again. Its `tasks` {title, subject, actions} sit above it: "Task  Ubuntu  Terminal  Start  Pause  Stop…  Uninstall…". A
+button (an ask, a form's, the terminal's) is drawn `disabled` where its task does not apply now (Pause while stopped).
+
 ## 0.12.0 (2026-11-08)
 
 The terminal into the install chosen (the user: "for the WSL plugins, they need to list all the 'operating systems' that

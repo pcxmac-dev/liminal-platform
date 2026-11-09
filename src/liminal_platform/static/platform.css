@@ -190,5 +190,19 @@ table.grouped tr.moved .moved-note { color: var(--accent); }
 .move-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 6px 0 4px; }
 .move-bar [role="status"] { flex: 1 1 200px; }
 
+/* 0.13.0: a table chosen from by a click on a row (a WSL plugin's installs), the chosen one's tasks above it */
+.tasks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0 8px; }
+.tasks .tasks-title { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.tasks .tasks-subject { font-weight: 600; margin-right: 6px; }
+.tasks button { border-color: var(--border); }
+.tasks button:disabled, .table-actions button:disabled, .actions button:disabled { opacity: .4; cursor: default; background: transparent; }
+table.selectable tr.pickable { cursor: pointer; }
+table.selectable tr.picked td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+table.selectable tr.picked td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.row-pick { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; color: inherit; }
+.row-pick:hover { background: none; }
+.row-pick .row-name { font-weight: 600; }
+.row-pick .sub { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+
 /* 0.10.2: a plugin's two switches at the head of its page: enabled, and hidden from the dock on the right */
 .data-head .switches { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 18px; }

@@ -208,6 +208,51 @@
       + (chosen.size ? `<button type="button" class="move-clear" ${at()}>Clear the choice</button>` : '') + '</div>' : '';
     return `<table class="list stats grouped">${thead}${body}</table>${rows.length ? '' : `<div class="muted small">${esc(t.empty || 'None.')}</div>`}${bar}`;
   }
+  // -- a table chosen from by a click on a row (0.13.0: a WSL plugin's installs; the user: "instead of chosen, put task and
+  // for the tasks lets do terminal, start, pause, stop, allow selection of the linux install by clicking on the list";
+  // "tasks also include uninstall"). t.select {hook, value, title}: each row {cells, key}; the row whose key is the value
+  // is the one chosen, a click on another (or its name, a button for the keyboard) asks the hook with its key. t.tasks
+  // {title, subject, actions}: the chosen one's buttons above the table ("Task  Ubuntu  Terminal Start Pause Stop…
+  // Uninstall…"), one whose task does not apply now `disabled`.
+  function tasksBar(m, t, forms, can) {
+    const k = t.tasks;
+    if (!k || !Array.isArray(k.actions)) return '';
+    const buttons = k.actions.map((b) => (b && b.form ? formButton(m, b, forms) : b && b.terminal ? shellButton(m, b.title, b) : askButton(m, b, can))).join('');
+    return `<div class="row tasks" role="group" aria-label="${esc(`${k.title || 'Task'} ${k.subject || ''}`.trim())}"><span class="tasks-title">${esc(k.title || 'Task')}</span>`
+      + `${k.subject ? `<span class="tasks-subject">${esc(k.subject)}</span>` : ''}${buttons}</div>`;
+  }
+  function selectTable(m, t, forms, can) {
+    const rows = rowsOf(t), s = t.select, pick = can.has(s.hook);
+    const at = (r) => `data-machine="${esc(m.name)}" data-hook="${esc(s.hook)}" data-key="${esc(r.key)}"`;
+    const first = (r, on) => {
+      const c = r.cells[0], text = c && typeof c === 'object' ? c.text : c, sub = c && typeof c === 'object' ? c.sub : '';
+      const inner = `<span class="row-name">${esc(text)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}`;
+      return pick ? `<button type="button" class="row-pick" ${at(r)} aria-pressed="${on}" title="${esc(s.title || 'Choose it')}">${inner}</button>` : inner;
+    };
+    const body = rows.map((r) => {
+      const on = r.key === s.value;
+      return `<tr class="pickable${on ? ' picked' : ''}"${pick ? ` data-pick-row ${at(r)}` : ''}>` + r.cells.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"'
+        : longWord(c) ? ' class="long"' : ''}>${i === 0 ? first(r, on) : cellHtml(c, m, forms)}</td>`).join('') + '</tr>';
+    }).join('');
+    return tasksBar(m, t, forms, can) + (rows.length ? `<table class="list stats selectable"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`
+      : `<div class="muted small">${esc(t.empty || 'None.')}</div>`);
+  }
+  async function pickRow(el) {  // the row chosen at once on the page, then the plugin asked and drawn again
+    const name = el.dataset.machine, hook = el.dataset.hook, key = el.dataset.key;
+    const table = el.closest('table');
+    if (table) table.querySelectorAll('tr.pickable').forEach((tr) => {
+      const on = tr.dataset.key === key;
+      tr.classList.toggle('picked', on);
+      const b = tr.querySelector('button.row-pick');
+      if (b) b.setAttribute('aria-pressed', String(on));
+    });
+    try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args: [key] }); say(name, ''); }
+    catch (err) { say(name, err.message); }
+    await refresh(name);
+    const again = data.querySelector(`button.row-pick[data-machine="${CSS.escape(name)}"][data-key="${CSS.escape(key)}"]`);
+    if (again && el.matches('button')) again.focus({ preventScroll: true });
+  }
+
   function redrawTables(name, focus) {  // a plugin's tables drawn again (a group opened or closed, rules chosen), the focus kept
     const m = pluginOf(name), box = $(`tables-${name}`);
     if (!m || !box) return;
@@ -256,12 +301,13 @@
     const forms = formsOf(m), can = new Set(m.asks || []);
     const under = (t) => {
       const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => (b && b.form ? formButton(m, b, forms)
-        : b && b.terminal ? shellButton(m, b.title) : askButton(m, b, can))).join('');  // {terminal, title}: its terminal (0.12.0)
+        : b && b.terminal ? shellButton(m, b.title, b) : askButton(m, b, can))).join('');  // {terminal, title}: its terminal (0.12.0)
       return buttons ? `<div class="row table-actions">${buttons}</div>` : '';
     };
     const picks = (t) => groupsOf(t.options, can).map((o) => choicesHtml(m, o, `<div class="muted small choices-title">${esc(o.title)}</div>`)).join('');
     return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}${picks(t)}`
-      + (Array.isArray(t.groups) && Array.isArray(t.columns) ? groupedTable(m, t, forms, can) : (t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
+      + (Array.isArray(t.groups) && Array.isArray(t.columns) ? groupedTable(m, t, forms, can)
+        : t.select && Array.isArray(t.columns) ? selectTable(m, t, forms, can) : (t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
         + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
         : `<div class="muted small">${esc(t.empty || 'None.')}</div>`) + under(t)).join('');
   }
@@ -332,7 +378,7 @@
   // a button asking one of a plugin's hooks by name ({hook, args, title, note}), when the platform may ask it now
   function askButton(m, a, can) {
     return a && can.has(a.hook) && Array.isArray(a.args || []) ? `<button type="button" class="ask" data-machine="${esc(m.name)}" `
-      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}>${esc(a.title || a.hook)}</button>` : '';
+      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}${a.disabled ? ' disabled' : ''}>${esc(a.title || a.hook)}</button>` : '';
   }
 
   // a plugin's actions (status.actions: {hook, args, title, note}: one of its hooks asked by name from a button, the
@@ -389,7 +435,7 @@
     const f = b && typeof b.form === 'string' && (forms || formsOf(m))[b.form];
     if (!f) return '';
     return `<button type="button" class="form-open" data-machine="${esc(m.name)}" data-form="${esc(b.form)}" data-values='${esc(JSON.stringify(b.values || {}))}'`
-      + `${b.label ? ` aria-label="${esc(b.label)}"` : ''}${b.note ? ` title="${esc(b.note)}"` : ''}>${esc(b.title || f.title || f.hook)}</button>`;
+      + `${b.label ? ` aria-label="${esc(b.label)}"` : ''}${b.note ? ` title="${esc(b.note)}"` : ''}${b.disabled ? ' disabled' : ''}>${esc(b.title || f.title || f.hook)}</button>`;
   }
 
   const given = (v) => v !== undefined && v !== null && v !== '';
@@ -677,7 +723,7 @@
       + `<span class="what"><span>${esc(x.title)}<span class="sr-only">: ${x.ok ? 'met' : 'not met'}</span></span><span class="sub">${esc(x.detail)}</span></span></li>`).join('');
     const install = d.installed ? '' : `<button type="button" class="install accent" data-machine="${esc(m.name)}" ${d.ready && !busy ? '' : 'disabled'}>Install ${esc(d.distribution || what)}</button>`;
     const tools = !d.installed ? '' : `<button type="button" class="update" data-machine="${esc(m.name)}" ${busy ? 'disabled' : ''}>Update packages</button>`
-      + shellButton(m);
+      + (shellInto(m) ? '' : shellButton(m));  // a plugin with installs to choose from: its Terminal is a task of the one chosen (0.13.0)
     const said = d.installed ? `${d.distribution} is installed` : d.ready ? (busy ? 'Installing…' : 'Every criterion is met: the install is unlocked.') : `Locked: ${d.why}`;
     return `<h4>This PC for ${esc(what)}</h4><ul class="criteria">${items}</ul>`
       + `<div class="row install-row">${install}${tools}${again}<span class="muted small">${esc(said)}</span></div>${shellPanel(m)}`;
@@ -686,10 +732,11 @@
   // the terminal's button: into the install chosen (0.12.0, status.terminalInto: the user, "select which one to terminal
   // in to"; "basically a selector for different installs"), Show when the one open is into it already
   const shellInto = (m) => (m.status && m.status.terminalInto) || '';
-  function shellButton(m, title) {
+  function shellButton(m, title, b) {
     if (!hasHook(m, 'terminal')) return '';
     const into = shellInto(m), sh = shells[m.name], same = sh && (!into || !sh.into || sh.into === into);
-    return `<button type="button" class="shell-open" data-machine="${esc(m.name)}">${esc(same ? 'Show the terminal' : title || (into ? `Open a terminal in ${into}` : 'Open a terminal'))}</button>`;
+    return `<button type="button" class="shell-open" data-machine="${esc(m.name)}"${b && b.disabled ? ' disabled' : ''}${b && b.note ? ` title="${esc(b.note)}"` : ''}>`
+      + `${esc(same ? 'Show the terminal' : title || (into ? `Open a terminal in ${into}` : 'Open a terminal'))}</button>`;
   }
 
   function shellPanel(m) {
@@ -1407,6 +1454,8 @@
     if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
     const hs = e.target.closest('button.switch[data-hide]');  // lit: visible, so a click hides it; not lit: shown again
     if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') === 'true', document.activeElement === hs || e.detail === 0); return; }
+    const rp = e.target.closest('button.row-pick[data-key], tr[data-pick-row]');  // an install chosen by a click on its row (0.13.0)
+    if (rp && (e.target.closest('button.row-pick') || !e.target.closest('button, a, input, select, label'))) { pickRow(rp); return; }
     const ex = e.target.closest('button.expander[data-group]');  // a group opened (+) or closed (−)
     if (ex) { toggleGroup(ex); return; }
     const pr = e.target.closest('input.pick-row[data-key]');  // a rule chosen, or not

@@ -195,7 +195,7 @@ def test_a_tables_own_choices_and_buttons_ask_its_hooks():
         assert _call(port, "GET", "/api/machines/listed")[1]["status"]["tables"][0]["rows"] == [["b"]]
         page = _call(port, "GET", "/platform.js")[1]
         assert b"function choicesHtml" in page and b"function askButton" in page and b"groupsOf(t.options, can)" in page
-        assert b"b && b.form ? formButton(m, b, forms)" in page and b"b && b.terminal ? shellButton(m, b.title) : askButton(m, b, can)" in page  # a table's buttons ask, open forms or a terminal
+        assert b"b && b.form ? formButton(m, b, forms)" in page and b"b && b.terminal ? shellButton(m, b.title, b) : askButton(m, b, can)" in page  # a table's buttons ask, open forms or a terminal
         assert b"dlg.form.confirm === false" in page  # a form changing nothing on the machine is asked once filled
     finally:
         app.stop()
@@ -834,5 +834,7 @@ def test_the_terminal_opens_into_the_install_chosen():
         assert made[0].closed and made[1].argv == ["wsl", "-d", "Distro"] and second["title"] == "Distro, as its default user"
         page = _call(port, "GET", "/platform.js")[1]
         assert b"function shellButton" in page and b"Open a terminal in ${into}" in page and b"b.terminal ? shellButton" in page
+        assert b"function selectTable" in page and b"function tasksBar" in page and b"tr[data-pick-row]" in page  # 0.13.0
+        assert b"${a.disabled ? ' disabled' : ''}" in page and b"${b.disabled ? ' disabled' : ''}" in page
     finally:
         app.stop()
