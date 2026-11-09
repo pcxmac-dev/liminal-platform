@@ -255,7 +255,8 @@
   function statTables(m) {
     const forms = formsOf(m), can = new Set(m.asks || []);
     const under = (t) => {
-      const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => (b && b.form ? formButton(m, b, forms) : askButton(m, b, can))).join('');
+      const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => (b && b.form ? formButton(m, b, forms)
+        : b && b.terminal ? shellButton(m, b.title) : askButton(m, b, can))).join('');  // {terminal, title}: its terminal (0.12.0)
       return buttons ? `<div class="row table-actions">${buttons}</div>` : '';
     };
     const picks = (t) => groupsOf(t.options, can).map((o) => choicesHtml(m, o, `<div class="muted small choices-title">${esc(o.title)}</div>`)).join('');
@@ -676,10 +677,19 @@
       + `<span class="what"><span>${esc(x.title)}<span class="sr-only">: ${x.ok ? 'met' : 'not met'}</span></span><span class="sub">${esc(x.detail)}</span></span></li>`).join('');
     const install = d.installed ? '' : `<button type="button" class="install accent" data-machine="${esc(m.name)}" ${d.ready && !busy ? '' : 'disabled'}>Install ${esc(d.distribution || what)}</button>`;
     const tools = !d.installed ? '' : `<button type="button" class="update" data-machine="${esc(m.name)}" ${busy ? 'disabled' : ''}>Update packages</button>`
-      + (hasHook(m, 'terminal') ? `<button type="button" class="shell-open" data-machine="${esc(m.name)}">${shells[m.name] ? 'Show the terminal' : 'Open a terminal'}</button>` : '');
+      + shellButton(m);
     const said = d.installed ? `${d.distribution} is installed` : d.ready ? (busy ? 'Installing…' : 'Every criterion is met: the install is unlocked.') : `Locked: ${d.why}`;
     return `<h4>This PC for ${esc(what)}</h4><ul class="criteria">${items}</ul>`
       + `<div class="row install-row">${install}${tools}${again}<span class="muted small">${esc(said)}</span></div>${shellPanel(m)}`;
+  }
+
+  // the terminal's button: into the install chosen (0.12.0, status.terminalInto: the user, "select which one to terminal
+  // in to"; "basically a selector for different installs"), Show when the one open is into it already
+  const shellInto = (m) => (m.status && m.status.terminalInto) || '';
+  function shellButton(m, title) {
+    if (!hasHook(m, 'terminal')) return '';
+    const into = shellInto(m), sh = shells[m.name], same = sh && (!into || !sh.into || sh.into === into);
+    return `<button type="button" class="shell-open" data-machine="${esc(m.name)}">${esc(same ? 'Show the terminal' : title || (into ? `Open a terminal in ${into}` : 'Open a terminal'))}</button>`;
   }
 
   function shellPanel(m) {
@@ -1318,11 +1328,13 @@
 
   // -- a login terminal (the user: "the plugin also allows for a user to login through a terminal in to the environment")
   async function openShell(name) {
-    if (shells[name]) { const el = $(`shell-in-${name}`); if (el) el.focus(); return; }
+    const into = shellInto(pluginOf(name) || {});
+    if (shells[name] && (!into || !shells[name].into || shells[name].into === into)) { const el = $(`shell-in-${name}`); if (el) el.focus(); return; }
+    if (shells[name]) await closeShell(name);  // another install chosen: its terminal instead
     let got;
     try { got = await api('POST', `api/machines/${enc(name)}/terminal`, {}); }
     catch (e) { say(name, e.message); return; }
-    const sh = { term: LiminalTerminal.create(null, { cursor: true }), offset: got.offset, alive: got.alive, title: got.title, queue: '', sending: null, reading: false };
+    const sh = { term: LiminalTerminal.create(null, { cursor: true }), offset: got.offset, alive: got.alive, title: got.title, into, queue: '', sending: null, reading: false };
     shells[name] = sh;
     sh.term.write(got.text);
     drawData();

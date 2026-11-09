@@ -195,7 +195,7 @@ def test_a_tables_own_choices_and_buttons_ask_its_hooks():
         assert _call(port, "GET", "/api/machines/listed")[1]["status"]["tables"][0]["rows"] == [["b"]]
         page = _call(port, "GET", "/platform.js")[1]
         assert b"function choicesHtml" in page and b"function askButton" in page and b"groupsOf(t.options, can)" in page
-        assert b"b && b.form ? formButton(m, b, forms) : askButton(m, b, can)" in page  # a table's buttons ask or open forms
+        assert b"b && b.form ? formButton(m, b, forms)" in page and b"b && b.terminal ? shellButton(m, b.title) : askButton(m, b, can)" in page  # a table's buttons ask, open forms or a terminal
         assert b"dlg.form.confirm === false" in page  # a form changing nothing on the machine is asked once filled
     finally:
         app.stop()
@@ -798,5 +798,41 @@ def test_a_firewalls_rules_in_groups_moved_through_the_page_kept_in_a_scratch_lo
         assert b"move-go" in page and b"'liminal-platform-open-groups'" in page and b"open ? '\xe2\x88\x92' : '+'" in page  # (−) and (+)
         css = _call(port, "GET", "/platform.css")[1]
         assert b".expander {" in css and b"table.grouped tr.group-head td" in css
+    finally:
+        app.stop()
+
+
+def test_the_terminal_opens_into_the_install_chosen():
+    """0.12.0 (the user: "also the ability to uninstall and select which one to terminal in to"; "basically a selector for
+    different installs"): the plugin's terminal command follows the install chosen; opened again after another is chosen,
+    the old terminal is closed and the chosen one's opened, titled by the plugin."""
+
+    class Chooser(Distro):
+        def __init__(self):
+            super().__init__()
+            self.installed, self.target = True, "Liminal-Distro"
+
+        def terminal(self, user=None):
+            return ["wsl", "-d", self.target]
+
+        def terminal_title(self):
+            return f"{self.target}, as its default user"
+
+    d, made = Chooser(), []
+
+    def terminal(argv, title):
+        made.append(FakeTerminal(argv, title))
+        return made[-1]
+    app = PlatformApp(log=lambda m: None, machines={"distro": d}, assistants={}, terminal=terminal)
+    port = _port(app.start(0))
+    try:
+        first = _call(port, "POST", "/api/machines/distro/terminal", {})[1]
+        assert first["title"] == "Liminal-Distro, as its default user" and made[0].argv == ["wsl", "-d", "Liminal-Distro"]
+        assert _call(port, "POST", "/api/machines/distro/terminal", {})[1]["title"] == first["title"] and len(made) == 1  # the same: kept
+        d.target = "Distro"  # another install chosen
+        second = _call(port, "POST", "/api/machines/distro/terminal", {})[1]
+        assert made[0].closed and made[1].argv == ["wsl", "-d", "Distro"] and second["title"] == "Distro, as its default user"
+        page = _call(port, "GET", "/platform.js")[1]
+        assert b"function shellButton" in page and b"Open a terminal in ${into}" in page and b"b.terminal ? shellButton" in page
     finally:
         app.stop()

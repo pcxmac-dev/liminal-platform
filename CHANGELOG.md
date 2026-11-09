@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.0 (2026-11-08)
+
+The terminal into the install chosen (the user: "for the WSL plugins, they need to list all the 'operating systems' that
+are installed under the plugin's regime"; "also the ability to uninstall and select which one to terminal in to";
+"basically a selector for different installs"): a WSL plugin's status says which install its terminal opens into
+(`terminalInto`: liminal-libs 1.36.0's selector), so its button says "Open a terminal in Ubuntu", and a table's action
+`{terminal, title}` draws that button under the installs. Open while a terminal into another install is open, the page
+closes that one and opens the chosen one's; the platform does the same when the plugin's terminal command changed
+(`open_terminal` asks the plugin first), and titles it with the plugin's `terminal_title()` when it has one.
+
 ## 0.11.0 (2026-11-08)
 
 A plugin's table in groups (the user: "for both firewalls, i need to have groups, like system or application and then

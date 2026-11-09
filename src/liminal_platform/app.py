@@ -672,15 +672,18 @@ class PlatformApp(App):
         if "terminal" not in self.hooks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} offers no terminal")
         self._close_idle()
-        current = self.terminal_of(name)
-        if current is not None and current.alive:
-            return current.read(max(0, current.output.end - KEPT_SHOWN))  # where it was: its last lines
         try:
             with self.traffic.timed(self.NAME, name, "ask", "terminal"):
                 argv = m.terminal()
         except Exception as e:  # noqa: BLE001 - not installed: its words
             raise Refused(HTTPStatus.CONFLICT, str(e)) from None
-        title = f"{getattr(m, 'user', '') or 'you'} in {getattr(m, 'distribution_name', '') or m.title}"
+        current = self.terminal_of(name)
+        if current is not None and current.alive:
+            if list(getattr(current, "argv", None) or argv) == list(argv):
+                return current.read(max(0, current.output.end - KEPT_SHOWN))  # where it was: its last lines
+            self.close_terminal(name)  # another install chosen meanwhile (0.12.0): that one's terminal instead
+        made = getattr(m, "terminal_title", None)
+        title = made() if callable(made) else f"{getattr(m, 'user', '') or 'you'} in {getattr(m, 'distribution_name', '') or m.title}"
         term = (self._terminal_of or (lambda a, t: Terminal(a, title=t)))(argv, title)
         with self._lock:
             self._terminals[name] = term
