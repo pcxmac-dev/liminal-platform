@@ -155,6 +155,103 @@
   const cellHtml = (c, m, forms) => (c && typeof c === 'object' ? (c.form ? formButton(m, c, forms)
     : `${esc(c.text)}${c.sub ? `<div class="sub">${esc(c.sub)}</div>` : ''}`) : esc(c));
   const longWord = (c) => String(c && typeof c === 'object' ? c.text ?? '' : c ?? '').split(/\s+/).some((w) => w.length > 16);  // may break
+
+  // -- a table in groups (0.11.0: a firewall's rules, liminal-libs 1.35.0's rulegroups; the user: "for both firewalls, i
+  // need to have groups, like system or application and then unassociated rules not tied to a specific application or
+  // system process can be in an other, i can create labels, like system or application, as well and move the rules in to
+  // that"; "just use basic expansion like a (+) to open and close labels"). t.groups: [{id, title, kind (auto | label),
+  // count, listed, note, actions}]; each row {cells, key, group, own, why, moved}; t.move: {hook, title, choices}. Each
+  // group a heading with (+) to open it and (−) to close it (closed at first; kept while the page lives, and in this
+  // browser), a box to choose each rule (the heading's box choosing every rule the group lists), and under the table
+  // Move to: the hook asked with the keys chosen and the group picked.
+  const OPEN_KEY = 'liminal-platform-open-groups';
+  const openGroups = (() => { try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch (e) { return new Set(); } })();
+  const keepOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...openGroups].slice(-200))); } catch (e) { /* this page only */ } };
+  const chosenRows = {};  // `${plugin}|${table}` -> the keys of the rules chosen
+  const moveTargets = {};  // `${plugin}|${table}` -> the group last picked in Move to
+  const tableKey = (name, title) => `${name}|${title}`;
+  const chosenOf = (name, title) => chosenRows[tableKey(name, title)] || (chosenRows[tableKey(name, title)] = new Set());
+  const textOf = (c) => String(c && typeof c === 'object' ? c.text ?? c.title ?? '' : c ?? '');
+  const tableOf = (name, title) => { const p = pluginOf(name); return ((p && p.status && p.status.tables) || []).find((t) => t && t.title === title); };
+  const rowsOf = (t) => (Array.isArray(t.rows) ? t.rows.filter((r) => r && typeof r === 'object' && Array.isArray(r.cells)) : []);
+  function groupedTable(m, t, forms, can) {
+    const rows = rowsOf(t), chosen = chosenOf(m.name, t.title), listed = new Set(rows.map((r) => r.key));
+    [...chosen].forEach((k) => { if (!listed.has(k)) chosen.delete(k); });  // a rule no longer listed is no longer chosen
+    const movable = !!(t.move && can.has(t.move.hook) && Array.isArray(t.move.choices));
+    const at = (extra) => `data-machine="${esc(m.name)}" data-table="${esc(t.title)}"${extra || ''}`;
+    const titles = Object.fromEntries(t.groups.filter(Boolean).map((g) => [g.id, g.title]));
+    const span = t.columns.length;
+    const body = t.groups.filter(Boolean).map((g) => {
+      const open = openGroups.has(`${tableKey(m.name, t.title)}|${g.id}`), mine = rows.filter((r) => r.group === g.id);
+      const all = mine.length > 0 && mine.every((r) => chosen.has(r.key)), some = !all && mine.some((r) => chosen.has(r.key));
+      const box = movable ? `<td class="pick"><input type="checkbox" class="pick-group" ${at(` data-group="${esc(g.id)}"`)}${all ? ' checked' : ''}`
+        + `${some ? ' data-some="1"' : ''}${mine.length ? '' : ' disabled'} aria-label="Choose every rule ${esc(g.title)} lists"></td>` : '';
+      const buttons = (Array.isArray(g.actions) ? g.actions : []).map((a) => formButton(m, a, forms)).join('');
+      const head = `<tr class="group-head${g.kind === 'label' ? ' label' : ''}">${box}<td colspan="${span}"><div class="group-line">`
+        + `<button type="button" class="expander" ${at(` data-group="${esc(g.id)}"`)} aria-expanded="${open}" aria-label="${open ? 'Close' : 'Open'} ${esc(g.title)}" title="${open ? 'Close' : 'Open'}">${open ? '−' : '+'}</button>`
+        + `<span class="group-title">${esc(g.title)}</span><span class="muted small">${esc(String(g.count ?? mine.length))} rule${(g.count ?? mine.length) === 1 ? '' : 's'}</span>`
+        + (g.note ? `<span class="muted small group-note">${esc(g.note)}</span>` : '') + (buttons ? `<span class="group-actions">${buttons}</span>` : '') + '</div></td></tr>';
+      const lines = open ? mine.map((r) => {
+        const pick = movable ? `<td class="pick"><input type="checkbox" class="pick-row" ${at(` data-key="${esc(r.key)}"`)}${chosen.has(r.key) ? ' checked' : ''} aria-label="Choose ${esc(textOf(r.cells[0]))}"></td>` : '';
+        const moved = r.moved ? `<div class="sub moved-note">moved here · its own group: ${esc(titles[r.own] || r.own || '')}</div>` : '';
+        return `<tr${r.moved ? ' class="moved"' : ''}>${pick}` + r.cells.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}`
+          + `${i === 0 && r.why ? ` title="${esc(r.why)}"` : ''}>${cellHtml(c, m, forms)}${i === 0 ? moved : ''}</td>`).join('') + '</tr>';
+      }).join('') : '';
+      return `<tbody class="group" data-group="${esc(g.id)}">${head}${lines}</tbody>`;
+    }).join('');
+    const thead = `<thead><tr>${movable ? '<th class="pick"></th>' : ''}${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead>`;
+    const target = moveTargets[tableKey(m.name, t.title)];
+    const options = movable ? t.move.choices.filter(Boolean).map((c) => `<option value="${esc(c.value)}"${c.value === target ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}>${esc(c.title)}</option>`).join('') : '';
+    const bar = movable ? `<div class="row move-bar"><span class="muted small" role="status">${chosen.size ? `${chosen.size} rule${chosen.size === 1 ? '' : 's'} chosen` : 'Choose rules by their boxes to move them'}</span>`
+      + `<label class="small">${esc(t.move.title || 'Move to')} <select class="move-to" ${at()}>${options}</select></label>`
+      + `<button type="button" class="move-go" ${at()}${chosen.size ? '' : ' disabled'}>Move</button>`
+      + (chosen.size ? `<button type="button" class="move-clear" ${at()}>Clear the choice</button>` : '') + '</div>' : '';
+    return `<table class="list stats grouped">${thead}${body}</table>${rows.length ? '' : `<div class="muted small">${esc(t.empty || 'None.')}</div>`}${bar}`;
+  }
+  function redrawTables(name, focus) {  // a plugin's tables drawn again (a group opened or closed, rules chosen), the focus kept
+    const m = pluginOf(name), box = $(`tables-${name}`);
+    if (!m || !box) return;
+    box.innerHTML = tables(m) + statTables(m);
+    const again = focus ? box.querySelector(focus) : null;
+    if (again) again.focus({ preventScroll: true });
+  }
+  const pickSel = (cls, el, extra) => `${cls}[data-table="${CSS.escape(el.dataset.table)}"]${extra || ''}`;
+  function toggleGroup(el) {
+    const k = `${tableKey(el.dataset.machine, el.dataset.table)}|${el.dataset.group}`;
+    if (openGroups.has(k)) openGroups.delete(k); else openGroups.add(k);
+    keepOpen();
+    redrawTables(el.dataset.machine, pickSel('button.expander', el, `[data-group="${CSS.escape(el.dataset.group)}"]`));
+  }
+  function pickRows(el, keys, on, focus) {
+    const chosen = chosenOf(el.dataset.machine, el.dataset.table);
+    keys.forEach((k) => (on ? chosen.add(k) : chosen.delete(k)));
+    redrawTables(el.dataset.machine, focus);
+  }
+  async function moveChosen(el) {
+    const name = el.dataset.machine, t = tableOf(name, el.dataset.table), chosen = chosenOf(name, el.dataset.table);
+    const box = $(`tables-${name}`), pick = box && box.querySelector(pickSel('select.move-to', el));
+    if (!t || !t.move || !chosen.size || !pick) return;
+    const keys = [...chosen], to = pick.value;
+    moveTargets[tableKey(name, t.title)] = to;
+    chosen.clear();
+    if (to !== 'own') { openGroups.add(`${tableKey(name, t.title)}|${to}`); keepOpen(); }  // where they went, open
+    el.disabled = true;
+    try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: t.move.hook, args: [keys, to] }); say(name, ''); }
+    catch (e) {  // refused: chosen as they were, the plugin's words at the head of its page
+      keys.forEach((k) => chosen.add(k));
+      say(name, e.message);
+      redrawTables(name, pickSel('button.move-go', el));
+      return;
+    }
+    await refresh(name);  // this plugin alone asked again: the rules where they went at once
+  }
+  // a group's box half chosen: shown as such once drawn
+  new MutationObserver(() => document.querySelectorAll('input.pick-group[data-some]').forEach((x) => { x.indeterminate = true; }))
+    .observe(document.body, { childList: true, subtree: true });
+  document.addEventListener('change', (e) => {
+    const s = e.target.closest && e.target.closest('select.move-to[data-table]');
+    if (s) moveTargets[tableKey(s.dataset.machine, s.dataset.table)] = s.value;
+  });
   function statTables(m) {
     const forms = formsOf(m), can = new Set(m.asks || []);
     const under = (t) => {
@@ -163,7 +260,7 @@
     };
     const picks = (t) => groupsOf(t.options, can).map((o) => choicesHtml(m, o, `<div class="muted small choices-title">${esc(o.title)}</div>`)).join('');
     return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}${picks(t)}`
-      + ((t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
+      + (Array.isArray(t.groups) && Array.isArray(t.columns) ? groupedTable(m, t, forms, can) : (t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
         + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
         : `<div class="muted small">${esc(t.empty || 'None.')}</div>`) + under(t)).join('');
   }
@@ -1298,6 +1395,21 @@
     if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
     const hs = e.target.closest('button.switch[data-hide]');  // lit: visible, so a click hides it; not lit: shown again
     if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') === 'true', document.activeElement === hs || e.detail === 0); return; }
+    const ex = e.target.closest('button.expander[data-group]');  // a group opened (+) or closed (−)
+    if (ex) { toggleGroup(ex); return; }
+    const pr = e.target.closest('input.pick-row[data-key]');  // a rule chosen, or not
+    if (pr) { pickRows(pr, [pr.dataset.key], pr.checked, pickSel('input.pick-row', pr, `[data-key="${CSS.escape(pr.dataset.key)}"]`)); return; }
+    const pg = e.target.closest('input.pick-group[data-group]');  // every rule a group lists chosen, or none
+    if (pg) {
+      const t = tableOf(pg.dataset.machine, pg.dataset.table);
+      pickRows(pg, t ? rowsOf(t).filter((r) => r.group === pg.dataset.group).map((r) => r.key) : [], pg.checked,
+        pickSel('input.pick-group', pg, `[data-group="${CSS.escape(pg.dataset.group)}"]`));
+      return;
+    }
+    const mg = e.target.closest('button.move-go[data-table]');
+    if (mg) { if (!mg.disabled) moveChosen(mg); return; }
+    const mc = e.target.closest('button.move-clear[data-table]');
+    if (mc) { chosenOf(mc.dataset.machine, mc.dataset.table).clear(); redrawTables(mc.dataset.machine, pickSel('select.move-to', mc)); return; }
     const pick = e.target.closest('[data-select]');
     if (pick) { location.hash = pick.dataset.select === 'machine' ? '' : pick.dataset.select; return; }
     const sp = e.target.closest('button[data-span]');

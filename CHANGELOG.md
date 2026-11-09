@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0 (2026-11-08)
+
+A plugin's table in groups (the user: "for both firewalls, i need to have groups, like system or application and then
+unassociated rules not tied to a specific application or system process can be in an other, i can create labels, like
+system or application, as well and move the rules in to that"; "just use basic expansion like a (+) to open and close
+labels"): a table with `groups` (liminal-libs 1.35.0's rulegroups: the firewall plugins' Rules) is drawn as a heading per
+group (its title, how many rules, what it holds, a label's Rename… and Remove…) with (+) to open it and (−) to close it,
+closed at first and kept open in this browser; a box to choose each rule, the heading's box choosing every rule the group
+lists; under the table, Move to with the groups and labels and Its own group, asking the plugin's move hook with the
+keys chosen. A rule moved shows where it came from; why a rule is in its group shows over its name. The choice, the
+groups open and the group picked last hold while the tables are asked again every 30 s.
+`LIMINAL_PLATFORM_LOGIN=memory`: a scratch preview's login, a copy of the process's environment keeping what the page
+saves (a setting, a label) in the process alone, never the user's environment.
+
 ## 0.10.3 (2026-11-08)
 
 The dock switch says just Visible or Hidden (the user: "the dock hidden visible switch literally needs to say hidden (not

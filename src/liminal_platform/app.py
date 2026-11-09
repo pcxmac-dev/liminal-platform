@@ -20,6 +20,7 @@ PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
 READS = ("present", "status", "view", "charts", "instances", "wanted", "services", "startups", "processes")  # asks not logged
 DIR_VAR = "LIMINAL_PLATFORM_DIR"  # the platform's own folder: its log, which plugins are disabled
+LOGIN_VAR = "LIMINAL_PLATFORM_LOGIN"  # memory: a scratch preview's login, nothing it saves leaving the process
 PLUGINS_FILE = "plugins.json"
 TERMINAL_IDLE_S = 120.0  # a terminal no page has read for this long is closed
 PREPARING = ("wsl", "update", "version")  # setup steps that prepare this PC: never locked by a plugin's check
@@ -172,8 +173,12 @@ class PlatformApp(App):
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
                  assistants: dict | None = None, settings=None, terminal=None):
         # its login: the user's environment variables, those saved after it started too (a setting entered on a page
-        # holds across a restart), until the login app holds them (Login.save keeps one)
-        super().__init__(log, login if login is not None else EnvironmentLogin(saved=saved_variables))
+        # holds across a restart), until the login app holds them (Login.save keeps one); a scratch preview's
+        # (LIMINAL_PLATFORM_LOGIN=memory, 0.11.0): a copy of this process's, what the page saves kept in it alone
+        if login is None:
+            memory = os.environ.get(LOGIN_VAR, "").strip().lower() == "memory"
+            login = EnvironmentLogin(env=dict(os.environ)) if memory else EnvironmentLogin(saved=saved_variables)
+        super().__init__(log, login)
         self._machines = machines  # by name; None: the registry's
         self._assistants = assistants  # by name; None: the registry's
         self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login

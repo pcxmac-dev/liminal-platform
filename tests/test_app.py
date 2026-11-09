@@ -764,3 +764,39 @@ def test_a_plugin_hidden_from_the_dock_stays_as_it_was_and_comes_back(served):
     page = _call(port, "GET", "/platform.js")[1]
     assert b"data-hide=" in page and b"function setHidden" in page and b"label: 'Hide'," in page
     assert b"'Visible'" in page and b"'Hidden'" in page and b"from the dock" not in page  # the user: "just hidden / visible"
+
+
+def test_a_firewalls_rules_in_groups_moved_through_the_page_kept_in_a_scratch_login(monkeypatch):
+    """The user: "for both firewalls, i need to have groups, like system or application ... i can create labels, like
+    system or application, as well and move the rules in to that"; "just use basic expansion like a (+) to open and close
+    labels". The page's asks reach a firewall's groups hooks (liminal-libs 1.35.0); with LIMINAL_PLATFORM_LOGIN=memory
+    (a scratch preview's) what they keep stays in the process, never the user's environment."""
+    import os
+
+    from conftest import Wall
+    from liminal_libs.machines.rulegroups import Sorted, key_of
+
+    monkeypatch.setenv("LIMINAL_PLATFORM_LOGIN", "memory")
+    monkeypatch.delenv("WALL_GROUPS", raising=False)
+    wall, k = Wall(), key_of("base")
+    wall.sorted_rules = lambda: {k: Sorted("other", "a port alone")}
+    app = PlatformApp(log=lambda m: None, machines={"wall": wall}, assistants={})
+    assert isinstance(app.login.env, dict) and app.login.env is not os.environ  # a copy of the process's environment
+    url = app.start(0)
+    port = int(url.split("127.0.0.1:", 1)[1].split("/", 1)[0])
+    try:
+        assert _call(port, "GET", "/api/machines/wall")[0] == 200  # its status asked: the platform's login lent
+        status, out = _call(port, "POST", "/api/machines/wall/ask", {"hook": "new_label", "args": ["Games"]})
+        assert status == 200 and "the label Games made" in json.dumps(out)
+        status, out = _call(port, "POST", "/api/machines/wall/ask", {"hook": "move_rules", "args": [[k], "label:Games"]})
+        assert status == 200 and "1 rule moved to Games" in json.dumps(out)
+        assert json.loads(app.login.env["WALL_GROUPS"]) == {"v": 1, "labels": ["Games"], "moved": {"Games": [k]}}
+        assert "WALL_GROUPS" not in os.environ  # kept in the scratch login alone
+        assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "move_rules", "args": [["{not-a-key}"], "system"]})[0] == 400
+        page = _call(port, "GET", "/platform.js")[1]
+        assert b"function groupedTable" in page and b"button.expander[data-group]" in page and b"input.pick-group" in page
+        assert b"move-go" in page and b"'liminal-platform-open-groups'" in page and b"open ? '\xe2\x88\x92' : '+'" in page  # (−) and (+)
+        css = _call(port, "GET", "/platform.css")[1]
+        assert b".expander {" in css and b"table.grouped tr.group-head td" in css
+    finally:
+        app.stop()
