@@ -70,7 +70,7 @@
   }
 
   // -- the tray: the chip, a divider, an icon per active plugin, in the one dark box ------------------------
-  function drawRail() {  // the active plugins, none hidden from the dock (0.10.2: the machine plugins, then the AI assistants)
+  function drawRail() {  // the active plugins, none hidden (0.10.2: the machine plugins, then the AI assistants)
     const sel = selected();
     const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden)); });
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
@@ -538,9 +538,10 @@
   function switchRow(m) {
     const on = !off(m), held = invalid(m);  // not valid: off until it is, whatever the switch says
     const enable = `<label class="switch-row"${held ? ` title="${esc(notHere(m) ? `Not for this machine: ${whyOf(m)}` : `Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? (notHere(m) ? 'Disabled: not for this machine' : 'Disabled: not valid') : 'Disabled'}</label>`;
-    // 0.10.2 (the user: "all plugins need a hide switch next to enable for the dock on the right"): on, its icon stays
-    // out of the dock while the plugin is as it was; a plugin not active is never in the dock, the switch keeps it out after
-    const hide = `<label class="switch-row" title="Its icon in the dock on the right: hidden, the plugin is still enabled and asked as before"><button type="button" class="switch" role="switch" aria-checked="${!!m.hidden}" aria-label="Hide ${esc(m.title)} from the dock" data-hide="${esc(m.name)}"></button>${m.hidden ? 'Hidden from the dock' : on ? 'In the dock' : 'In the dock once active'}</label>`;
+    // 0.10.2 (the user: "all plugins need a hide switch next to enable for the dock on the right"); 0.10.3 (the user: "the
+    // dock hidden visible switch literally needs to say hidden (not lit) and visible (lit)"; "just hidden / visible"): lit,
+    // its icon is on the right once the plugin is active; not lit, hidden while the plugin is as it was
+    const hide = `<label class="switch-row" title="Hidden: its icon is not on the right, the plugin still works as before"><button type="button" class="switch" role="switch" aria-checked="${!m.hidden}" aria-label="${m.hidden ? 'Hidden' : 'Visible'}" data-hide="${esc(m.name)}"></button>${m.hidden ? 'Hidden' : 'Visible'}</label>`;
     return `<span class="switches">${enable}${hide}</span>`;
   }
 
@@ -1086,7 +1087,7 @@
     trayFollows(name, present);
   }
 
-  // a plugin hidden from the dock or shown there again: at once on the page, then the platform's tray (0.10.2)
+  // a plugin hidden, or visible again: at once on the page, then the platform's tray (0.10.2)
   async function setHidden(name, on, refocus) {
     const p = st && pluginOf(name);
     if (!p) return;
@@ -1295,8 +1296,8 @@
     if (e.target.closest('#conn-svg')) { if (focusNode) { focusNode = null; updateConnections(false); } return; }
     const sw = e.target.closest('button.switch[data-toggle]');
     if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
-    const hs = e.target.closest('button.switch[data-hide]');  // hidden from the dock, or shown there again
-    if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') !== 'true', document.activeElement === hs || e.detail === 0); return; }
+    const hs = e.target.closest('button.switch[data-hide]');  // lit: visible, so a click hides it; not lit: shown again
+    if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') === 'true', document.activeElement === hs || e.detail === 0); return; }
     const pick = e.target.closest('[data-select]');
     if (pick) { location.hash = pick.dataset.select === 'machine' ? '' : pick.dataset.select; return; }
     const sp = e.target.closest('button[data-span]');
@@ -1334,7 +1335,7 @@
     }
   });
 
-  // a right click on a plugin's icon in the tray: hide it from the dock, or disable it (the platform's own icon keeps the
+  // a right click on a plugin's icon in the tray: hide it, or disable it (the platform's own icon keeps the
   // browser's menu); an AI assistant's too (0.10.2)
   rail.addEventListener('contextmenu', (e) => {
     const b = e.target.closest('button[data-select]');
@@ -1344,7 +1345,7 @@
     const r = b.getBoundingClientRect();
     const keyboard = e.clientX === 0 && e.clientY === 0;  // the menu key, or Shift+F10: beside the icon
     window.LiminalMenu.open({ x: keyboard ? r.left - 170 : e.clientX, y: keyboard ? r.top : e.clientY, title: m.title,
-      items: [{ label: 'Hide from the dock', run: () => setHidden(m.name, true, false) }, { label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
+      items: [{ label: 'Hide', run: () => setHidden(m.name, true, false) }, { label: 'Disable', run: () => setEnabled(m.name, false, false) }], from: b });
   });
 
   // typing into a login terminal, through its hidden text box (as web terminals do): the keys a terminal sends for

@@ -281,7 +281,7 @@ class PlatformApp(App):
         names = self.hidden()
         (names.add if on else names.discard)(name)
         self._keep(self.disabled(), names)
-        self.log(f"platform: {name} {'hidden from' if on else 'shown in'} the dock")
+        self.log(f"platform: {name} {'hidden' if on else 'visible'}")
         return {"name": name, "hidden": on, "tray": self.tray().as_dict()}
 
     def set_enabled(self, name: str, on: bool) -> dict:

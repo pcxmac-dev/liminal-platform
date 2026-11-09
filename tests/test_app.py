@@ -760,6 +760,7 @@ def test_a_plugin_hidden_from_the_dock_stays_as_it_was_and_comes_back(served):
     assert _call(port, "POST", "/api/plugins/box/hidden", {"on": False})[1]["hidden"] is False and tray() == ["platform", "box"]
     assert _call(port, "POST", "/api/plugins/box/hidden", {"on": "yes"})[0] == 400
     assert _call(port, "POST", "/api/plugins/nobody/hidden", {"on": True})[0] == 404
-    assert any("box hidden from the dock" in x for x in lines) and any("box shown in the dock" in x for x in lines)
+    assert any(x.endswith("box hidden") for x in lines) and any(x.endswith("box visible") for x in lines)
     page = _call(port, "GET", "/platform.js")[1]
-    assert b"data-hide=" in page and b"function setHidden" in page and b"'Hide from the dock'" in page
+    assert b"data-hide=" in page and b"function setHidden" in page and b"label: 'Hide'," in page
+    assert b"'Visible'" in page and b"'Hidden'" in page and b"from the dock" not in page  # the user: "just hidden / visible"

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3 (2026-11-08)
+
+The dock switch says just Visible or Hidden (the user: "the dock hidden visible switch literally needs to say hidden (not
+lit) and visible (lit)"; "don't say 'from the dock'"; "just hidden / visible"): lit, the plugin's icon is on the right
+(once it is active); not lit, hidden. The tray's right click offers Hide beside Disable; the log says "hidden" or
+"visible".
+
 ## 0.10.2 (2026-11-08)
 
 A hide switch beside enable (the user: "all plugins need a hide switch next to enable for the dock on the right"): on
