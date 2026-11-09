@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0 (2026-11-09)
+
+A plugin's settings as entries on its page (the user: "the namecheap plugin is very sparse, it should have entries for
+login credentials api key etc.."): every setting a plugin declares (its keys: the Namecheap plugin's API user, API key,
+account acted on, whitelisted address, sandbox, Dynamic DNS password, hosts and minutes; an AI assistant's key and
+account) is a row under "Settings": its label and variable, set (✓), not set or optional, where to get it (its hint),
+Enter… or Change… opening the settings dialog with that one field, and Forget… for one set (confirmed; it is removed
+from where it is kept). All settings… opens them all at once, as Settings… did. A value is never shown back.
+
 ## 0.14.0 (2026-11-09)
 
 Update packages among the tasks (the user: "move the update packages on to the TASK"): a task `{job: "update"}` draws the

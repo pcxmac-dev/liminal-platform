@@ -656,6 +656,10 @@ def test_a_plugins_settings_are_entered_on_its_page_and_kept_through_the_login()
         assert "KEYED_API_KEY" not in kept
         page = _call(port, "GET", "/platform.js")[1]
         assert b"function settingsForm" in page and b"api/plugins/${enc(d.name)}/settings" in page and b'type="password"' in page
+        # 0.15.0 (the user: "the namecheap plugin is very sparse, it should have entries for login credentials api key etc.."):
+        # each setting an entry on the page, Enter… or Change… for that one, Forget… for one set
+        assert b"function forgetForm" in page and b"settings-forget" in page and b"forget: [d.values.variable]" in page
+        assert "All settings…".encode() in page and b"data-variable=" in page
     finally:
         app.stop()
 

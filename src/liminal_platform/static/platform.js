@@ -412,21 +412,48 @@
   const EDITABLE = ['text', 'number', 'choice', 'password'];
   // a plugin's settings (0.9.0: its keys, from the platform: m.settings), entered in the same dialog and kept through
   // the platform's login: a secret typed hidden, a value never shown back, a field left empty keeping its value
-  const SETTINGS = '__settings';
-  function settingsForm(m) {
-    const set = (m.settings || []).filter((s) => s.set).length;
-    return { id: SETTINGS, hook: '', route: 'settings', title: `${m.title}: settings`, submit: 'Keep them', confirm: false,
-      note: `${set} of ${(m.settings || []).length} set. Kept with you: your user environment variables today, the login app once it holds them. `
-        + 'A field left empty keeps its value; a key is never shown back.',
-      fields: (m.settings || []).map((s) => ({ name: s.variable, label: s.label || s.variable, type: s.secret ? 'password' : 'text',
+  const SETTINGS = '__settings', FORGET = '__forget';
+  function settingsForm(m, only) {  // every setting, or `only` the one named (0.15.0: an entry's Enter… or Change…)
+    const all = m.settings || [], set = all.filter((s) => s.set).length;
+    const shown = only ? all.filter((s) => s.variable === only) : all;
+    if (!shown.length) return null;
+    return { id: only ? `${SETTINGS}:${only}` : SETTINGS, hook: '', route: 'settings', confirm: false,
+      title: only ? `${m.title}: ${shown[0].label || shown[0].variable}` : `${m.title}: settings`, submit: only ? 'Keep it' : 'Keep them',
+      note: (only ? '' : `${set} of ${all.length} set. `) + 'Kept with you: your user environment variables today, the login app once it holds them. '
+        + (only ? 'Left empty, it keeps its value; a key is never shown back.' : 'A field left empty keeps its value; a key is never shown back.'),
+      fields: shown.map((s) => ({ name: s.variable, label: s.label || s.variable, type: s.secret ? 'password' : 'text',
+        required: Boolean(only) && !s.set && !optionalSetting(s),  // one needed and not set yet: typed, or the dialog cancelled
         placeholder: s.set ? 'set: type to replace it' : 'not set', note: [s.variable, s.hint].filter(Boolean).join(' · ') })) };
   }
+  function forgetForm(m, variable) {  // one setting forgotten: kept nowhere any more, once confirmed
+    const s = (m.settings || []).find((x) => x.variable === variable && x.set);
+    if (!s) return null;
+    return { id: `${FORGET}:${variable}`, hook: '', route: 'settings-forget', title: `Forget ${s.label || s.variable}`,
+      fields: [{ name: 'variable', label: 'Variable', type: 'fixed' }, { name: 'label', label: 'Setting', type: 'fixed' }],
+      confirm: { title: `Forget ${s.label || s.variable}?`, words: `${s.variable} is removed from where it is kept (your user environment variables); `
+        + `${m.title} no longer has it until it is entered again.`, yes: 'Forget it', danger: true } };
+  }
+  // a plugin's settings as entries on its page (0.15.0; the user: "the namecheap plugin is very sparse, it should have
+  // entries for login credentials api key etc.."): each it declares with its variable, set or not (never its value),
+  // optional or needed, where to get it (its hint), Enter… or Change… (that one field) and Forget… for one set; All
+  // settings… for every one at once
+  const optionalSetting = (s) => /^optional\b/i.test(s.hint || '');
   function settingsButton(m) {
     const all = m.settings || [];
     if (!all.length) return '';
     const set = all.filter((s) => s.set).length;
-    return `<div class="row actions"><button type="button" class="settings-open" data-machine="${esc(m.name)}">Settings…</button>`
-      + `<span class="muted small">${set} of ${all.length} set</span></div>`;
+    const rows = all.map((s) => {
+      const state = s.set ? '<span class="setting-set">✓ set</span>' : optionalSetting(s) ? '<span class="muted">optional</span>' : '<span class="setting-unset">not set</span>';
+      return `<tr><td><span class="setting-name">${esc(s.label || s.variable)}</span><div class="sub mono">${esc(s.variable)}${s.secret ? ' · hidden' : ''}</div></td>`
+        + `<td>${state}</td><td class="muted small setting-hint">${esc(String(s.hint || '').replace(/^optional:\s*/i, ''))}</td>`
+        + `<td class="setting-buttons"><button type="button" class="settings-open" data-machine="${esc(m.name)}" data-variable="${esc(s.variable)}">${s.set ? 'Change…' : 'Enter…'}</button>`
+        + (s.set ? `<button type="button" class="settings-forget" data-machine="${esc(m.name)}" data-variable="${esc(s.variable)}" data-label="${esc(s.label || s.variable)}">Forget…</button>` : '')
+        + '</td></tr>';
+    }).join('');
+    return `<h4>Settings</h4><div class="muted small note">${set} of ${all.length} set. Kept with you through the platform's login: your user environment `
+      + `variables today, the login app once it holds them. A value is never shown back.</div>`
+      + `<table class="list settings-table"><thead><tr><th>Setting</th><th>State</th><th>Where to get it</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      + `<div class="row actions"><button type="button" class="settings-open" data-machine="${esc(m.name)}">All settings…</button></div>`;
   }
   const pluginOf = (name) => st && (st.machines[name] || (st.assistants || []).find((a) => a.name === name));
   let dlg = null;  // the form open: {name, plugin, form, values, step, busy, accepted, accept, answer, words, opener, key}
@@ -470,7 +497,8 @@
   }
 
   function openForm(name, id, values, opener) {
-    const m = pluginOf(name), f = m && (id === SETTINGS ? settingsForm(m) : formsOf(m)[id]);
+    const m = pluginOf(name), f = m && (id === SETTINGS ? settingsForm(m) : id.startsWith(`${SETTINGS}:`) ? settingsForm(m, id.slice(SETTINGS.length + 1))
+      : id.startsWith(`${FORGET}:`) ? forgetForm(m, id.slice(FORGET.length + 1)) : formsOf(m)[id]);
     if (!f) return;
     const start = {};
     f.fields.forEach((x) => {
@@ -644,7 +672,9 @@
     try {
       out = d.form.route === 'settings'  // a plugin's settings: kept by the platform, the values typed only
         ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: Object.fromEntries(Object.entries(d.values).filter(([, v]) => given(v))) }) }
-        : await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
+        : d.form.route === 'settings-forget'  // one setting forgotten (0.15.0)
+          ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: {}, forget: [d.values.variable] }) }
+          : await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
     }
     catch (e) { err = e; }
     d.busy = false;
@@ -767,7 +797,7 @@
         + (m.setup || jobs[m.name] ? setupLog(m) : '');
     }
     if (invalid(m)) {
-      return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings (Settings…, above) can make it valid. '
+      return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings, above, can make it valid. '
         : hasHook(m, 'check') ? 'Its install, below, can make it valid. '
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
         + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
@@ -781,7 +811,7 @@
     const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
-    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are set with Settings…, above; its plan and model on the charts app's Plugins view. The platform hosts it.</div>`;
+    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>`;
   }
 
   // -- Connections (0.10.0; the user, 2026-11-08: "the root plugin (platform) will need to visually illustrate how
@@ -1500,8 +1530,10 @@
     if (sc) { closeShell(sc.dataset.machine); return; }
     const go = e.target.closest('button.setup, button.step');
     if (go) { setup(go.dataset.machine, go.dataset.step ? [go.dataset.step] : null); return; }
-    const se = e.target.closest('button.settings-open[data-machine]');
-    if (se) { openForm(se.dataset.machine, SETTINGS, {}, se); return; }
+    const se = e.target.closest('button.settings-open[data-machine]');  // every setting, or the one an entry names (0.15.0)
+    if (se) { openForm(se.dataset.machine, se.dataset.variable ? `${SETTINGS}:${se.dataset.variable}` : SETTINGS, {}, se); return; }
+    const sf = e.target.closest('button.settings-forget[data-machine]');
+    if (sf) { openForm(sf.dataset.machine, `${FORGET}:${sf.dataset.variable}`, { variable: sf.dataset.variable, label: sf.dataset.label }, sf); return; }
     const fo = e.target.closest('button.form-open[data-form]');
     if (fo) {  // one of a plugin's forms, filled with the button's values: asked only once confirmed
       let values = {};
