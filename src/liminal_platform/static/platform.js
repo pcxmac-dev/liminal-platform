@@ -217,9 +217,16 @@
   function tasksBar(m, t, forms, can) {
     const k = t.tasks;
     if (!k || !Array.isArray(k.actions)) return '';
-    const buttons = k.actions.map((b) => (b && b.form ? formButton(m, b, forms) : b && b.terminal ? shellButton(m, b.title, b) : askButton(m, b, can))).join('');
+    const buttons = k.actions.map((b) => (b && b.form ? formButton(m, b, forms) : b && b.terminal ? shellButton(m, b.title, b)
+      : b && b.job === 'update' ? updateButton(m, b) : askButton(m, b, can))).join('');
     return `<div class="row tasks" role="group" aria-label="${esc(`${k.title || 'Task'} ${k.subject || ''}`.trim())}"><span class="tasks-title">${esc(k.title || 'Task')}</span>`
       + `${k.subject ? `<span class="tasks-subject">${esc(k.subject)}</span>` : ''}${buttons}</div>`;
+  }
+  function updateButton(m, b) {  // the packages' update of the install chosen: a job, its output in the terminal panel (0.14.0)
+    if (!hasHook(m, 'update_packages')) return '';
+    const busy = !!(jobs[m.name] && jobs[m.name].running) || !!(m.setup && m.setup.running);
+    return `<button type="button" class="update" data-machine="${esc(m.name)}"${busy || (b && b.disabled) ? ' disabled' : ''}${b && b.note ? ` title="${esc(b.note)}"` : ''}>`
+      + `${esc((b && b.title) || 'Update packages')}</button>`;
   }
   function selectTable(m, t, forms, can) {
     const rows = rowsOf(t), s = t.select, pick = can.has(s.hook);
@@ -695,7 +702,7 @@
     return j.running ? 'running…' : j.ok ? 'done' : j.ok === false ? 'ended with a failure' : '';
   }
   function jobTitle(m, j) {
-    const what = (checks[m.name] && checks[m.name].data && checks[m.name].data.distribution) || m.title;
+    const what = (j.action === 'update' && j.what) || (checks[m.name] && checks[m.name].data && checks[m.name].data.distribution) || m.title;
     return j.action === 'update' ? `Updating ${what}'s packages` : PREPARING.includes((j.steps || [])[0]) && j.steps.length === 1
       ? `${m.title}: ${j.steps[0]}` : `Installing ${what}`;
   }
@@ -722,8 +729,9 @@
     const items = d.criteria.map((x) => `<li class="${x.ok ? 'met' : 'unmet'}"><span class="mark" aria-hidden="true">${x.ok ? '✓' : '✗'}</span>`
       + `<span class="what"><span>${esc(x.title)}<span class="sr-only">: ${x.ok ? 'met' : 'not met'}</span></span><span class="sub">${esc(x.detail)}</span></span></li>`).join('');
     const install = d.installed ? '' : `<button type="button" class="install accent" data-machine="${esc(m.name)}" ${d.ready && !busy ? '' : 'disabled'}>Install ${esc(d.distribution || what)}</button>`;
-    const tools = !d.installed ? '' : `<button type="button" class="update" data-machine="${esc(m.name)}" ${busy ? 'disabled' : ''}>Update packages</button>`
-      + (shellInto(m) ? '' : shellButton(m));  // a plugin with installs to choose from: its Terminal is a task of the one chosen (0.13.0)
+    // a plugin with installs to choose from: its Terminal (0.13.0) and Update packages (0.14.0) are tasks of the one chosen
+    const tools = !d.installed || shellInto(m) ? '' : `<button type="button" class="update" data-machine="${esc(m.name)}" ${busy ? 'disabled' : ''}>Update packages</button>`
+      + shellButton(m);
     const said = d.installed ? `${d.distribution} is installed` : d.ready ? (busy ? 'Installing…' : 'Every criterion is met: the install is unlocked.') : `Locked: ${d.why}`;
     return `<h4>This PC for ${esc(what)}</h4><ul class="criteria">${items}</ul>`
       + `<div class="row install-row">${install}${tools}${again}<span class="muted small">${esc(said)}</span></div>${shellPanel(m)}`;
@@ -1314,15 +1322,16 @@
   }
 
   async function runJob(name, action) {  // the Install (everything) or the packages' update
+    const what = action === 'update' ? shellInto(pluginOf(name) || {}) : '';  // the install chosen, which it updates (0.14.0)
     try { await api('POST', `api/machines/${enc(name)}/job`, { action }); }
     catch (e) { say(name, e.message); return; }
-    follow(name, action === 'update' ? 'update' : 'setup', []);
+    follow(name, action === 'update' ? 'update' : 'setup', [], what);
   }
 
-  function follow(name, action, steps) {  // the panel pops up and follows the job from its start
+  function follow(name, action, steps, what) {  // the panel pops up and follows the job from its start
     const was = jobs[name];
     if (was) clearTimeout(was.timer);
-    jobs[name] = { term: LiminalTerminal.create(null), offset: 0, open: true, action, steps: steps || [], running: true, ok: null, timer: null };
+    jobs[name] = { term: LiminalTerminal.create(null), offset: 0, open: true, action, steps: steps || [], running: true, ok: null, timer: null, what: what || '' };
     say(name, '');
     if (st.machines[name]) st.machines[name].setup = { running: true, action };
     if (selected() === name) { drawData(); drawSide(); }

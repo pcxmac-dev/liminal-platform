@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.0 (2026-11-09)
+
+Update packages among the tasks (the user: "move the update packages on to the TASK"): a task `{job: "update"}` draws the
+packages' update button in the Task bar (busy while a job runs), its terminal panel titled by the install it updates;
+the row above the installs keeps neither Update packages nor the terminal for a plugin with installs to choose from. The
+update job of such a plugin (one with `chosen`) is not held back by its own install's check: it updates the one chosen
+and says itself when that is not there.
+
 ## 0.13.0 (2026-11-09)
 
 A table chosen from by a click on a row, its tasks above it (the user: "instead of chosen, put task and for the tasks lets

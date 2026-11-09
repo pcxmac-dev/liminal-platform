@@ -632,7 +632,8 @@ class PlatformApp(App):
         if action == "update":
             if "update_packages" not in hooks:
                 raise Refused(HTTPStatus.BAD_REQUEST, f"{name} updates no packages")
-            if "check" in hooks and not self.check(name).get("installed"):
+            # a plugin with installs to choose from updates the one chosen and says itself when it is not there (0.14.0)
+            if "check" in hooks and not callable(getattr(m, "chosen", None)) and not self.check(name).get("installed"):
                 raise Refused(HTTPStatus.CONFLICT, f"{name} is not installed: install it first")
         elif "check" in hooks and not (steps and set(steps) <= set(PREPARING)):
             c = self.check(name)

@@ -836,5 +836,6 @@ def test_the_terminal_opens_into_the_install_chosen():
         assert b"function shellButton" in page and b"Open a terminal in ${into}" in page and b"b.terminal ? shellButton" in page
         assert b"function selectTable" in page and b"function tasksBar" in page and b"tr[data-pick-row]" in page  # 0.13.0
         assert b"${a.disabled ? ' disabled' : ''}" in page and b"${b.disabled ? ' disabled' : ''}" in page
+        assert b"function updateButton" in page and b"b.job === 'update' ? updateButton(m, b)" in page  # 0.14.0
     finally:
         app.stop()
