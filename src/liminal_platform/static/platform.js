@@ -14,6 +14,12 @@
 // its hooks asked with what the user fills in, once the user has confirmed the exact change: the Namecheap plugin's
 // records set and removed). The selection is the address's #name (#wsl-ubuntu), so a reload or a link keeps it. API
 // paths are relative, so the page works under a super app's prefix too.
+// 0.17.0 (the user, 2026-11-10: "let's do an update. I want to support touch as well as mouse clicking on the interface
+// ... We'll make sure it works across all apps"; "Support for virtual keyboard on tablets and phones"): a finger, a pen and
+// the on-screen keyboard through the library's touch.js (LiminalTouch): the tray's menu by a long press (menu.js), words a
+// finger needs shown on a touch screen, every field's keyboard, no keyboard called up before a field is tapped, the
+// login terminal kept alive across redraws with a row of the keys a phone's keyboard lacks. A mouse and a hardware
+// keyboard work as they did.
 (() => {
   'use strict';
 
@@ -38,6 +44,13 @@
   const hasHook = (m, h) => (m.hooks || []).includes(h);
   const selected = () => decodeURIComponent(location.hash.slice(1)) || 'machine';
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
+  // a finger, a pen and the on-screen keyboard (0.17.0, liminal-libs 1.42.0's touch.js, loaded before this file); without
+  // it, the page as a mouse and a keyboard have it
+  const T = window.LiminalTouch || null;
+  const fingered = () => !!T && (T.lastInput === 'touch' || T.lastInput === 'pen');  // the user's last move was a finger's
+  const mayFocus = () => !T || T.mayFocus();  // a field focused by code calls up no keyboard unasked
+  const autofocus = (el, options) => { if (!el) return false; if (T) return T.autofocus(el, options); el.focus(options); return true; };
+  const kb = (kind, more) => (T ? T.keyboard(kind, more) : 'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"');  // a field's keyboard
 
   async function api(method, path, body) {
     let r;
@@ -73,8 +86,10 @@
   function drawRail() {  // the active plugins, none hidden (0.10.2: the machine plugins, then the AI assistants)
     const sel = selected();
     const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden)); });
+    // a plugin's icon: its name and the right click in its tooltip; a long press (menu.js, 0.17.0) opens the same menu,
+    // headed by its name alone (its data-tip)
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
-      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
+      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)" data-tip="${esc(i.title)}">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
   }
 
   // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants
@@ -214,9 +229,11 @@
       const pick = movable ? `<td class="pick"><input type="checkbox" class="pick-row" ${at(` data-key="${esc(r.key)}"`)}${chosen.has(r.key) ? ' checked' : ''} aria-label="Choose ${esc(textOf(r.cells[0]) + turned)}"></td>` : '';
       const moved = r.moved ? `<div class="sub moved-note">moved here · its own group: ${esc(titles[r.own] || r.own || '')}</div>` : '';
       const why = [r.why, r.off && 'turned off'].filter(Boolean).join(' · ');
+      // why it is in its group, in words under its name on a touch screen (0.17.0: no finger hovers the tooltip over it)
+      const said = why ? `<div class="sub why-here touch-only" aria-hidden="true">${esc(why)}</div>` : '';
       const cls = [place, r.moved && 'moved', r.off && 'off'].filter(Boolean).join(' ');
       return `<tr${cls ? ` class="${cls}"` : ''}>${pick}` + r.cells.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}`
-        + `${i === 0 && why ? ` title="${esc(why)}"` : ''}>${cellHtml(c, m, forms)}${i === 0 ? (turned ? '<span class="sr-only">turned off</span>' : '') + moved : ''}</td>`).join('') + '</tr>';
+        + `${i === 0 && why ? ` title="${esc(why)}"` : ''}>${cellHtml(c, m, forms)}${i === 0 ? (turned ? '<span class="sr-only">turned off</span>' : '') + moved + said : ''}</td>`).join('') + '</tr>';
     };
     const body = t.groups.filter(Boolean).map((g) => {
       const open = isOpen(g.id), mine = rows.filter((r) => r.group === g.id);
@@ -233,8 +250,12 @@
     const thead = `<thead><tr>${movable ? '<th class="pick"></th>' : ''}${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead>`;
     const target = moveTargets[tableKey(m.name, t.title)];
     const options = movable ? t.move.choices.filter(Boolean).map((c) => `<option value="${esc(c.value)}"${c.value === target ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}>${esc(c.title)}</option>`).join('') : '';
+    // the note of the group picked, in words beside it on a touch screen (0.17.0: a phone's picker never shows an option's
+    // tooltip), kept as the pick changes
+    const picked = movable ? t.move.choices.filter(Boolean).find((c) => c.value === target) || t.move.choices.filter(Boolean)[0] : null;
     const bar = movable ? `<div class="row move-bar"><span class="muted small" role="status">${chosen.size ? `${chosen.size} rule${chosen.size === 1 ? '' : 's'} chosen` : 'Choose rules by their boxes to move them'}</span>`
       + `<label class="small">${esc(t.move.title || 'Move to')} <select class="move-to" ${at()}>${options}</select></label>`
+      + `<span class="muted small move-note touch-only">${esc((picked && picked.note) || '')}</span>`
       + `<button type="button" class="move-go" ${at()}${chosen.size ? '' : ' disabled'}>Move</button>`
       + (chosen.size ? `<button type="button" class="move-clear" ${at()}>Clear the choice</button>` : '') + '</div>' : '';
     return `<table class="list stats grouped">${thead}${body}</table>${rows.length ? '' : `<div class="muted small">${esc(t.empty || 'None.')}</div>`}${bar}`;
@@ -257,8 +278,11 @@
     if (!hasHook(m, 'update_packages')) return '';
     const busy = !!(jobs[m.name] && jobs[m.name].running) || !!(m.setup && m.setup.running);
     return `<button type="button" class="update" data-machine="${esc(m.name)}"${busy || (b && b.disabled) ? ' disabled' : ''}${b && b.note ? ` title="${esc(b.note)}"` : ''}>`
-      + `${esc((b && b.title) || 'Update packages')}</button>`;
+      + `${esc((b && b.title) || 'Update packages')}</button>${offWhy(b)}`;
   }
+  // why a button is disabled (its note), in words beside it on a touch screen (0.17.0): no finger hovers its tooltip, and a
+  // disabled button answers no press
+  const offWhy = (b) => (b && b.disabled && b.note ? `<span class="muted small off-why touch-only">${esc(b.note)}</span>` : '');
   function selectTable(m, t, forms, can) {
     const rows = rowsOf(t), s = t.select, pick = can.has(s.hook);
     const at = (r) => `data-machine="${esc(m.name)}" data-hook="${esc(s.hook)}" data-key="${esc(r.key)}"`;
@@ -272,7 +296,9 @@
       return `<tr class="pickable${on ? ' picked' : ''}"${pick ? ` data-pick-row ${at(r)}` : ''}>` + r.cells.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"'
         : longWord(c) ? ' class="long"' : ''}>${i === 0 ? first(r, on) : cellHtml(c, m, forms)}</td>`).join('') + '</tr>';
     }).join('');
-    return tasksBar(m, t, forms, can) + (rows.length ? `<table class="list stats selectable"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`
+    // what a row's tap does, in words above the rows on a touch screen (0.17.0: its name's tooltip says it to a mouse)
+    const how = pick && s.title && rows.length ? `<div class="muted small touch-only">${esc(s.title)}</div>` : '';
+    return tasksBar(m, t, forms, can) + how + (rows.length ? `<table class="list stats selectable"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`
       : `<div class="muted small">${esc(t.empty || 'None.')}</div>`);
   }
   async function pickRow(el) {  // the row chosen at once on the page, then the plugin asked and drawn again
@@ -335,7 +361,11 @@
     .observe(document.body, { childList: true, subtree: true });
   document.addEventListener('change', (e) => {
     const s = e.target.closest && e.target.closest('select.move-to[data-table]');
-    if (s) moveTargets[tableKey(s.dataset.machine, s.dataset.table)] = s.value;
+    if (!s) return;
+    moveTargets[tableKey(s.dataset.machine, s.dataset.table)] = s.value;
+    const note = s.closest('.move-bar') && s.closest('.move-bar').querySelector('.move-note');  // its note in words (0.17.0)
+    const o = s.options[s.selectedIndex];
+    if (note) note.textContent = (o && o.getAttribute('title')) || '';
   });
   function statTables(m) {
     const forms = formsOf(m), can = new Set(m.asks || []);
@@ -418,7 +448,7 @@
   // a button asking one of a plugin's hooks by name ({hook, args, title, note}), when the platform may ask it now
   function askButton(m, a, can) {
     return a && can.has(a.hook) && Array.isArray(a.args || []) ? `<button type="button" class="ask" data-machine="${esc(m.name)}" `
-      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}${a.disabled ? ' disabled' : ''}>${esc(a.title || a.hook)}</button>` : '';
+      + `data-hook="${esc(a.hook)}" data-args='${esc(JSON.stringify(a.args || []))}'${a.note ? ` title="${esc(a.note)}"` : ''}${a.disabled ? ' disabled' : ''}>${esc(a.title || a.hook)}</button>${offWhy(a)}` : '';
   }
 
   // a plugin's actions (status.actions: {hook, args, title, note}: one of its hooks asked by name from a button, the
@@ -433,7 +463,8 @@
   // -- a plugin's forms (0.6.0, status.forms): one of its hooks asked with what the user fills in, once the user has
   // confirmed the exact change; its answer said in words. A form: {id, hook, title, note, fields, submit, confirm: {title,
   // words, yes, danger}}; a field: {name, label, type: text | number | choice | fixed | accept, value, choices: [{value,
-  // title, note}], placeholder, note, required, min, max, empty, when: {field: [values]}}, the fields in the order of the
+  // title, note}], placeholder, note, required, min, max, empty, when: {field: [values]}, keyboard (0.17.0, optional: the
+  // on-screen keyboard it calls up, one of the library's kinds its type takes: see keyboardOf)}, the fields in the order of the
   // hook's arguments (a field whose `when` is unmet, or left empty, is sent as null: the hook's default). A button names
   // a form: an action ({form, title, values}), a table's `actions` under it, a cell ({form, title, values, label}); its
   // `values` fill the fields by name, and a form with nothing to fill goes straight to its confirmation, where `{name}` in
@@ -502,7 +533,7 @@
     const f = b && typeof b.form === 'string' && (forms || formsOf(m))[b.form];
     if (!f) return '';
     return `<button type="button" class="form-open" data-machine="${esc(m.name)}" data-form="${esc(b.form)}" data-values='${esc(JSON.stringify(b.values || {}))}'`
-      + `${b.label ? ` aria-label="${esc(b.label)}"` : ''}${b.note ? ` title="${esc(b.note)}"` : ''}${b.disabled ? ' disabled' : ''}>${esc(b.title || f.title || f.hook)}</button>`;
+      + `${b.label ? ` aria-label="${esc(b.label)}"` : ''}${b.note ? ` title="${esc(b.note)}"` : ''}${b.disabled ? ' disabled' : ''}>${esc(b.title || f.title || f.hook)}</button>${offWhy(b)}`;
   }
 
   const given = (v) => v !== undefined && v !== null && v !== '';
@@ -543,7 +574,14 @@
       accept: null, answer: null, words: '', opener, key: opener ? `${opener.dataset.form}|${opener.dataset.values}` : '' };
     const el = dialogEl();
     drawDialog();
-    if (!el.open) el.showModal();
+    if (!el.open) {
+      // opened by a finger (0.17.0): on its heading, so no keyboard covers the dialog before a field is tapped (the
+      // browser's own opening focuses the first field it can reach by Tab: the heading is that one meanwhile)
+      const head = mayFocus() ? null : $('formDialogTitle');
+      if (head) { head.tabIndex = 0; head.setAttribute('autofocus', ''); }
+      el.showModal();
+      if (head) { head.tabIndex = -1; head.removeAttribute('autofocus'); }
+    }
     focusStep();
   }
 
@@ -564,6 +602,17 @@
       const bad = $(`${e.target.id}-bad`);
       if (bad) bad.textContent = '';
     });
+    // an on-screen keyboard's Next (0.17.0): the next field shown, the form not sent yet (Safari sends it otherwise); a
+    // hardware keyboard's Enter sends it from any field, as before
+    el.addEventListener('keydown', (e) => {
+      const c = e.target;
+      if (e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || !fingered()) return;
+      if (!c.matches || !c.matches('form input') || c.getAttribute('enterkeyhint') !== 'next') return;
+      const shown = shownControls(el), next = shown[shown.indexOf(c) + 1];
+      if (!next) return;
+      e.preventDefault();
+      next.focus({ preventScroll: true });  // touch.js brings it into view above the keyboard
+    });
     el.addEventListener('click', (e) => {
       const b = e.target.closest('button[data-do]');
       if (!b || b.disabled || !dlg) return;
@@ -577,18 +626,30 @@
     return el;
   }
 
+  // the keyboard a field calls up on a phone or a tablet (0.17.0, the library's kinds): the one its plugin names in
+  // `keyboard` when its type takes it (a host name's url, an address's email), else its type's own: a number the digits
+  // pad (the keyboard with a minus where it may be below 0), a secret kept out of password managers (not a new password),
+  // a text typed as it is (no capitals, no corrections). Signed is a number's alone: its minus is type=number's keyboard's
+  const KEYBOARDS_OF = { text: ['plain', 'text', 'name', 'search', 'email', 'url', 'number', 'decimal', 'ticker', 'username', 'code'],
+    number: ['number', 'signed'], password: ['secret', 'key', 'password'] };
+  function keyboardOf(x) {
+    if (typeof x.keyboard === 'string' && (KEYBOARDS_OF[x.type] || []).includes(x.keyboard)) return x.keyboard;
+    if (x.type === 'number') return given(x.min) && Number(x.min) >= 0 ? 'number' : 'signed';
+    return x.type === 'password' ? 'secret' : 'plain';
+  }
   function fieldHtml(x, i, values) {
     if (!x || !EDITABLE.includes(x.type) || typeof x.name !== 'string') return '';
     const id = `fd-${i}`, v = values[x.name], c = x.type === 'choice' ? choiceOf(x, v) : null;
     const attrs = `id="${id}" name="${esc(x.name)}" aria-describedby="${id}-note ${id}-bad"${x.required ? ' aria-required="true"' : ''}`;
     const hint = x.placeholder ? ` placeholder="${esc(x.placeholder)}"` : '';
+    const keys = x.type === 'choice' ? '' : kb(keyboardOf(x));  // its Enter's word is set by its place (syncFill)
     const control = x.type === 'choice'
       ? `<select ${attrs}>${(x.choices || []).filter(Boolean).map((o) => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.title !== undefined ? o.title : o.value)}</option>`).join('')}</select>`
       : x.type === 'number'
-        ? `<input type="number" inputmode="numeric" step="1" ${attrs}${x.min !== undefined ? ` min="${esc(x.min)}"` : ''}${x.max !== undefined ? ` max="${esc(x.max)}"` : ''} value="${given(v) ? esc(v) : ''}"${hint}>`
+        ? `<input type="number" step="1" ${keys} ${attrs}${x.min !== undefined ? ` min="${esc(x.min)}"` : ''}${x.max !== undefined ? ` max="${esc(x.max)}"` : ''} value="${given(v) ? esc(v) : ''}"${hint}>`
         : x.type === 'password'
-          ? `<input type="password" autocomplete="new-password" spellcheck="false" ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`
-          : `<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`;
+          ? `<input type="password" ${keys} ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`
+          : `<input type="text" ${keys} ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`;
     const optional = !x.required && x.type !== 'choice' ? ' <span class="muted">(optional)</span>' : '';
     return `<div class="field" data-field="${esc(x.name)}"><label for="${id}">${esc(x.label || x.name)}${optional}</label>${control}`
       + `<span class="sub" id="${id}-note">${esc((c && c.note) || x.note || '')}</span><span class="bad" id="${id}-bad"></span></div>`;
@@ -647,13 +708,17 @@
     if (step === 'fill') syncFill();
   }
 
-  function focusStep() {  // the fill's first field; else the step's heading, so Enter confirms nothing by itself
+  function focusStep() {  // the fill's first field; else the step's heading, so Enter confirms nothing by itself (after a
+    // finger's tap, the heading too: the keyboard comes up when a field is tapped, 0.17.0)
     const el = $('formDialog');
     if (!el || !dlg) return;
-    const target = (dlg.step === 'fill' && el.querySelector('form input, form select')) || $('formDialogTitle');
+    const target = (dlg.step === 'fill' && mayFocus() && el.querySelector('form input, form select')) || $('formDialogTitle');
     if (target) target.focus({ preventScroll: true });
   }
 
+  // the form's fields shown (a field whose `when` is unmet is not), in order
+  const shownControls = (el) => [...el.querySelectorAll('form .field[data-field]')].filter((d) => !d.hidden)
+    .map((d) => d.querySelector('input, select')).filter(Boolean);
   function syncFill() {  // what the form holds kept; a field whose `when` is unmet hidden; a choice's note under it
     const el = $('formDialog');
     if (!el || !dlg || dlg.step !== 'fill') return;
@@ -664,6 +729,13 @@
       div.hidden = !whenMet(dlg.values, x);
       const note = div.querySelector('.sub');
       if (x.type === 'choice' && note) note.textContent = ((choiceOf(x, dlg.values[x.name]) || {}).note) || x.note || '';
+    });
+    // the on-screen keyboard's Enter (0.17.0): Next on every field shown but the last, the last its kind's own word
+    const shown = shownControls(el);
+    shown.forEach((c, i) => {
+      if (c.localName !== 'input') return;
+      const own = ((T && T.KEYBOARDS[c.dataset.keyboard]) || {}).enterkeyhint || 'done';
+      c.setAttribute('enterkeyhint', i < shown.length - 1 ? 'next' : own === 'next' ? 'done' : own);
     });
   }
 
@@ -688,7 +760,9 @@
       if (bad) bad.textContent = why;
       if (why && !first) first = c;
     });
-    if (first) { first.focus(); return; }
+    // the first field to change: focused, or after a finger's tap brought into view with its complaint (0.17.0: no keyboard
+    // called up before it is tapped)
+    if (first) { if (!autofocus(first)) (first.closest('.field') || first).scrollIntoView({ block: 'nearest' }); return; }
     if (dlg.form.confirm === false) { send(); return; }  // a choice changing nothing on the machine (0.7.0): asked at once
     dlg.step = 'confirm';
     drawDialog();
@@ -786,8 +860,9 @@
     const c = checks[m.name], busy = m.setup && m.setup.running || (jobs[m.name] && jobs[m.name].running);
     const what = m.title.replace(/^WSL /, '');
     const again = `<button type="button" class="recheck" data-machine="${esc(m.name)}">Check again</button>`;
-    if (!c || c.loading) return `<h4>This PC for ${esc(what)}</h4><div class="muted small">Checking this PC…</div>`;
-    if (c.error) return `<h4>This PC for ${esc(what)}</h4><p class="error">${esc(c.error)}</p>${again}`;
+    // a terminal open stays while the check is asked again (0.17.0: the keyboard typing into it stays up)
+    if (!c || c.loading) return `<h4>This PC for ${esc(what)}</h4><div class="muted small">Checking this PC…</div>${shellPanel(m)}`;
+    if (c.error) return `<h4>This PC for ${esc(what)}</h4><p class="error">${esc(c.error)}</p>${again}${shellPanel(m)}`;
     const d = c.data;
     const items = d.criteria.map((x) => `<li class="${x.ok ? 'met' : 'unmet'}"><span class="mark" aria-hidden="true">${x.ok ? '✓' : '✗'}</span>`
       + `<span class="what"><span>${esc(x.title)}<span class="sr-only">: ${x.ok ? 'met' : 'not met'}</span></span><span class="sub">${esc(x.detail)}</span></span></li>`).join('');
@@ -807,18 +882,49 @@
     if (!hasHook(m, 'terminal')) return '';
     const into = shellInto(m), sh = shells[m.name], same = sh && (!into || !sh.into || sh.into === into);
     return `<button type="button" class="shell-open" data-machine="${esc(m.name)}"${b && b.disabled ? ' disabled' : ''}${b && b.note ? ` title="${esc(b.note)}"` : ''}>`
-      + `${esc(same ? 'Show the terminal' : title || (into ? `Open a terminal in ${into}` : 'Open a terminal'))}</button>`;
+      + `${esc(same ? 'Show the terminal' : title || (into ? `Open a terminal in ${into}` : 'Open a terminal'))}</button>${offWhy(b)}`;
   }
 
-  function shellPanel(m) {
-    const sh = shells[m.name];
-    if (!sh) return '';
-    return `<div class="term-panel shell" data-panel="shell-${esc(m.name)}"><div class="term-head"><span>${esc(sh.title || 'Terminal')}</span>`
-      + `<span class="muted small state">${sh.alive ? 'click, then type; Ctrl+Shift+C copies' : 'ended'}</span>`
-      + `<button type="button" class="shell-close" data-machine="${esc(m.name)}" aria-label="Close the terminal">×</button></div>`
-      + `<pre class="term interactive" id="shell-term-${esc(m.name)}" data-machine="${esc(m.name)}" aria-hidden="true"></pre>`
-      + `<textarea class="term-input" id="shell-in-${esc(m.name)}" data-machine="${esc(m.name)}" aria-label="Type into ${esc(sh.title || 'the terminal')}" `
-      + `autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" rows="1"></textarea></div>`;
+  // A login terminal's panel (0.17.0): one element per terminal, kept alive across the page's redraws (the page draws a slot
+  // where it goes, and drawData draws the pane anew around it), so a redraw never closes the on-screen keyboard nor drops a
+  // word being typed. Under its lines, on a touch screen, the keys a phone's keyboard lacks: Esc, Tab, Ctrl (held for the
+  // next key), the arrows, ^C, ^D and Paste.
+  const shellPanel = (m) => (shells[m.name] ? `<div class="term-slot" data-shell-slot="${esc(m.name)}"></div>` : '');
+  // how to type into it: a mouse's words as before, a finger's added on a touch screen, a phone's or a tablet's alone where
+  // a finger is the only pointer (platform.css: a computer with a touch screen beside its mouse shows both)
+  const HOW_TO_TYPE = '<span class="how-mouse">click, then type; Ctrl+Shift+C copies</span><span class="how-touch touch-only">tap, then type; press and hold to copy</span>';
+  const TERM_KEYS = [['Escape', 'Esc', 'Escape'], ['Tab', 'Tab', 'Tab'], ['Ctrl', 'Ctrl', 'Control, held for the next key'],
+    ['ArrowUp', '↑', 'Up'], ['ArrowDown', '↓', 'Down'], ['ArrowLeft', '←', 'Left'], ['ArrowRight', '→', 'Right'],
+    ['^C', '^C', 'Control C: interrupt'], ['^D', '^D', 'Control D: end of input'], ['Paste', 'Paste', 'Paste what is copied']];
+  function shellPanelEl(name) {  // made once, its words kept current
+    const sh = shells[name];
+    if (!sh) return null;
+    if (!sh.panel) {
+      const n = esc(name), wrap = document.createElement('div');
+      wrap.innerHTML = `<div class="term-panel shell" data-panel="shell-${n}" data-touch-own><div class="term-head"><span class="term-title"></span>`
+        + `<span class="muted small state"></span><button type="button" class="shell-close" data-machine="${n}" aria-label="Close the terminal">×</button></div>`
+        + `<pre class="term interactive" id="shell-term-${n}" data-machine="${n}" aria-hidden="true"></pre>`
+        + `<div class="term-keys touch-only" role="toolbar" aria-label="Keys a phone's keyboard lacks">`
+        + TERM_KEYS.map(([k, text, words]) => `<button type="button" tabindex="-1" data-term-key="${k}" data-machine="${n}" aria-label="${words}"`
+          + `${k === 'Ctrl' ? ' aria-pressed="false"' : ''}>${text}</button>`).join('')
+        + '<span class="term-said" role="status"></span></div>'
+        + `<textarea class="term-input" id="shell-in-${n}" data-machine="${n}" rows="1" ${kb('terminal')}></textarea>`
+        + '<span class="term-composing" aria-hidden="true" hidden></span></div>';
+      sh.panel = wrap.firstElementChild;
+      keepBox(sh.panel.querySelector('textarea.term-input'));
+      sh.panel.querySelector('pre.term').addEventListener('click', tapTerminal);  // on the lines themselves: Safari makes a click of a tap there only so
+    }
+    syncShellPanel(name);
+    return sh.panel;
+  }
+  function syncShellPanel(name) {  // its words as the terminal is now: its title, how to type into it, or that it ended
+    const sh = shells[name], p = sh && sh.panel;
+    if (!p) return;
+    p.querySelector('.term-title').textContent = sh.title || 'Terminal';
+    const state = p.querySelector('.term-head .state'), alive = String(!!sh.alive);
+    if (state.dataset.alive !== alive) { state.dataset.alive = alive; state.innerHTML = sh.alive ? HOW_TO_TYPE : 'ended'; }
+    p.querySelector('textarea.term-input').setAttribute('aria-label', `Type into ${sh.title || 'the terminal'}`);
+    p.querySelector('.term-keys').hidden = !sh.alive;
   }
 
   function pluginData(m) {
@@ -924,8 +1030,10 @@
   function nodeSvg(n) {
     const w = n.w, ic = icon(n.icon || 'plug', 15).replace('<svg ', `<svg x="${-w / 2 + 8}" y="-7.5" `);
     const dot = n.role === 'plugin' ? `<circle class="dot" cx="${w / 2 - 10}" cy="0" r="3.5"/>` : '';
+    // its row's whole height (34) a finger's to pick on a touch screen (0.17.0: rect.hit, unseen), the box drawn 26 high
     return `<g class="node role-${esc(n.role)} state-${esc(n.state || 'none')}" data-node="${esc(n.id)}" transform="translate(${n.x} ${n.y})"`
       + ` tabindex="0" role="button" aria-pressed="false" aria-label="${esc(nodeTip(n))}"><title>${esc(nodeTip(n))}</title>`
+      + `<rect class="hit" x="${-w / 2}" y="-17" width="${w}" height="34" rx="7"/>`
       + `<rect x="${-w / 2}" y="-13" width="${w}" height="26" rx="7"/>${ic}<text x="${-w / 2 + 29}" y="4" data-room="${w - 29 - (dot ? 20 : 8)}">${esc(n.title)}</text>${dot}</g>`;
   }
 
@@ -1101,19 +1209,45 @@
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
-    const typing = document.activeElement && document.activeElement.matches && document.activeElement.matches('.term-input');
     if (m && hasHook(m, 'check') && !userOff(m)) {  // its check of this PC: asked when shown, again after a minute
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
     }
-    data.innerHTML = sel === 'machine' ? machineData() : sel === CONNECTIONS ? connectionsData() : m ? pluginData(m) : a ? assistantData(a)
+    const html = sel === 'machine' ? machineData() : sel === CONNECTIONS ? connectionsData() : m ? pluginData(m) : a ? assistantData(a)
       : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
+    // a terminal's panel shown stays where it is, the pane drawn anew around it (0.17.0): its box keeps the focus, the
+    // on-screen keyboard stays up and a word being composed goes on; else the pane drawn anew and the panel put in its slot
+    const panel = m && shells[m.name] ? shells[m.name].panel : null;
+    if (!(panel && panel.parentNode === data && drawAround(panel, html, m.name))) {
+      const typing = !!panel && panel.contains(document.activeElement);
+      data.innerHTML = html;
+      placeShells(typing);
+    }
     if (sel === CONNECTIONS) updateConnections(true);
     Charts.draw(data);
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
-    Object.entries(shells).forEach(([name, sh]) => sh.term.attach($(`shell-term-${name}`)));
-    if (typing && m && shells[m.name]) { const el = $(`shell-in-${m.name}`); if (el) el.focus({ preventScroll: true }); }
+    Object.values(shells).forEach((sh) => { if (sh.panel && !sh.panel.isConnected) sh.term.attach(null); });  // not shown: not drawn
     data.scrollTop = scrolled;
+  }
+  function drawAround(panel, html, name) {  // the pane's other parts replaced, the panel never taken out (false: no slot for it)
+    const t = document.createElement('template');
+    t.innerHTML = html;
+    const parts = [...t.content.childNodes], at = parts.findIndex((n) => n.nodeType === 1 && n.getAttribute('data-shell-slot') === name);
+    if (at < 0) return false;
+    [...data.childNodes].forEach((n) => { if (n !== panel) n.remove(); });
+    panel.before(...parts.slice(0, at));
+    panel.after(...parts.slice(at + 1));
+    syncShellPanel(name);
+    return true;
+  }
+  function placeShells(refocus) {  // each terminal's panel in its slot (made, or put back after another view), drawn at its end
+    data.querySelectorAll('[data-shell-slot]').forEach((slot) => {
+      const name = slot.getAttribute('data-shell-slot'), panel = shellPanelEl(name);
+      if (!panel) { slot.remove(); return; }
+      slot.replaceWith(panel);
+      shells[name].term.attach(panel.querySelector('pre.term'));
+      if (refocus) panel.querySelector('textarea.term-input').focus({ preventScroll: true });  // typed in before: typed in still
+    });
   }
 
   // -- the right: the selected one's specifics ----------------------------------------------------------
@@ -1186,7 +1320,14 @@
     const g = ++gen;
     let fresh;
     try { fresh = await Promise.all([api('GET', 'api/status'), api('GET', 'api/tray')]); }
-    catch (e) { if (g === gen) data.innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+    catch (e) {
+      if (g !== gen) return;
+      // a terminal on the page stays where it is, typed into still (0.17.0: a view never replaces the field typed in): the
+      // trouble said at the head of its plugin's page, the next answer drawing it all again; else the pane says it, as before
+      const line = st && data.querySelector('.term-panel.shell') ? $(`err-${selected()}`) : null;
+      if (line) line.textContent = e.message; else data.innerHTML = `<p class="error">${esc(e.message)}</p>`;
+      return;
+    }
     if (g !== gen) return;  // something changed meanwhile: a newer answer is on its way
     [st, tray] = fresh;
     draw();
@@ -1396,7 +1537,7 @@
 
   function follow(name, action, steps, what) {  // the panel pops up and follows the job from its start
     const was = jobs[name];
-    if (was) clearTimeout(was.timer);
+    if (was) { clearTimeout(was.timer); was.term.attach(null); }  // the last job's lines no longer followed (0.17.0)
     jobs[name] = { term: LiminalTerminal.create(null), offset: 0, open: true, action, steps: steps || [], running: true, ok: null, timer: null, what: what || '' };
     say(name, '');
     if (st.machines[name]) st.machines[name].setup = { running: true, action };
@@ -1451,18 +1592,24 @@
   // -- a login terminal (the user: "the plugin also allows for a user to login through a terminal in to the environment")
   async function openShell(name) {
     const into = shellInto(pluginOf(name) || {});
-    if (shells[name] && (!into || !shells[name].into || shells[name].into === into)) { const el = $(`shell-in-${name}`); if (el) el.focus(); return; }
+    if (shells[name] && (!into || !shells[name].into || shells[name].into === into)) { showShell(name); return; }
     if (shells[name]) await closeShell(name);  // another install chosen: its terminal instead
     let got;
     try { got = await api('POST', `api/machines/${enc(name)}/terminal`, {}); }
     catch (e) { say(name, e.message); return; }
-    const sh = { term: LiminalTerminal.create(null, { cursor: true }), offset: got.offset, alive: got.alive, title: got.title, into, queue: '', sending: null, reading: false };
+    // its panel made once and kept (0.17.0), the cursor followed sideways on a touch screen; a Ctrl held from its key row
+    const sh = { term: LiminalTerminal.create(null, { cursor: true, followCursor: () => !!(T && T.touch) }), offset: got.offset, alive: got.alive,
+      title: got.title, into, queue: '', sending: null, reading: false, panel: null, ctrl: false };
     shells[name] = sh;
     sh.term.write(got.text);
     drawData();
-    const el = $(`shell-in-${name}`);
-    if (el) el.focus();
+    showShell(name);
     readShell(name);
+  }
+  function showShell(name) {  // typed into at once with a mouse or a keyboard; after a finger's tap only brought into view,
+    // its keyboard called up by a tap on its lines (0.17.0: none unasked)
+    const el = $(`shell-in-${name}`);
+    if (el && !autofocus(el)) el.closest('.term-panel').scrollIntoView({ block: 'nearest' });
   }
 
   // one read at a time, held open by the platform until the shell prints (its echo at once), nothing drawn twice
@@ -1483,8 +1630,7 @@
       if (document.hidden) await pause(1000);
     }
     sh.reading = false;
-    const state = document.querySelector(`[data-panel="shell-${CSS.escape(name)}"] .state`);
-    if (state && !sh.alive) state.textContent = 'ended';
+    if (shells[name] === sh) syncShellPanel(name);  // ended: said so, its key row put away
   }
 
   function type(name, keys) {  // the keys typed, sent in small batches; the echo comes back through the read held open
@@ -1505,6 +1651,7 @@
     const sh = shells[name];
     if (!sh) return;
     delete shells[name];  // its read ends with it
+    sh.term.attach(null);  // its lines' scrolls and size no longer followed (0.17.0)
     try { await api('POST', `api/machines/${enc(name)}/terminal/close`, {}); } catch (e) { /* gone already */ }
     drawData();
   }
@@ -1529,6 +1676,10 @@
     if (sw) { setEnabled(sw.dataset.toggle, sw.getAttribute('aria-checked') !== 'true', document.activeElement === sw || e.detail === 0); return; }
     const hs = e.target.closest('button.switch[data-hide]');  // lit: visible, so a click hides it; not lit: shown again
     if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') === 'true', document.activeElement === hs || e.detail === 0); return; }
+    const tk = e.target.closest('button[data-term-key]');  // a key of a terminal's key row (0.17.0)
+    if (tk) { termKey(tk); return; }
+    const cell = fingered() && e.target.matches('table.grouped td.pick') ? e.target : null;  // a finger's tap beside a rule's box: the box's (0.17.0)
+    if (cell) { const x = cell.querySelector('input[type="checkbox"]'); if (x && !x.disabled) x.click(); return; }
     const rp = e.target.closest('button.row-pick[data-key], tr[data-pick-row]');  // an install chosen by a click on its row (0.13.0)
     if (rp && (e.target.closest('button.row-pick') || !e.target.closest('button, a, input, select, label'))) { pickRow(rp); return; }
     const ex = e.target.closest('button.expander[data-group]');  // a group opened (+) or closed (−), or a name under it
@@ -1600,35 +1751,169 @@
 
   // typing into a login terminal, through its hidden text box (as web terminals do): the keys a terminal sends for
   // Enter, the arrows, Tab, Backspace and Ctrl+letter at keydown; text from the box's input, so composed characters
-  // (dead keys, other layouts) and a paste arrive whole (Ctrl+Shift+C copies, Ctrl+Shift+V pastes)
+  // (dead keys, other layouts) and a paste arrive whole (Ctrl+Shift+C copies, Ctrl+Shift+V pastes).
+  // 0.17.0, a phone's or a tablet's keyboard too: the box keeps one unseen character (KEEP), so a Backspace always has
+  // something to delete and reaches the shell (Gboard and others send it as a deletion, not as a key); the word such a
+  // keyboard composes is shown at the cursor until it is done, then sent; a Ctrl held from the key row makes the next
+  // character typed its control code
+  const KEEP = String.fromCharCode(0x200b);  // a zero-width space: unseen, yet a character to delete
+  const termBox = (t) => (t && t.closest ? t.closest('.term-input[data-machine]') : null);
+  const typedIn = (box) => box.value.split(KEEP).join('');  // what a keyboard put in the box
+  function keepBox(box) {  // back to its one character, the caret after it
+    if (!box) return;
+    if (box.value !== KEEP) box.value = KEEP;
+    try { box.setSelectionRange(KEEP.length, KEEP.length); } catch (e) { /* not on the page yet */ }
+  }
+  function setCtrl(name, on) {  // the key row's Ctrl, held for the next key or let go
+    const sh = shells[name];
+    if (!sh) return;
+    sh.ctrl = on;
+    const b = sh.panel && sh.panel.querySelector('[data-term-key="Ctrl"]');
+    if (b) b.setAttribute('aria-pressed', String(on));
+  }
+  function typeKey(name, keys) {  // a key that is not text; under a held Ctrl, an arrow is a word over (as xterm sends it)
+    const sh = shells[name];
+    if (sh && sh.ctrl) {
+      setCtrl(name, false);
+      const arrow = /^\x1b\[([ABCD])$/.exec(keys);
+      if (arrow) keys = `\x1b[1;5${arrow[1]}`;
+    }
+    type(name, keys);
+  }
+  function typeText(name, text) {  // text a keyboard typed; under a held Ctrl, its first character as its control code
+    const sh = shells[name];
+    if (!sh || !text) return;
+    if (sh.ctrl) {
+      setCtrl(name, false);
+      const code = LiminalTerminal.ctrl(text[0]);
+      if (code) text = code + text.slice(1);
+    }
+    type(name, text.replace(/\r?\n/g, '\r'));
+  }
+  function composing(box, on) {  // the word a phone's keyboard composes, shown at the terminal's cursor until it is sent
+    // (a hardware keyboard's own composing, an IME's or a dead key's, shows nothing new: as before)
+    const p = box.closest('.term-panel'), w = p && p.querySelector('.term-composing'), pre = p && p.querySelector('pre.term');
+    const text = on && fingered() ? typedIn(box) : '';
+    if (!w || !pre) return;
+    w.hidden = !text;
+    if (!text) return;
+    w.textContent = text;
+    const c = pre.querySelector('.t-cursor'), panel = p.getBoundingClientRect(), view = pre.getBoundingClientRect();
+    const at = c ? c.getBoundingClientRect() : { left: view.left + 10, top: view.bottom - 24 };
+    w.style.left = `${Math.round(Math.max(view.left, Math.min(at.left, view.right - w.offsetWidth)) - panel.left)}px`;
+    w.style.top = `${Math.round(Math.max(view.top, Math.min(at.top, view.bottom - w.offsetHeight)) - panel.top)}px`;
+  }
   data.addEventListener('keydown', (e) => {
-    const box = e.target.closest && e.target.closest('.term-input[data-machine]');
+    const box = termBox(e.target);
     if (!box || e.isComposing) return;
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;  // a character: the input brings it
     if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'V' || e.key === 'c' || e.key === 'v')) return;  // copy, paste
     const keys = LiminalTerminal.keys(e);
-    if (keys) { e.preventDefault(); type(box.dataset.machine, keys); }
+    if (keys) { e.preventDefault(); typeKey(box.dataset.machine, keys); }
+  });
+  data.addEventListener('beforeinput', (e) => {  // a keyboard's Backspace as a deletion (0.17.0): sent, the box kept as it is
+    const box = termBox(e.target);
+    if (!box || e.isComposing || !e.cancelable || !/^delete.*Backward$/.test(e.inputType || '')) return;
+    e.preventDefault();
+    typeKey(box.dataset.machine, '\x7f');
   });
   data.addEventListener('input', (e) => {
-    const box = e.target.closest && e.target.closest('.term-input[data-machine]');
-    if (!box || e.isComposing) return;
-    const text = box.value;
-    box.value = '';
-    if (text) type(box.dataset.machine, text.replace(/\r?\n/g, '\r'));
+    const box = termBox(e.target);
+    if (!box) return;
+    const name = box.dataset.machine, sh = shells[name];
+    // a word being composed: shown, sent once done; under a held Ctrl, sent at once, its first character the control code
+    // (the key row's Ctrl sent the word composed before it, so this one began after it)
+    if (e.isComposing) {
+      const text = typedIn(box);
+      if (sh && sh.ctrl && text) { keepBox(box); composing(box, false); typeText(name, text); return; }
+      composing(box, true);
+      return;
+    }
+    const text = typedIn(box), gone = !text && !box.value.includes(KEEP);  // the kept character deleted: a Backspace
+    keepBox(box);
+    if (text) typeText(name, text);
+    else if (gone) typeKey(name, '\x7f');
   });
   data.addEventListener('compositionend', (e) => {
-    const box = e.target.closest && e.target.closest('.term-input[data-machine]');
+    const box = termBox(e.target);
     if (!box) return;
-    const text = box.value;
-    box.value = '';
-    if (text) type(box.dataset.machine, text);
+    composing(box, false);
+    const text = typedIn(box);
+    keepBox(box);
+    if (text) typeText(box.dataset.machine, text);
   });
+  data.addEventListener('focusin', (e) => keepBox(termBox(e.target)));
+  data.addEventListener('focusout', (e) => { const box = termBox(e.target); if (box) composing(box, false); });
   data.addEventListener('mouseup', (e) => {  // a click in the terminal types into it (a selection made is left to copy)
+    if (fingered()) return;  // a finger's tap: tapTerminal, at its click (0.17.0)
     const t = e.target.closest && e.target.closest('.term.interactive[data-machine]');
     if (!t || String(window.getSelection() || '')) return;
     const box = $(`shell-in-${t.dataset.machine}`);
     if (box) box.focus({ preventScroll: true });
   });
+  // the window's height with no on-screen keyboard up (0.17.0): as it is while no field is typed in, the tallest since one
+  // is (at the same width). Chrome on Android makes the page itself shorter above its keyboard (resizes-content), which
+  // LiminalTouch.keyboardOpen does not count
+  let roomy = { w: innerWidth, h: innerHeight };
+  window.addEventListener('resize', () => {
+    if (innerWidth !== roomy.w || !(T && T.isTextField(document.activeElement))) roomy = { w: innerWidth, h: innerHeight };
+    else if (innerHeight > roomy.h) roomy.h = innerHeight;
+  });
+  const keyboardUp = () => !!T && (T.keyboardOpen || innerHeight < roomy.h - 120);
+  // a finger's tap on a terminal's lines (0.17.0): its keyboard comes up, even when it was put away with the box still
+  // focused (Android's back gesture), and is left as it is when it is up (a word being composed goes on). A word a
+  // finger pressed and held there to copy is let go by the next tap (its press keeps the focus in the box, so it
+  // collapses nothing); a pen's drag selects to copy as a mouse's does, and is left to copy
+  function tapTerminal(e) {
+    if (!fingered()) return;
+    const t = e.currentTarget, sh = shells[t.dataset.machine], s = window.getSelection();
+    if (!sh || !sh.alive) return;
+    if (s && !s.isCollapsed && t.contains(s.anchorNode)) {
+      if (T.lastInput !== 'touch') return;
+      s.removeAllRanges();
+    }
+    const box = $(`shell-in-${t.dataset.machine}`);
+    if (box && !(document.activeElement === box && keyboardUp())) T.raiseKeyboard(box, { preventScroll: true });
+  }
+  // the key row under a terminal (0.17.0): a key sent as the terminal's. A press on it, or a finger's tap on the lines,
+  // leaves the focus in the box (the tap's mouse press would take it to the page), so the keyboard stays up; a pen's
+  // press on the lines is a mouse's (it selects to copy)
+  data.addEventListener('mousedown', (e) => {
+    const t = e.target.closest ? e.target : null;
+    if (t && (t.closest('.term-keys button') || (T && T.lastInput === 'touch' && t.closest('.term.interactive[data-machine]')))) e.preventDefault();
+  });
+  // the word a phone's keyboard is still composing in the box, sent as typed before a key of the key row (0.17.0): Tab
+  // completes it, an arrow or ^C comes after it, Ctrl applies to the next character typed and not to it
+  function flushBox(name) {
+    const sh = shells[name], box = sh && sh.panel && sh.panel.querySelector('textarea.term-input');
+    const word = box ? typedIn(box) : '';
+    if (!word) return;
+    keepBox(box);
+    composing(box, false);
+    type(name, word.replace(/\r?\n/g, '\r'));
+  }
+  function termKey(b) {
+    const name = b.dataset.machine, sh = shells[name], k = b.dataset.termKey;
+    if (!sh || !sh.alive) return;
+    flushBox(name);
+    if (k === 'Ctrl') { setCtrl(name, !sh.ctrl); return; }
+    if (k === 'Paste') { pasteInto(name); return; }
+    typeKey(name, k === '^C' ? '\x03' : k === '^D' ? '\x04' : LiminalTerminal.seq(k));
+  }
+  async function pasteInto(name) {  // what is copied, typed into the shell (this page is on localhost: the browser may let it read it)
+    setCtrl(name, false);
+    let text = '';
+    try { text = await navigator.clipboard.readText(); }
+    catch (e) { termSaid(name, 'Paste: the browser did not let this page read what is copied.'); return; }
+    if (text) type(name, text.replace(/\r?\n/g, '\r'));
+  }
+  function termSaid(name, words) {  // a word beside the key row, for a while
+    const sh = shells[name], el = sh && sh.panel && sh.panel.querySelector('.term-said');
+    if (!el) return;
+    el.textContent = words;
+    clearTimeout(sh.saidTimer);
+    sh.saidTimer = setTimeout(() => { el.textContent = ''; }, 6000);
+  }
 
   // the radio group's arrow keys move the choice, as a radio group's do
   data.addEventListener('keydown', (e) => {

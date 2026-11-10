@@ -910,3 +910,127 @@ def test_the_terminal_opens_into_the_install_chosen():
         assert b"function updateButton" in page and b"b.job === 'update' ? updateButton(m, b)" in page  # 0.14.0
     finally:
         app.stop()
+
+
+def _blocks(css: str, head: str) -> list[tuple[int, int]]:
+    """Where each `head { ... }` block of a stylesheet starts and ends (read as the library's tests read liminal.css)."""
+    spans, at = [], css.find(head)
+    while at >= 0:
+        depth, i = 0, css.index("{", at)
+        for j in range(i, len(css)):
+            depth += {"{": 1, "}": -1}.get(css[j], 0)
+            if depth == 0:
+                spans.append((at, j))
+                break
+        at = css.find(head, at + 1)
+    return spans
+
+
+def test_the_page_answers_a_finger_and_an_on_screen_keyboard(served):
+    """0.17.0 (the user, 2026-11-10: "let's do an update. I want to support touch as well as mouse clicking on the
+    interface ... We'll make sure it works across all apps"; "Support for virtual keyboard on tablets and phones"): the
+    library's touch.js right after theme.js and before every script that looks for it, the keyboard's room in the
+    viewport; the tray's menu by a long press through the library's menu; the words a finger needs shown on a touch
+    screen; every field's keyboard (a plugin's form may name one); no keyboard called up before a field is tapped; the
+    login terminal kept alive across redraws, its key row, a phone keyboard's typing; every hover a mouse's. No
+    JavaScript runs here: what the page is drawn with."""
+    import re
+
+    port = served[1]
+    body = _call(port, "GET", "/")[1]
+    assert b'<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">' in body
+    at = {name: body.index(f'src="{name}"'.encode()) for name in ("theme.js", "touch.js", "icons.js", "menu.js", "charts.js", "terminal.js", "platform.js")}
+    assert body.count(b'src="touch.js"') == 1
+    assert at["theme.js"] < at["touch.js"] < min(at["icons.js"], at["menu.js"], at["charts.js"], at["terminal.js"], at["platform.js"])
+    status, touch = _call(port, "GET", "/touch.js")
+    assert status == 200 and b"window.LiminalTouch" in touch  # the library's, served by every app
+    assert b"longPress(document, '#rail button')" in _call(port, "GET", "/menu.js")[1]  # the tray's long press: no wiring here
+    page = _call(port, "GET", "/platform.js")[1].decode("utf-8")
+    assert "\u200b" not in page  # nothing unseen in the source: the terminal's kept character is written out
+    # the tray: a long press opens the right click's menu, headed by the plugin's name (its data-tip), not "right click"
+    assert '(right click: hide or disable)" data-tip="${esc(i.title)}"' in page and "rail.addEventListener('contextmenu'" in page
+    # the words a finger needs, on a touch screen: why a rule is in its group, Move to's note, a disabled button's reason
+    for part in ('class="sub why-here touch-only" aria-hidden="true"', 'class="muted small move-note touch-only"',
+                 "o.getAttribute('title')", 'class="muted small off-why touch-only"', "b && b.disabled && b.note",
+                 "</button>${offWhy(a)}", "</button>${offWhy(b)}"):
+        assert part in page, part
+    # every field's keyboard: a plugin's own (`keyboard`) when its type takes it, a number's digits (a minus below 0), a
+    # secret kept out of password managers, a text typed as it is; Next on every field but the last, which a phone's
+    # keyboard moves on to; no field focused by code after a finger's tap (the dialog opens on its heading)
+    assert "function keyboardOf(x)" in page and "number: ['number', 'signed'], password: ['secret', 'key', 'password']" in page
+    assert "given(x.min) && Number(x.min) >= 0 ? 'number' : 'signed'" in page and "x.type === 'password' ? 'secret' : 'plain'" in page
+    assert 'autocomplete="new-password"' not in page and 'inputmode="numeric" step="1"' not in page
+    assert "i < shown.length - 1 ? 'next'" in page and "c.getAttribute('enterkeyhint') !== 'next'" in page
+    assert "const head = mayFocus() ? null : $('formDialogTitle');" in page and "head.tabIndex = 0; head.setAttribute('autofocus', '')" in page
+    assert "dlg.step === 'fill' && mayFocus() && el.querySelector('form input, form select')" in page
+    assert "if (!autofocus(first)) (first.closest('.field') || first).scrollIntoView" in page
+    # the login terminal: its panel made once and kept, the pane drawn around it; shown by a tap without a keyboard;
+    # its key row; an Android keyboard's composing and Backspace; a tap brings the keyboard back; its gestures its own
+    assert "panel.parentNode === data && drawAround(panel, html, m.name)" in page and "data-shell-slot" in page
+    assert "[...data.childNodes].forEach((n) => { if (n !== panel) n.remove(); });" in page
+    assert '<div class="term-panel shell" data-panel="shell-${n}" data-touch-own>' in page and "${kb('terminal')}" in page
+    for key in ("['Escape', 'Esc'", "['Tab', 'Tab'", "['Ctrl', 'Ctrl'", "['ArrowUp', '↑'", "['ArrowDown', '↓'", "['ArrowLeft', '←'",
+                "['ArrowRight', '→'", "['^C', '^C'", "['^D', '^D'", "['Paste', 'Paste'"):
+        assert key in page, key
+    assert "navigator.clipboard.readText()" in page and "LiminalTerminal.ctrl(text[0])" in page and "`\\x1b[1;5${arrow[1]}`" in page
+    assert "data.addEventListener('beforeinput'" in page and "const KEEP = String.fromCharCode(0x200b);" in page
+    assert "if (e.isComposing) {" in page and "composing(box, true)" in page and "T.raiseKeyboard(box, { preventScroll: true })" in page
+    assert "addEventListener('click', tapTerminal)" in page and "if (fingered()) return;  // a finger's tap" in page
+    assert "tap, then type; press and hold to copy" in page and "click, then type; Ctrl+Shift+C copies" in page
+    assert "function showShell(name)" in page and "Checking this PC…</div>${shellPanel(m)}" in page
+    term = _call(port, "GET", "/terminal.js")[1].decode("utf-8")
+    assert "window.LiminalTerminal = { create, keys, seq, ctrl };" in term and "followCursor" in term and "sideways()" in term
+    # the stylesheet: every hover a mouse's; a finger's targets; the key row; the dialog and the terminal above the
+    # keyboard; a phone's page
+    css = re.sub(r"/\*.*?\*/", "", _call(port, "GET", "/platform.css")[1].decode("utf-8"), flags=re.S)
+    hovers = _blocks(css, "@media (hover: hover)")
+    assert hovers and all(any(a < m.start() < b for a, b in hovers) for m in re.finditer(r":hover", css))
+    coarse = "".join(css[a:b] for a, b in _blocks(css, "@media (any-pointer: coarse)"))
+    assert "table.grouped th.pick, table.grouped td.pick { width: 44px; }" in coarse and "scroll-margin" in coarse
+    assert ".term-keys {" in css and ".term-keys[hidden] { display: none; }" in css and "font-size: 16px; }" in css
+    assert "html.keyboard .form-dialog { margin-top: calc(var(--vv-top, 0px) + 12px)" in css
+    assert ".conn-picture .node rect.hit" in css and "html.touch .conn-picture .node rect.hit { pointer-events: all; }" in css
+    narrow = "".join(css[a:b] for a, b in _blocks(css, "@media (max-width: 700px)"))
+    assert ".data-head { flex-wrap: wrap; }" in narrow and ".conn-picture svg { min-width: 600px; }" in narrow
+
+
+def test_the_login_terminal_keeps_a_phones_word_its_end_and_a_mouses_ways(served):
+    """0.17.0, the terminal as a review found it wanting: the word a phone's keyboard is still composing goes before a key
+    of the key row (Tab completes it, Ctrl applies to the next character, not to it); the lines follow their end when
+    the keyboard makes them shorter (a flag kept by scrolls and the box's size, not measured at each draw; svh, so the
+    phone's bars do not move it); a tap lets go of a word pressed and held to copy and brings the keyboard back, and
+    leaves it as it is when it is up (Android's window shorter counts); a pen selects as a mouse does; a hardware
+    keyboard's composing shows nothing new; a computer with a touch screen keeps the mouse's words; a failed refresh
+    never takes the terminal off the page; a text field takes no 'signed' keyboard (type=number's alone has the
+    minus). No JavaScript runs here: what the page is drawn with."""
+    import re
+
+    port = served[1]
+    page = _call(port, "GET", "/platform.js")[1].decode("utf-8")
+    at = page.index("function termKey(b)")
+    key = page[at:page.index("}", page.index("LiminalTerminal.seq(k)", at))]
+    assert key.index("flushBox(name);") < key.index("if (k === 'Ctrl')") < key.index("if (k === 'Paste')")
+    flush = page[page.index("function flushBox(name)"):at]
+    assert "const word = box ? typedIn(box) : '';" in flush and flush.index("keepBox(box);") < flush.index("composing(box, false);") < flush.index("type(name, word")
+    assert "if (sh && sh.ctrl && text) { keepBox(box); composing(box, false); typeText(name, text); return; }" in page
+    assert "const text = on && fingered() ? typedIn(box) : '';" in page  # the overlay a phone keyboard's alone
+    tap = page[page.index("function tapTerminal(e)"):page.index("data.addEventListener('mousedown'")]
+    assert "if (T.lastInput !== 'touch') return;" in tap and "s.removeAllRanges();" in tap
+    assert "document.activeElement === box && keyboardUp()" in tap and "T.keyboardOpen" not in tap
+    assert "const keyboardUp = () => !!T && (T.keyboardOpen || innerHeight < roomy.h - 120);" in page
+    assert "T && T.lastInput === 'touch' && t.closest('.term.interactive[data-machine]')" in page
+    assert ("const HOW_TO_TYPE = '<span class=\"how-mouse\">click, then type; Ctrl+Shift+C copies</span>"
+            "<span class=\"how-touch touch-only\">tap, then type; press and hold to copy</span>';") in page
+    assert 'class="mouse-only"' not in page
+    assert "const line = st && data.querySelector('.term-panel.shell') ? $(`err-${selected()}`) : null;" in page
+    assert "text: ['plain', 'text', 'name', 'search', 'email', 'url', 'number', 'decimal', 'ticker', 'username', 'code']," in page
+    term = _call(port, "GET", "/terminal.js")[1].decode("utf-8")
+    assert "const follow" not in term and "if (stuck) toEnd();" in term and "attach(next) { bind(next); stuck = true; draw(); }" in term
+    assert "new ResizeObserver(() => { note(); if (box && stuck) toEnd(); })" in term
+    assert "else if (box.scrollTop < top - 1) stuck = false;" in term and "box.addEventListener('scroll', note, { passive: true });" in term
+    css = re.sub(r"/\*.*?\*/", "", _call(port, "GET", "/platform.css")[1].decode("utf-8"), flags=re.S)
+    assert "tr.pick > td, table.selectable tr.pickable > td, table.grouped td.pick, .term.interactive { touch-action: manipulation; }" in css
+    assert "tr.pick, table.selectable tr.pickable," not in css  # a row itself takes no touch-action
+    assert ".term { height: min(340px, 45vh); height: min(340px, 45svh); }" in css and "dvh" not in css
+    assert "@media (pointer: coarse) { .term-head .how-mouse { display: none; } }" in css
+    assert "@media not all and (pointer: coarse) { .term-head .how-mouse + .how-touch::before { content: \" · \"; } }" in css

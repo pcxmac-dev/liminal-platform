@@ -6,6 +6,12 @@
 //
 //   const t = LiminalTerminal.create(el, {cursor: true}); t.write(text); t.attach(other)   // drawn again elsewhere
 //   LiminalTerminal.keys(keydownEvent) -> '\r', '\x1b[A', 'a', '\x03' ... ('' for none)
+//   LiminalTerminal.seq('Escape') -> '\x1b'; LiminalTerminal.ctrl('c') -> '\x03'   // a key row's keys (0.17.0), as keys() sends them
+// {followCursor: true, or a function saying so now}: the cursor kept in view sideways too while the end is followed (a
+// phone's terminal is narrower than its 120 columns; 0.17.0)
+// The end followed (0.17.0): while the lines are scrolled to their end they stay there, as lines come and as the box
+// changes size (an on-screen keyboard coming up makes it shorter); a scroll up lets the end go, a scroll back to it
+// takes it again.
 (() => {
   'use strict';
 
@@ -13,8 +19,35 @@
   const MAX_LINES = 3000;
   const SCREEN = 32;  // the rows a cursor position counts from (the terminal is 120 x 32: LOGIN in liminal-libs' wsl.py)
 
-  function create(el, { cursor = false } = {}) {
-    let lines = [[]], row = 0, col = 0, fg = 0, bold = false, pend = '', box = el;
+  function create(el, { cursor = false, followCursor = false } = {}) {
+    let lines = [[]], row = 0, col = 0, fg = 0, bold = false, pend = '', box = null;
+    let stuck = true, top = 0;  // the end followed; where the box was scrolled to when last looked at
+    const sideways = () => !!(typeof followCursor === 'function' ? followCursor() : followCursor);
+    function note() {  // where the user left the lines: at the end (followed), scrolled up (let go), or as they were
+      if (!box) return;
+      if (box.scrollTop + box.clientHeight >= box.scrollHeight - 24) stuck = true;
+      else if (box.scrollTop < top - 1) stuck = false;  // a box made shorter keeps its place: still followed
+      top = box.scrollTop;
+    }
+    function toEnd() {  // the end in view, and the cursor's column too when asked (a long command typed on a phone stays seen)
+      box.scrollTop = box.scrollHeight;
+      top = box.scrollTop;
+      if (!cursor || !sideways()) return;
+      const c = box.querySelector('.t-cursor');
+      if (!c) return;
+      const b = box.getBoundingClientRect(), r = c.getBoundingClientRect(), x = r.left - b.left + box.scrollLeft, room = 24;
+      if (x < box.scrollLeft + room) box.scrollLeft = Math.max(0, x - room);
+      else if (x + r.width > box.scrollLeft + box.clientWidth - room) box.scrollLeft = x + r.width - box.clientWidth + room;
+    }
+    // a box that changes size (an on-screen keyboard's room, a window turned): its end kept in view while followed
+    const sized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { note(); if (box && stuck) toEnd(); }) : null;
+    function bind(next) {  // the box drawn into: its scrolls and its size followed, the last one's no longer
+      if ((next || null) === box) return;
+      if (box) { box.removeEventListener('scroll', note); if (sized) sized.unobserve(box); }
+      box = next || null;
+      top = 0;
+      if (box) { box.addEventListener('scroll', note, { passive: true }); if (sized) sized.observe(box); }
+    }
     const style = () => [fg ? `t-${fg}` : '', bold ? 't-b' : ''].filter(Boolean).join(' ');
     const line = () => lines[row] || (lines[row] = []);
     function down() {
@@ -92,7 +125,7 @@
     }
     function draw() {
       if (!box) return;
-      const follow = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;  // at the end: stays at the end
+      note();  // a scroll up since the last look: let go at once, before its scroll event comes
       box.innerHTML = lines.map((l, r) => {
         let out = '', cur = null, buf = '';
         const cells = cursor && r === row ? [...l, ...Array.from({ length: Math.max(0, col + 1 - l.length) }, () => [' ', ''])] : l;
@@ -104,11 +137,12 @@
         if (buf) out += cur ? `<span class="${cur}">${esc(buf)}</span>` : esc(buf);
         return out;
       }).join('\n');
-      if (follow) box.scrollTop = box.scrollHeight;
+      if (stuck) toEnd();
     }
+    bind(el);
     return {
       write(text) { if (text) { feed(text); draw(); } },
-      attach(next) { box = next; draw(); if (box) box.scrollTop = box.scrollHeight; },
+      attach(next) { bind(next); stuck = true; draw(); },  // drawn again elsewhere, at its end
       clear() { lines = [[]]; row = 0; col = 0; draw(); },
       get text() { return lines.map((l) => l.map(([ch]) => ch).join('')).join('\n'); },
     };
@@ -116,15 +150,17 @@
 
   const KEYS = { Enter: '\r', Backspace: '\x7f', Tab: '\t', Escape: '\x1b', ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C',
     ArrowLeft: '\x1b[D', Home: '\x1b[H', End: '\x1b[F', Delete: '\x1b[3~', Insert: '\x1b[2~', PageUp: '\x1b[5~', PageDown: '\x1b[6~' };
+  function ctrl(ch) {  // a character's control code (Ctrl+C: '\x03'), '' for one with none
+    const k = String(ch || '').toUpperCase().charCodeAt(0);
+    return k >= 64 && k <= 95 ? String.fromCharCode(k - 64) : '';
+  }
   function keys(e) {
-    if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.length === 1) {  // Ctrl+C, Ctrl+D ... (Ctrl+Shift+C copies, as the browser does)
-      const k = e.key.toUpperCase().charCodeAt(0);
-      return k >= 64 && k <= 95 ? String.fromCharCode(k - 64) : '';
-    }
+    if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.length === 1) return ctrl(e.key);  // Ctrl+C, Ctrl+D ... (Ctrl+Shift+C copies, as the browser does)
     if (KEYS[e.key]) return KEYS[e.key];
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) return e.altKey ? `\x1b${e.key}` : e.key;
     return '';
   }
+  const seq = (name) => (Object.prototype.hasOwnProperty.call(KEYS, name) ? KEYS[name] : '');
 
-  window.LiminalTerminal = { create, keys };
+  window.LiminalTerminal = { create, keys, seq, ctrl };
 })();

@@ -22,7 +22,8 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
 /* a disabled plugin is shaded darker in the list (the user, 2026-11-07: "on the left hand side, shade darker the
    plugins that are not enabled"), brighter again while pointed at, focused or selected so it stays readable */
 .app-list .item.off { opacity: .45; }
-.app-list .item.off:hover, .app-list .item.off:focus-visible, .app-list .item.off.active { opacity: .8; }
+@media (hover: hover) { .app-list .item.off:hover { opacity: .8; } }  /* 0.17.0: every hover a mouse's, none stuck after a tap */
+.app-list .item.off:focus-visible, .app-list .item.off.active { opacity: .8; }
 .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 4px; }
 .choice { display: flex; align-items: center; gap: 10px; padding: 8px 10px; text-align: left; border: 1px solid var(--border); border-radius: 8px; }
 .choice[aria-checked="true"] { border-color: var(--accent); color: var(--accent); background: var(--hover); }
@@ -42,7 +43,8 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
 .install-row { margin: 8px 0 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .term-panel { position: relative; margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #0c0f14; }
-.term-input { position: absolute; left: 0; bottom: 0; width: 2px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; }
+.term-input { position: absolute; left: 0; bottom: 0; width: 2px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden;
+  font-size: 16px; }  /* 16 px (0.17.0): an iPhone zooms the page into a smaller box; unseen, so nothing changes on screen */
 .term-panel:focus-within { border-color: var(--accent); }
 .term-head { display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 10px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 12px; }
 .term-head > span:first-child { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -140,7 +142,7 @@ td .form-open { margin-right: 4px; white-space: nowrap; }
 .conn-picture .node rect { fill: var(--panel); stroke: var(--border); stroke-width: 1; }
 .conn-picture .node text { fill: var(--text); font-size: 12px; }
 .conn-picture .node .ico { color: var(--muted); }
-.conn-picture .node:hover rect { stroke: var(--text); }
+@media (hover: hover) { .conn-picture .node:hover rect { stroke: var(--text); } }
 .conn-picture .node:focus-visible rect, .conn-picture .node.picked rect { stroke: var(--accent); stroke-width: 2; }
 .conn-picture .node.role-app rect { stroke: var(--accent); }
 .conn-picture .node.role-app .ico { color: var(--accent); }
@@ -150,6 +152,10 @@ td .form-open { margin-right: 4px; white-space: nowrap; }
 .conn-picture .node .dot { fill: var(--muted); }
 .conn-picture .node.state-active .dot, .conn-picture .node.state-attached .dot { fill: var(--up); }
 .conn-picture .node.state-invalid .dot { fill: var(--series-4); }
+/* 0.17.0: a box's row, its whole height, a finger's to pick on a touch screen; unseen, and no mouse's (after the rules
+   above, which it overrides) */
+.conn-picture .node rect.hit { fill: transparent; stroke: none; pointer-events: none; }
+html.touch .conn-picture .node rect.hit { pointer-events: all; }
 .kind { display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--border); border-radius: 9px;
   font-size: 11px; line-height: 17px; color: var(--text); white-space: nowrap; }
 .kind::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--k); }
@@ -177,7 +183,7 @@ table.conn-rows tr.new td { animation: conn-new 1.6s ease-out; }
 table.grouped th.pick, table.grouped td.pick { width: 26px; padding-right: 0; }
 table.grouped td.pick input { margin: 0; cursor: pointer; accent-color: var(--accent); }
 table.grouped tr.group-head td { background: var(--panel); border-top: 1px solid var(--border); padding-top: 6px; padding-bottom: 6px; }
-table.grouped tr.group-head:hover td { background: var(--hover); }
+@media (hover: hover) { table.grouped tr.group-head:hover td { background: var(--hover); } }
 table.grouped .group-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
 table.grouped .group-title { font-weight: 600; }
 table.grouped tr.group-head.label .group-title { color: var(--accent); }
@@ -194,13 +200,14 @@ table.grouped tr.moved .moved-note { color: var(--accent); }
    or application flush with the group, a line above the first; a rule turned off dimmed, its box as clear as any (it
    may still be chosen and moved) */
 table.grouped tr.sub-head td { background: color-mix(in srgb, var(--panel) 50%, transparent); }
-table.grouped tr.sub-head:hover td { background: var(--hover); }
+@media (hover: hover) { table.grouped tr.sub-head:hover td { background: var(--hover); } }
 table.grouped tr.sub-head .group-line { padding-left: 32px; }
 table.grouped tr.sub-head .group-title { font-size: 12px; }
 table.grouped tr.under > td.pick + td, table.grouped tr.under > td:first-child:not(.pick) { padding-left: 40px; }
 table.grouped tr.first-own > td { border-top: 2px solid var(--border); }
 table.grouped tr.off td:not(.pick) { opacity: .5; }
-table.grouped tr.off:hover td:not(.pick), table.grouped tr.off:focus-within td:not(.pick) { opacity: .8; }
+@media (hover: hover) { table.grouped tr.off:hover td:not(.pick) { opacity: .8; } }
+table.grouped tr.off:focus-within td:not(.pick) { opacity: .8; }
 
 /* 0.15.0: a plugin's settings as entries on its page */
 table.settings-table .setting-name { font-weight: 600; }
@@ -220,9 +227,62 @@ table.selectable tr.pickable { cursor: pointer; }
 table.selectable tr.picked td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 table.selectable tr.picked td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .row-pick { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; color: inherit; }
-.row-pick:hover { background: none; }
+@media (hover: hover) { .row-pick:hover { background: none; } }
 .row-pick .row-name { font-weight: 600; }
 .row-pick .sub { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 
 /* 0.10.2: a plugin's two switches at the head of its page: enabled, and hidden from the dock on the right */
 .data-head .switches { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 18px; }
+
+/* 0.17.0: touch screens and the on-screen keyboard (the user, 2026-11-10: "I want to support touch as well as mouse
+   clicking on the interface"; "Support for virtual keyboard on tablets and phones"), over liminal.css's rules for every
+   app (targets of 40 px and fields of 16 px on a touch screen, hovers a mouse's, one column on a phone). A mouse and a
+   keyboard see nothing new. The words a finger needs (.touch-only): why a rule is in its group, Move to's note, a
+   disabled button's reason. */
+.move-bar .move-note:empty { display: none; }
+.off-why { overflow-wrap: anywhere; }
+/* what a tap picks (a row's cells: touch-action does not apply to a row itself; a rule's box cell, a terminal's lines): no
+   double-tap zoom there, as on controls (liminal.css) */
+tr.pick > td, table.selectable tr.pickable > td, table.grouped td.pick, .term.interactive { touch-action: manipulation; }
+/* how to type into a login terminal: a phone's or a tablet's words alone where a finger is the only pointer, both a
+   mouse's and a finger's on a computer with a touch screen beside its mouse or touchpad */
+@media (pointer: coarse) { .term-head .how-mouse { display: none; } }
+@media not all and (pointer: coarse) { .term-head .how-mouse + .how-touch::before { content: " · "; } }
+/* a login terminal's key row under its lines, on a touch screen: Esc, Tab, Ctrl held for the next key, the arrows, ^C,
+   ^D, Paste; and the word a phone's keyboard composes, shown at the cursor until it is sent */
+.term-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; background: var(--panel); border-top: 1px solid var(--border); }
+.term-keys[hidden] { display: none; }
+.term-keys button { min-width: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+  font: 13px/1 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+.term-keys button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.term-keys .term-said { flex: 1 1 100%; color: var(--down); font-size: 12px; }
+.term-keys .term-said:empty { display: none; }
+.term-composing { position: absolute; z-index: 1; padding: 0 1px; color: #0c0f14; background: #d4d4d4; text-decoration: underline;
+  white-space: pre; pointer-events: none; font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+@media (any-pointer: coarse) {
+  table.grouped th.pick, table.grouped td.pick { width: 44px; }  /* the box with room around it: a tap there is the box's */
+  table.grouped .group-actions { gap: 8px; }
+  table.settings-table .setting-buttons button + button { margin-left: 8px; }
+  /* a plugin's dialog fits what the keyboard leaves, scrolls in itself, a field's label and note kept in view with it */
+  .form-dialog { max-height: min(calc(100vh - 48px), calc(100% - 24px)); overflow: auto; overscroll-behavior: contain; }
+  .form-dialog .field input, .form-dialog .field select { scroll-margin: 28px 0 72px; }
+}
+/* a phone, or a tablet's window its keyboard made short: the dialog's buttons held at its foot, a terminal at most 45%
+   of the height (of the window with its bars shown: svh, so the bars coming and going do not move it) */
+@media (max-width: 700px), (any-pointer: coarse) and (max-height: 600px) {
+  .form-dialog .buttons { position: sticky; bottom: 0; z-index: 1; padding-top: 8px; background: var(--panel); }
+  .term { height: min(340px, 45vh); height: min(340px, 45svh); }
+}
+/* the keyboard laid over the page (Safari; touch.js sets html.keyboard, --vvh and --vv-top): the dialog at the top of
+   what is seen and fitted above the keyboard, its buttons held at its foot; the terminal typed into fitted too */
+html.keyboard .form-dialog { margin-top: calc(var(--vv-top, 0px) + 12px); margin-bottom: auto; max-height: calc(var(--vvh, 100vh) - 24px); }
+html.keyboard .form-dialog .buttons { position: sticky; bottom: 0; z-index: 1; padding-top: 8px; background: var(--panel); }
+html.keyboard .term-panel.shell:focus-within .term { height: max(96px, min(340px, calc(var(--vvh, 100vh) - 160px))); }
+/* a phone (liminal.css stacks the panes below 700 px): a plugin's head wraps, Connections' picture scrolls sideways at
+   a size its words can be read */
+@media (max-width: 700px) {
+  .data-head { flex-wrap: wrap; }
+  .data-head .switches { justify-content: flex-start; }
+  .conn-picture { overflow-x: auto; }
+  .conn-picture svg { min-width: 600px; }
+}

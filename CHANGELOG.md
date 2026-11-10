@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.17.0 (2026-11-10)
+
+Touch screens and the on-screen keyboard (the user: "let's do an update. I want to support touch as well as mouse
+clicking on the interface ... We'll make sure it works across all apps"; "Support for virtual keyboard on tablets and
+phones"), on liminal-libs 1.42.0's touch.js, which the page loads right after theme.js, and the viewport's
+`interactive-widget=resizes-content` (Chrome on Android makes room above its keyboard). A mouse and a hardware keyboard
+work as before. A long press on a plugin's icon in the tray opens its menu (Hide, Disable) on every device, an iPad's
+too, through the library's menu, headed by the plugin's name; a long press on anything with a tooltip shows its words in
+a bubble. On a touch screen the words no finger can hover are on the page: why a rule is in its group, under its name;
+the note of the group picked in Move to, beside it; a disabled button's reason, beside it; what a tap on a row of a
+table chosen from does, above it. A tap beside a rule's box chooses it, a box in Connections is picked anywhere in its
+row, targets are about 40 px (liminal.css) with room between a row's buttons, and no hover highlight sticks after a tap.
+
+The login terminal is kept alive across the page's redraws: its panel stays where it is and the page is drawn around it,
+so a redraw never closes the keyboard nor drops a word being typed (nor scrolls the terminal back to its end); it stays
+while this PC's check is asked again, and when the platform does not answer a refresh for a moment, which is said at the
+head of the plugin's page rather than in place of it. Its lines keep following their end while the keyboard makes them
+shorter (and while a phone's bars come and go): a scroll up lets the end go, a scroll back to it takes it again. On a
+touch screen a row of the keys a phone's keyboard lacks sits under its lines: Esc, Tab, Ctrl (held for the next key: a
+letter typed then is its control code, an arrow a word over), the four arrows, ^C, ^D and Paste (what is copied, read
+through the clipboard, which a page on localhost may read once the browser allows it). An Android keyboard's typing
+reaches the shell: the word it composes shows at the cursor until it is done, then is sent, and a key of the row sends
+it first, as typed (Tab completes it; Ctrl applies to the next character, not to it); its Backspace always arrives (the
+box keeps one unseen character to delete). A hardware keyboard's own composing (an IME, a dead key) shows nothing new. A
+tap on the terminal brings the keyboard back, even after it was put away, and leaves it as it is while it is up (a word
+being composed goes on); it lets go of a word pressed and held to copy; a pen's drag selects to copy as a mouse's does.
+Opening or showing a terminal by a tap brings it into view without calling up the keyboard; on a touch screen the cursor
+is kept in view sideways, and the head says "tap, then type; press and hold to copy" (beside the mouse's words on a
+computer whose touch screen sits beside its mouse, alone on a phone or a tablet).
+
+A plugin's form, opened by a tap, shows its heading first, so no keyboard covers the dialog before a field is tapped (a
+mouse or a keyboard still finds the first field focused), and a field to fix after Review is brought into view rather
+than focused. The dialog fits what the keyboard leaves (at the top of what is seen where the keyboard lies over the page,
+as on an iPhone), the field typed in is kept in view with its label and note, and its buttons are held at its foot on a
+phone or while the keyboard is up. Each field calls up its keyboard: a number its digits (with a minus where it may be
+below 0), a text typed as it is (no capitals, no corrections), a secret kept out of password managers (no longer offered
+a new password). A form's field may name its own with `keyboard`, one of the library's kinds its type takes: plain,
+text, name, search, email, url, number, decimal, ticker, username or code for a text; number or signed for a number
+(signed is a number's alone: its minus is the number field's keyboard's); secret, key or password for a password. The
+keyboard's Enter says Next on every field shown but the last and moves there; the last one's sends the form, as Enter
+does.
+
+Below 700 px wide the panes are one column (liminal.css); here a plugin's head wraps, Connections' picture scrolls
+sideways at a size its words can be read, and a terminal is at most 45% of the height. The library at 1.42.0 or later.
+
 ## 0.16.0 (2026-11-09)
 
 The firewalls' System and Application grouped again (the user: "lets group by application under apps or system, try
