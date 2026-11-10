@@ -806,6 +806,73 @@ def test_a_firewalls_rules_in_groups_moved_through_the_page_kept_in_a_scratch_lo
         app.stop()
 
 
+def test_a_firewalls_services_and_applications_reach_the_page_as_headings(monkeypatch):
+    """0.16.0 (the user: "lets group by application under apps or system"; "try to group the system by 'services'";
+    "also rules that are turned off should be shown as well"): a firewall's Rules as the platform hands them to the page,
+    grouped by liminal-libs 1.41.0: a heading per service in System and per application in Application, each rule's
+    heading, a rule with none belonging to its group directly, a rule turned off marked; a rule moved into Application
+    keeps its service's name there. Invented rules, a scratch login."""
+    from conftest import Wall
+    from liminal_libs.machines.rulegroups import Sorted, key_of
+
+    monkeypatch.setenv("LIMINAL_PLATFORM_LOGIN", "memory")
+    monkeypatch.delenv("WALL_GROUPS", raising=False)
+    rules = [(key_of("wsd"), Sorted("system", "a rule group of the system's", "Network Discovery"), ["Network Discovery (WSD-In)"], {}),
+             (key_of("upnp"), Sorted("system", "a rule group of the system's", "Network Discovery"), ["Network Discovery (UPnP-In)"], {"off": True}),
+             (key_of("bare"), Sorted("system", "the system's own process"), ["System (port 445)"], {}),
+             (key_of("game"), Sorted("application", "its install folder", "Example Game"), ["Example Game (UDP)"], {}),
+             (key_of("port"), Sorted("other", "a port alone"), ["port 9000"], {})]
+
+    class Grouped(Wall):
+        def sorted_rules(self):
+            return {k: s for k, s, _, _ in rules}
+
+        def status(self):
+            return {**super().status(), "tables": [self.groups.table({"title": "Rules", "columns": [{"title": "Rule"}]}, rules)]}
+
+    app = PlatformApp(log=lambda m: None, machines={"wall": Grouped()}, assistants={})
+    port = _port(app.start(0))
+
+    def rules_table():
+        status, m = _call(port, "GET", "/api/machines/wall")
+        assert status == 200
+        return next(t for t in m["status"]["tables"] if t["title"] == "Rules")
+
+    try:
+        t = rules_table()
+        by = {g["id"]: g for g in t["groups"]}
+        assert [(c["id"], c["title"], c["count"], c["listed"]) for c in by["system"]["children"]] == [
+            ("system:network discovery", "Network Discovery", 2, 2)]
+        assert [c["title"] for c in by["application"]["children"]] == ["Example Game"] and by["system"]["count"] == 3
+        assert "children" not in by["other"]  # Other is one list
+        rows = {r["cells"][0]: r for r in t["rows"]}
+        assert rows["Network Discovery (WSD-In)"]["sub"] == rows["Network Discovery (UPnP-In)"]["sub"] == "system:network discovery"
+        assert rows["System (port 445)"]["group"] == "system" and "sub" not in rows["System (port 445)"]  # System's own, no heading
+        assert rows["Network Discovery (UPnP-In)"]["off"] is True and "off" not in rows["Network Discovery (WSD-In)"]
+        assert "sub" not in rows["port 9000"] and rows["Example Game (UDP)"]["sub"] == "application:example game"
+        status, out = _call(port, "POST", "/api/machines/wall/ask", {"hook": "move_rules", "args": [[key_of("wsd")], "application"]})
+        assert status == 200 and "1 rule moved to Application" in json.dumps(out)
+        moved = {r["key"]: r for r in rules_table()["rows"]}[key_of("wsd")]
+        assert (moved["group"], moved["sub"], moved["moved"]) == ("application", "application:network discovery", True)
+        # the page (no JavaScript runs here: what it draws them with): a heading per name under its open group, open at
+        # first while the group lists few rules, its box choosing its rules, its rules indented under it; the group's own
+        # after them, set apart; a rule turned off dimmed and said; the headings moved rules go under opened; the focus
+        # kept on the same (+), (−) or box while drawn again
+        page = _call(port, "GET", "/platform.js")[1]
+        assert b"heading(c, theirs, on, 'sub-head')" in page and b"ruleLine(r, 'under')" in page and b"'first-own'" in page
+        assert b"r.group === id || r.sub === id" in page and b"const FEW = 30;" in page and b"shut.add(k)" in page
+        assert b"r.off && 'off'" in page and b'<span class="sr-only">turned off</span>' in page and b"' (turned off)'" in page
+        assert b"went[tableKey(name, t.title)] = { keys: new Set(keys), to }" in page and b"slice(-2000)" in page
+        assert b"'liminal-platform-closed-headings'" in page  # a heading open at first, closed by the user: kept closed
+        assert b"input[data-machine]" in page and b"b.dataset.table, b.dataset.group, b.dataset.key" in page
+        css = _call(port, "GET", "/platform.css")[1]
+        assert b"table.grouped tr.sub-head td { background" in css and b"table.grouped tr.sub-head .group-line" in css
+        assert b"table.grouped tr.under > td.pick + td" in css and b"table.grouped tr.first-own > td" in css
+        assert b"table.grouped tr.off td:not(.pick)" in css and b"font-weight: 500" not in css
+    finally:
+        app.stop()
+
+
 def test_the_terminal_opens_into_the_install_chosen():
     """0.12.0 (the user: "also the ability to uninstall and select which one to terminal in to"; "basically a selector for
     different installs"): the plugin's terminal command follows the install chosen; opened again after another is chosen,

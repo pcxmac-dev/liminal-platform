@@ -164,9 +164,25 @@
   // group a heading with (+) to open it and (−) to close it (closed at first; kept while the page lives, and in this
   // browser), a box to choose each rule (the heading's box choosing every rule the group lists), and under the table
   // Move to: the hook asked with the keys chosen and the group picked.
-  const OPEN_KEY = 'liminal-platform-open-groups';
+  // 0.16.0 (liminal-libs 1.41.0; the user: "lets group by application under apps or system"; "try to group the system by
+  // 'services'"; "also rules that are turned off should be shown as well"): a group may hold `children` [{id, title,
+  // count, listed, note}], one per name (a service in System, an application in Application), each drawn under the open
+  // group as a heading of its own, indented and on a lighter band, with its (+) and (−) (kept open as a group is, under
+  // its own id; closed at first, but open at first while its group lists FEW rules or fewer, as after a Find, until the
+  // user closes it) and its box (choosing the rules whose `sub` is its id); its rules under it once open, indented as
+  // it is; then the group's rules with no name, flush with the group and set apart by a line. A group with no children
+  // is drawn as before. A row with `off` (a rule turned off) is dimmed and says so in words (over its name, to a screen
+  // reader, by its box), chosen and moved as any. Rules moved into System or Application open the headings they went under.
+  const OPEN_KEY = 'liminal-platform-open-groups', SHUT_KEY = 'liminal-platform-closed-headings';
   const openGroups = (() => { try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch (e) { return new Set(); } })();
-  const keepOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...openGroups].slice(-200))); } catch (e) { /* this page only */ } };
+  // closed by the user (0.16.0), `${plugin}|${table}|${id}`: a heading open at first (FEW) stays closed, in this browser too
+  const shut = (() => { try { return new Set(JSON.parse(localStorage.getItem(SHUT_KEY) || '[]')); } catch (e) { return new Set(); } })();
+  const keepOpen = () => {
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify([...openGroups].slice(-2000))); localStorage.setItem(SHUT_KEY, JSON.stringify([...shut].slice(-2000))); }
+    catch (e) { /* this page only */ }
+  };
+  const FEW = 30;  // a group listing this many rules or fewer (a Find's, a narrow choice's): its headings open at first (0.16.0)
+  const went = {};  // `${plugin}|${table}` -> {keys, to}: rules just moved into a group, until drawn there (0.16.0)
   const chosenRows = {};  // `${plugin}|${table}` -> the keys of the rules chosen
   const moveTargets = {};  // `${plugin}|${table}` -> the group last picked in Move to
   const tableKey = (name, title) => `${name}|${title}`;
@@ -181,22 +197,37 @@
     const at = (extra) => `data-machine="${esc(m.name)}" data-table="${esc(t.title)}"${extra || ''}`;
     const titles = Object.fromEntries(t.groups.filter(Boolean).map((g) => [g.id, g.title]));
     const span = t.columns.length;
-    const body = t.groups.filter(Boolean).map((g) => {
-      const open = openGroups.has(`${tableKey(m.name, t.title)}|${g.id}`), mine = rows.filter((r) => r.group === g.id);
+    const came = went[tableKey(m.name, t.title)];  // rules just moved into a group: the headings they went under, open (0.16.0)
+    if (came) { rows.forEach((r) => { if (came.keys.has(r.key) && r.sub && r.group === came.to) openGroups.add(`${tableKey(m.name, t.title)}|${r.sub}`); }); keepOpen(); }
+    const isOpen = (id) => openGroups.has(`${tableKey(m.name, t.title)}|${id}`);
+    const heading = (g, mine, open, cls, tail) => {  // a group's heading, or a name's under it (0.16.0): its box, (+) or (−), title, count, note
       const all = mine.length > 0 && mine.every((r) => chosen.has(r.key)), some = !all && mine.some((r) => chosen.has(r.key));
       const box = movable ? `<td class="pick"><input type="checkbox" class="pick-group" ${at(` data-group="${esc(g.id)}"`)}${all ? ' checked' : ''}`
         + `${some ? ' data-some="1"' : ''}${mine.length ? '' : ' disabled'} aria-label="Choose every rule ${esc(g.title)} lists"></td>` : '';
-      const buttons = (Array.isArray(g.actions) ? g.actions : []).map((a) => formButton(m, a, forms)).join('');
-      const head = `<tr class="group-head${g.kind === 'label' ? ' label' : ''}">${box}<td colspan="${span}"><div class="group-line">`
+      return `<tr class="${cls}">${box}<td colspan="${span}"><div class="group-line">`
         + `<button type="button" class="expander" ${at(` data-group="${esc(g.id)}"`)} aria-expanded="${open}" aria-label="${open ? 'Close' : 'Open'} ${esc(g.title)}" title="${open ? 'Close' : 'Open'}">${open ? '−' : '+'}</button>`
         + `<span class="group-title">${esc(g.title)}</span><span class="muted small">${esc(String(g.count ?? mine.length))} rule${(g.count ?? mine.length) === 1 ? '' : 's'}</span>`
-        + (g.note ? `<span class="muted small group-note">${esc(g.note)}</span>` : '') + (buttons ? `<span class="group-actions">${buttons}</span>` : '') + '</div></td></tr>';
-      const lines = open ? mine.map((r) => {
-        const pick = movable ? `<td class="pick"><input type="checkbox" class="pick-row" ${at(` data-key="${esc(r.key)}"`)}${chosen.has(r.key) ? ' checked' : ''} aria-label="Choose ${esc(textOf(r.cells[0]))}"></td>` : '';
-        const moved = r.moved ? `<div class="sub moved-note">moved here · its own group: ${esc(titles[r.own] || r.own || '')}</div>` : '';
-        return `<tr${r.moved ? ' class="moved"' : ''}>${pick}` + r.cells.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}`
-          + `${i === 0 && r.why ? ` title="${esc(r.why)}"` : ''}>${cellHtml(c, m, forms)}${i === 0 ? moved : ''}</td>`).join('') + '</tr>';
-      }).join('') : '';
+        + (g.note ? `<span class="muted small group-note">${esc(g.note)}</span>` : '') + (tail || '') + '</div></td></tr>';
+    };
+    const ruleLine = (r, place) => {  // place (0.16.0): 'under' a heading, indented as it is; 'first-own', a group's first rule after its headings
+      const turned = r.off ? ' (turned off)' : '';  // a rule turned off: dimmed, and said so over its name, to a screen reader and by its box (0.16.0)
+      const pick = movable ? `<td class="pick"><input type="checkbox" class="pick-row" ${at(` data-key="${esc(r.key)}"`)}${chosen.has(r.key) ? ' checked' : ''} aria-label="Choose ${esc(textOf(r.cells[0]) + turned)}"></td>` : '';
+      const moved = r.moved ? `<div class="sub moved-note">moved here · its own group: ${esc(titles[r.own] || r.own || '')}</div>` : '';
+      const why = [r.why, r.off && 'turned off'].filter(Boolean).join(' · ');
+      const cls = [place, r.moved && 'moved', r.off && 'off'].filter(Boolean).join(' ');
+      return `<tr${cls ? ` class="${cls}"` : ''}>${pick}` + r.cells.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}`
+        + `${i === 0 && why ? ` title="${esc(why)}"` : ''}>${cellHtml(c, m, forms)}${i === 0 ? (turned ? '<span class="sr-only">turned off</span>' : '') + moved : ''}</td>`).join('') + '</tr>';
+    };
+    const body = t.groups.filter(Boolean).map((g) => {
+      const open = isOpen(g.id), mine = rows.filter((r) => r.group === g.id);
+      const buttons = (Array.isArray(g.actions) ? g.actions : []).map((a) => formButton(m, a, forms)).join('');
+      const head = heading(g, mine, open, `group-head${g.kind === 'label' ? ' label' : ''}`, buttons ? `<span class="group-actions">${buttons}</span>` : '');
+      const kids = Array.isArray(g.children) ? g.children.filter((c) => c && c.id) : [], ids = new Set(kids.map((c) => c.id));
+      const few = mine.length <= FEW;  // few listed (a Find's): its headings open at first, until closed
+      const lines = open ? kids.map((c) => {  // its names first, each a heading of its own, its rules under it once open
+        const theirs = mine.filter((r) => r.sub === c.id), on = isOpen(c.id) || (few && !shut.has(`${tableKey(m.name, t.title)}|${c.id}`));
+        return heading(c, theirs, on, 'sub-head') + (on ? theirs.map((r) => ruleLine(r, 'under')).join('') : '');
+      }).join('') + mine.filter((r) => !ids.has(r.sub)).map((r, i) => ruleLine(r, kids.length && !i ? 'first-own' : '')).join('') : '';  // then those with no name, set apart
       return `<tbody class="group" data-group="${esc(g.id)}">${head}${lines}</tbody>`;
     }).join('');
     const thead = `<thead><tr>${movable ? '<th class="pick"></th>' : ''}${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead>`;
@@ -268,9 +299,9 @@
     if (again) again.focus({ preventScroll: true });
   }
   const pickSel = (cls, el, extra) => `${cls}[data-table="${CSS.escape(el.dataset.table)}"]${extra || ''}`;
-  function toggleGroup(el) {
+  function toggleGroup(el) {  // as drawn: an open one closed, a closed one opened (a heading open at first, closed: kept closed)
     const k = `${tableKey(el.dataset.machine, el.dataset.table)}|${el.dataset.group}`;
-    if (openGroups.has(k)) openGroups.delete(k); else openGroups.add(k);
+    if (el.getAttribute('aria-expanded') === 'true') { openGroups.delete(k); shut.add(k); } else { openGroups.add(k); shut.delete(k); }
     keepOpen();
     redrawTables(el.dataset.machine, pickSel('button.expander', el, `[data-group="${CSS.escape(el.dataset.group)}"]`));
   }
@@ -295,7 +326,9 @@
       redrawTables(name, pickSel('button.move-go', el));
       return;
     }
+    if (to !== 'own') went[tableKey(name, t.title)] = { keys: new Set(keys), to };  // and the headings they go under, once drawn there
     await refresh(name);  // this plugin alone asked again: the rules where they went at once
+    delete went[tableKey(name, t.title)];
   }
   // a group's box half chosen: shown as such once drawn
   new MutationObserver(() => document.querySelectorAll('input.pick-group[data-some]').forEach((x) => { x.indeterminate = true; }))
@@ -1195,14 +1228,17 @@
     } catch (e) { if (g === gen) say(name, e.message); }
     schedule();
   }
-  // a button focused in what is drawn again (a row's Remove, a service's Start) is focused again after: the same one
-  const keyOf = (b) => [b.className, b.dataset.machine, b.dataset.form || b.dataset.hook || '', b.dataset.values || b.dataset.args || ''].join('|');
+  // a button or a box focused in what is drawn again (a row's Remove, a service's Start; a group's or a heading's (+) or
+  // (−), a rule's box, Move to: by its table, group and key, 0.16.0) is focused again after: the same one
+  const FOCUSED = 'button[data-machine], input[data-machine], select[data-machine]';
+  const keyOf = (b) => [b.className, b.dataset.machine, b.dataset.form || b.dataset.hook || '', b.dataset.values || b.dataset.args || '',
+    b.dataset.table, b.dataset.group, b.dataset.key].join('|');
   function keepFocus(draw) {
     const a = document.activeElement;
-    const key = a && data.contains(a) && a.matches && a.matches('button[data-machine]') ? keyOf(a) : null;
+    const key = a && data.contains(a) && a.matches && a.matches(FOCUSED) ? keyOf(a) : null;
     draw();
     if (!key || data.contains(a)) return;
-    const again = [...data.querySelectorAll('button[data-machine]')].find((b) => keyOf(b) === key);
+    const again = [...data.querySelectorAll(FOCUSED)].find((b) => keyOf(b) === key);
     if (again) again.focus({ preventScroll: true });
   }
   function redrawShown(m) {
@@ -1495,15 +1531,15 @@
     if (hs) { setHidden(hs.dataset.hide, hs.getAttribute('aria-checked') === 'true', document.activeElement === hs || e.detail === 0); return; }
     const rp = e.target.closest('button.row-pick[data-key], tr[data-pick-row]');  // an install chosen by a click on its row (0.13.0)
     if (rp && (e.target.closest('button.row-pick') || !e.target.closest('button, a, input, select, label'))) { pickRow(rp); return; }
-    const ex = e.target.closest('button.expander[data-group]');  // a group opened (+) or closed (−)
+    const ex = e.target.closest('button.expander[data-group]');  // a group opened (+) or closed (−), or a name under it
     if (ex) { toggleGroup(ex); return; }
     const pr = e.target.closest('input.pick-row[data-key]');  // a rule chosen, or not
     if (pr) { pickRows(pr, [pr.dataset.key], pr.checked, pickSel('input.pick-row', pr, `[data-key="${CSS.escape(pr.dataset.key)}"]`)); return; }
-    const pg = e.target.closest('input.pick-group[data-group]');  // every rule a group lists chosen, or none
+    const pg = e.target.closest('input.pick-group[data-group]');  // every rule a group lists chosen, or none; a name's box: its own (0.16.0)
     if (pg) {
-      const t = tableOf(pg.dataset.machine, pg.dataset.table);
-      pickRows(pg, t ? rowsOf(t).filter((r) => r.group === pg.dataset.group).map((r) => r.key) : [], pg.checked,
-        pickSel('input.pick-group', pg, `[data-group="${CSS.escape(pg.dataset.group)}"]`));
+      const t = tableOf(pg.dataset.machine, pg.dataset.table), id = pg.dataset.group;
+      pickRows(pg, t ? rowsOf(t).filter((r) => r.group === id || r.sub === id).map((r) => r.key) : [], pg.checked,
+        pickSel('input.pick-group', pg, `[data-group="${CSS.escape(id)}"]`));
       return;
     }
     const mg = e.target.closest('button.move-go[data-table]');

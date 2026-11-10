@@ -189,6 +189,18 @@ table.grouped .group-actions { display: inline-flex; gap: 6px; margin-left: auto
 table.grouped tr.moved .moved-note { color: var(--accent); }
 .move-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 6px 0 4px; }
 .move-bar [role="status"] { flex: 1 1 200px; }
+/* 0.16.0: System and Application grouped again, a heading per service or application under its group, indented and
+   lighter than a group's (a paler band, a smaller title); its rules indented as it is; the group's rules with no service
+   or application flush with the group, a line above the first; a rule turned off dimmed, its box as clear as any (it
+   may still be chosen and moved) */
+table.grouped tr.sub-head td { background: color-mix(in srgb, var(--panel) 50%, transparent); }
+table.grouped tr.sub-head:hover td { background: var(--hover); }
+table.grouped tr.sub-head .group-line { padding-left: 32px; }
+table.grouped tr.sub-head .group-title { font-size: 12px; }
+table.grouped tr.under > td.pick + td, table.grouped tr.under > td:first-child:not(.pick) { padding-left: 40px; }
+table.grouped tr.first-own > td { border-top: 2px solid var(--border); }
+table.grouped tr.off td:not(.pick) { opacity: .5; }
+table.grouped tr.off:hover td:not(.pick), table.grouped tr.off:focus-within td:not(.pick) { opacity: .8; }
 
 /* 0.15.0: a plugin's settings as entries on its page */
 table.settings-table .setting-name { font-weight: 600; }

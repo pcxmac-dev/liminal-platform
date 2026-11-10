@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.16.0 (2026-11-09)
+
+The firewalls' System and Application grouped again (the user: "lets group by application under apps or system, try
+best to organize under system and applications. Like system has 'core networking' or WSD or UPnP or RA Server or Remote
+Assistance or network discovery or ... applications has like starcraft or edge"; "try to group the system by
+'services'"; "also rules that are turned off should be shown as well"): an open System shows a heading per service (Core
+Networking, Network Discovery, Remote Assistance...) and an open Application a heading per application (StarCraft II,
+Microsoft Edge...). Each heading is indented under its group on a paler band, its title smaller than the group's, with
+its own (+) to open it and (−) to close it, a box choosing every rule it lists, how many rules it holds and, when not
+every one is listed, how many are. A heading is closed at first and kept open in this browser as a group is; while its
+group lists 30 rules or fewer (after a Find, or a narrow choice of the rules shown) it is open at first, and one closed
+then is kept closed in this browser. An open heading lists its rules under it, indented as it is; the group's rules with
+no service or application follow the headings, flush with the group, a line above them. Rules moved into System or
+Application open the heading they go under. A group's box still chooses every rule it lists, those under its headings
+too; Other and the labels stay single lists, and Move to is as it was. A rule turned off is listed dimmed and says so,
+over its name and to a screen reader; it is chosen and moved as any other. While the tables are drawn again every 30 s,
+the focus stays on the (+), (−), box or Move to it was on, and this browser keeps up to 2000 groups and headings open
+(200 before). The headings come with liminal-libs 1.41.0's firewall tables; a table without them is drawn as before.
+
 ## 0.15.0 (2026-11-09)
 
 A plugin's settings as entries on its page (the user: "the namecheap plugin is very sparse, it should have entries for
