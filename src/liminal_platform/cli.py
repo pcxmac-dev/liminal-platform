@@ -16,15 +16,17 @@ from .app import PlatformApp, facts, platform_dir
 QUIET_SECONDS = 600.0
 
 
-def _app(log=print) -> PlatformApp:
-    app = PlatformApp(log=log)
+def _app(log=print, once: bool = True) -> PlatformApp:
+    """The platform app with its plugins attached; `once` (every command but serve): answering and ending, so a plugin
+    starts no background work of its own (0.20.1: a status had started each cloud plugin's reads and a Dynamic DNS pass)."""
+    app = PlatformApp(log=log, once=once)
     app.attach_plugins()
     return app
 
 
 def cmd_serve(args) -> int:
     folder = platform_dir()
-    app = _app(Logger(folder / "logs" / "platform.log"))
+    app = _app(Logger(folder / "logs" / "platform.log"), once=False)
     port = args.port if args.port is not None else app.port()
     print(f"platform: its page at {app.url(port)} (Ctrl+C to stop)", flush=True)
     try:

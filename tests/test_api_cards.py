@@ -94,3 +94,15 @@ def test_a_change_is_logged_without_what_was_filled_in():
         assert "platform: keyed asked add_key (2 arguments)" in said and not any("secretbody" in s or "laptop" in s for s in said)
     finally:
         app.stop()
+
+
+def test_the_command_lines_app_is_a_one_shot_and_serves_is_not(monkeypatch):
+    """0.20.1: the command line's status and machine commands make a one-shot app, whose plugins start no background
+    work (a cloud's account reads, a Dynamic DNS pass); serve's app is not one."""
+    from liminal_platform import cli
+
+    made = []
+    monkeypatch.setattr(cli.PlatformApp, "attach_plugins", lambda self, plugins=None: made.append(self) or [])
+    assert cli._app(lambda m: None).once is True and made[-1].once is True
+    assert cli._app(lambda m: None, once=False).once is False
+    assert PlatformApp(log=lambda m: None, machines={}, assistants={}).once is False

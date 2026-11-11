@@ -4,7 +4,9 @@
 
 What the audit before any cloud key went in found here: a change asked of a plugin is logged by its name and how many
 arguments it had, never their values. A private key pasted into a cloud plugin's SSH-key form had reached platform.log
-before the plugin refused it. A disabled plugin is no longer asked what it learned of its APIs (its card is still drawn).
+before the plugin refused it. A disabled plugin is no longer asked what it learned of its APIs (its card is still drawn). The command line's status
+and machine commands make a one-shot app (`PlatformApp.once`): a plugin they attach starts no background work of its
+own (a cloud's account reads, a Dynamic DNS pass); serve's app is not one.
 
 ## 0.20.0 (2026-11-11)
 

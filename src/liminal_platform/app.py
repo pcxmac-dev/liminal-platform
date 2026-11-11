@@ -186,7 +186,7 @@ class PlatformApp(App):
     READ_HOOKS = READS
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
-                 assistants: dict | None = None, settings=None, terminal=None):
+                 assistants: dict | None = None, settings=None, terminal=None, once: bool = False):
         # its login: the user's environment variables, those saved after it started too (a setting entered on a page
         # holds across a restart), until the login app holds them (Login.save keeps one); a scratch preview's
         # (LIMINAL_PLATFORM_LOGIN=memory, 0.11.0): a copy of this process's, what the page saves kept in it alone
@@ -194,6 +194,9 @@ class PlatformApp(App):
             memory = os.environ.get(LOGIN_VAR, "").strip().lower() == "memory"
             login = EnvironmentLogin(env=dict(os.environ)) if memory else EnvironmentLogin(saved=saved_variables)
         super().__init__(log, login)
+        # a one-shot app (0.20.1): the command line's status and machine commands, answering and ending; a plugin it
+        # attaches starts no background work of its own (a cloud's account reads, Dynamic DNS passes)
+        self.once = bool(once)
         self._machines = machines  # by name; None: the registry's
         self._assistants = assistants  # by name; None: the registry's
         self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login
