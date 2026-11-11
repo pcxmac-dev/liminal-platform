@@ -700,7 +700,8 @@ class PlatformApp(App):
             self._setups[name] = job
             self.traffic.own(m, name)
             job.thread.start()  # running before the lock goes: a second ask sees it busy
-        self.log(f"platform: {name} asked {hook} as a job" + (f" {' '.join(map(str, args))}" if args else ""))
+        # its name and how many arguments, never their values (0.20.1, as an ask's)
+        self.log(f"platform: {name} asked {hook} as a job" + (f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""))
         self.traffic.record(self.NAME, name, "change", f"{hook} started")
         return job
 
