@@ -32,7 +32,8 @@
   // draws again only when it changed (a "more of the API" box opened stays open) -----------------------------------------
   const drawnApis = {};
   function apiInner(p) {
-    if (!window.LiminalApis) return '';
+    // a server from before 0.20.0 sends no `apis` (the page's files are read from the checkout at each request): no card
+    if (!window.LiminalApis || !Array.isArray(p.apis)) return '';
     const older = `Written for plugin API ${p.pluginApi || 'before 2.2'}: it does not say yet what it attaches to.`;
     return window.LiminalApis.html(p.apis, p.apiFacts, { owner: p.name, empty: (p.apis || []).length ? '' : older });
   }
