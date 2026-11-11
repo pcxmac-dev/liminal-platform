@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0 (2026-11-10)
+
+The platform inherits the login app (the user: "we need to shift over to platform, but make sure that the platform
+inherits the login app so we can login to platform"; "using secret user"), on liminal-libs 1.46.0:
+- Its own login at LIMINAL_PLATFORM_LOGIN_URL (http://127.0.0.1:8796; "none": none), started for it when nothing
+  answers, as its superclass: the platform's users apart from the charts app's (the login's folder `platform/`), the
+  pairs the platform's plugins ask for asked of the platform.
+- The page opens on the sign-in (the login app's page; type secret and click the lambda) until the browser is signed in;
+  then the platform.
+- The login's lambda after a divider at the rail's end: your account (who you are, your keys, the pairs the platform's
+  plugins ask for, sign out) over the main area; the rail's own icons take you back. Signing out there brings the
+  sign-in again.
+- The tests never reach or start a login app (LIMINAL_PLATFORM_LOGIN_URL=none; one test plays it).
+
 ## 0.17.0 (2026-11-10)
 
 Touch screens and the on-screen keyboard (the user: "let's do an update. I want to support touch as well as mouse

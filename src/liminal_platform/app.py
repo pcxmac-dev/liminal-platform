@@ -157,6 +157,11 @@ class PlatformApp(App):
     PORT = PORT
     PORT_VAR = "LIMINAL_PLATFORM_PORT"
     STATIC = Path(__file__).parent / "static"
+    # the login app it inherits (0.18.0; the user, 2026-11-10: "make sure that the platform inherits the login app so we
+    # can login to platform"; "using secret user"): its own login, its users apart from the charts app's (liminal-libs
+    # 1.46.0: started for it when nothing answers, its page the sign-in until the browser is signed in)
+    LOGIN_URL_VAR = "LIMINAL_PLATFORM_LOGIN_URL"
+    LOGIN_URL = "http://127.0.0.1:8796"
 
     ACTIVE_SECONDS = 60.0  # which plugins are active is asked again after this long (some ask WSL)
 

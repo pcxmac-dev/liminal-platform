@@ -32,6 +32,9 @@
   if (new URLSearchParams(location.search).get('embedded') === '1') document.body.classList.add('embedded');
   let st = null;  // the last GET api/status
   let tray = null;  // the last GET api/tray
+  // the login app the platform inherits (0.18.0; the user: "make sure that the platform inherits the login app so we can
+  // login to platform"): its tray after a divider at the rail's end (GET api/trays), your account over the main area
+  let trays = [], loginOpen = false;
   let span = 'recent';  // the charts' range: the last ten minutes, or the last day
   const day = {};  // a plugin's charts of the last day, by name (asked apart: they move every 30 s)
   let live = null;  // the timer asking the shown plugin again
@@ -89,7 +92,25 @@
     // a plugin's icon: its name and the right click in its tooltip; a long press (menu.js, 0.17.0) opens the same menu,
     // headed by its name alone (its data-tip)
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
-      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)" data-tip="${esc(i.title)}">${icon(i.icon || 'chip', 24)}</button>`).join('') : '');
+      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)" data-tip="${esc(i.title)}">${icon(i.icon || 'chip', 24)}</button>`).join('') : '')
+      + (trays.length ? '<hr>' + trays.map((t) => `<button type="button" class="bound${loginOpen ? ' active' : ''}" data-bound="${esc(t.app)}" title="${esc(t.title)}: who you are, your keys and accounts" data-tip="${esc(t.title)}">${icon(t.icon || 'lambda', 26)}</button>`).join('') : '');
+  }
+
+  // your account: the login app's page (embedded) over the main area, the rail's own icons taking you back
+  function openLogin(on) {
+    loginOpen = on;
+    let view = $('loginView');
+    if (on && !view) {
+      view = document.createElement('div');
+      view.id = 'loginView';
+      view.className = 'bound-view';
+      const theme = document.body.dataset.theme;
+      view.innerHTML = `<iframe title="Your account" src="login/?embedded=1${theme ? `&theme=${encodeURIComponent(theme)}` : ''}"></iframe>`;
+      $('main').after(view);
+    }
+    if (view) view.hidden = !on;
+    $('main').hidden = on;
+    drawRail();
   }
 
   // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants
@@ -1657,6 +1678,9 @@
   }
 
   document.addEventListener('click', (e) => {
+    const lb = e.target.closest('#rail button[data-bound]');  // the login's lambda: your account, or back (0.18.0)
+    if (lb) { openLogin(!loginOpen); return; }
+    if (loginOpen && e.target.closest('#rail [data-select]')) openLogin(false);  // the rail's own icons take you back
     const pz = e.target.closest('button.conn-pause');  // Connections: pause or resume the asking
     if (pz) {
       trafficPaused = !trafficPaused;
@@ -1940,6 +1964,14 @@
     const m = shown();
     if (m) refresh(m.name);
     if (selected() === CONNECTIONS) loadTraffic();
+  });
+
+  // the login app the platform inherits (0.18.0): its tray at the rail's end; signed out in your account (the login page
+  // held there says so), the platform's sign-in again
+  api('GET', 'api/trays').then((d) => { trays = (d && d.trays) || []; drawRail(); }).catch(() => { trays = []; });
+  window.addEventListener('message', (e) => {
+    if (e.origin !== location.origin || !e.data || e.data.liminal !== 'login') return;
+    if (!e.data.signedIn) location.reload();
   });
 
   render();

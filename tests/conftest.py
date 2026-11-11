@@ -99,6 +99,7 @@ def _folders_of_the_tests_own(monkeypatch, tmp_path):
     machine's."""
     monkeypatch.setenv("LIMINAL_PLATFORM_DIR", str(tmp_path / "platform"))
     monkeypatch.setenv("LIMINAL_UI_FILE", str(tmp_path / "ui.json"))
+    monkeypatch.setenv("LIMINAL_PLATFORM_LOGIN_URL", "none")  # no login app reached or started (a test sets a stand-in)
 
 
 def _port(url: str) -> int:

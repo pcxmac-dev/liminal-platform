@@ -1034,3 +1034,54 @@ def test_the_login_terminal_keeps_a_phones_word_its_end_and_a_mouses_ways(served
     assert ".term { height: min(340px, 45vh); height: min(340px, 45svh); }" in css and "dvh" not in css
     assert "@media (pointer: coarse) { .term-head .how-mouse { display: none; } }" in css
     assert "@media not all and (pointer: coarse) { .term-head .how-mouse + .how-touch::before { content: \" · \"; } }" in css
+
+
+def test_the_platform_inherits_the_login_app_and_opens_on_its_sign_in(monkeypatch):
+    """0.18.0 (the user, 2026-11-10: "we need to shift over to platform, but make sure that the platform inherits the login
+    app so we can login to platform"; "using secret user"): the platform's page is the sign-in (the login app's page held
+    in it, the secret user its default way in) until the browser is signed in there; its own login (8796, its users
+    apart from the charts app's), under /login/, its lambda at the rail's end opening your account over the main area.
+    A stand-in plays the login app; nothing is started."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Login(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            signed = "liminal_login_platform=tok" in (self.headers.get("Cookie") or "")
+            data = ({"signedIn": signed} if self.path.startswith("/api/status") else
+                    {"app": "login", "icon": "lambda", "title": "Login: Liminal Platform", "items": []})
+            body = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    login = ThreadingHTTPServer(("127.0.0.1", 0), Login)
+    threading.Thread(target=login.serve_forever, daemon=True).start()
+    assert PlatformApp.LOGIN_URL_VAR == "LIMINAL_PLATFORM_LOGIN_URL" and PlatformApp.LOGIN_URL == "http://127.0.0.1:8796"
+    monkeypatch.setenv("LIMINAL_PLATFORM_LOGIN_URL", f"http://127.0.0.1:{login.server_address[1]}")
+    app = PlatformApp(log=lambda m: None, machines={}, assistants={})
+    port = _port(app.start(0))
+    try:
+        conn = HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", "/")
+        body = conn.getresponse().read()
+        assert b'id="signinFrame"' in body  # not signed in: the sign-in
+        conn.request("GET", "/", headers={"Cookie": "liminal_login_platform=tok"})
+        body = conn.getresponse().read()
+        assert b"<title>Liminal Platform</title>" in body and b"platform.js" in body  # signed in: the platform
+        conn.request("GET", "/api/trays")
+        assert json.loads(conn.getresponse().read())["trays"][0]["icon"] == "lambda"
+    finally:
+        app.stop()
+        login.shutdown()
+        login.server_close()
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    assert "api('GET', 'api/trays')" in js and 'data-bound="${esc(t.app)}"' in js and "function openLogin(on)" in js
+    assert "src=\"login/?embedded=1" in js and "if (!e.data.signedIn) location.reload();" in js
+    css = (PlatformApp.STATIC / "platform.css").read_text(encoding="utf-8")
+    assert "#main[hidden] { display: none; }" in css and ".bound-view iframe {" in css
