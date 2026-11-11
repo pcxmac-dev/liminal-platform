@@ -4,7 +4,7 @@
 
 What the audit before any cloud key went in found here: a change asked of a plugin is logged by its name and how many
 arguments it had, never their values. A private key pasted into a cloud plugin's SSH-key form had reached platform.log
-before the plugin refused it.
+before the plugin refused it. A disabled plugin is no longer asked what it learned of its APIs (its card is still drawn).
 
 ## 0.20.0 (2026-11-11)
 

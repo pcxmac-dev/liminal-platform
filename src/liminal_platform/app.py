@@ -452,7 +452,7 @@ class PlatformApp(App):
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
                 "icon": getattr(p, "ICON", "") or "analysis",  # its maker's mark (0.10.1), else the chart
                 "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
-                "hidden": p.name in self.hidden(), "settings": self.settings_of(p), **self.api_card(p)}
+                "hidden": p.name in self.hidden(), "settings": self.settings_of(p), **self.api_card(p, on)}
 
     # -- a plugin's settings, entered on its page (the user, 2026-11-08: "i need a way to put my credentials in to the
     # namecheap plugin and allow it to function"): its keys (KeyVar), kept through the platform's login (Login.save:
@@ -587,21 +587,22 @@ class PlatformApp(App):
                 "icon": getattr(m, "ICON", "") or "chip", "enabled": on, "valid": valid, "why": why, "state": state,
                 "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
-                "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m), **self.api_card(m)}
+                "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m), **self.api_card(m, on)}
 
     @staticmethod
-    def api_card(p) -> dict:
+    def api_card(p, live: bool = True) -> dict:
         """What a plugin attaches to (0.20.0, plugin API 2.2: liminal-libs sources/apis.py; the user, 2026-11-11: "each
         plugin should reflect the the API its attached to, and present links that provide documentation ... it should
         also expose more of what the API is about"): its declarations and what it learned of them while it ran, asking
-        nothing of it (api_facts says what it already holds); the page draws them with the library's apis.js."""
+        nothing of it (api_facts says what it already holds; a disabled plugin is not asked even that: `live`, 0.20.1);
+        the page draws them with the library's apis.js."""
         from liminal_libs.sources import apis as apis_mod
 
         try:
             declared = apis_mod.as_dicts(getattr(p, "apis", ()) or ())
         except Exception:  # noqa: BLE001 - a declaration that cannot be read: the page says it declares none
             declared = []
-        return {"pluginApi": str(getattr(p, "api", "") or ""), "apis": declared, "apiFacts": apis_mod.facts_of(p) if declared else {}}
+        return {"pluginApi": str(getattr(p, "api", "") or ""), "apis": declared, "apiFacts": apis_mod.facts_of(p) if declared and live else {}}
 
     @staticmethod
     def hooks(m) -> list[str]:
