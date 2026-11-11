@@ -1129,3 +1129,95 @@ def test_your_account_takes_the_theme_chosen_after_it_opened():
     assert "w.LiminalTheme.apply(document.body.dataset.theme); return;" in body and "if (view.hidden) view.remove();" in body
     # the view made anew asks the theme shown then
     assert "src=\"login/?embedded=1${theme ? `&theme=${encodeURIComponent(theme)}` : ''}\"" in js
+
+
+def test_a_hook_asked_as_a_job_shows_its_lines_as_they_come_and_its_end():
+    """0.19.0 (the Docker plugin's pull, a large image taking minutes; the user: "lets roll in a way to import docker images
+    ... with a search"): a hook the plugin names in its JOB_HOOKS, asked as a job: its `log` the job's output, followed on the
+    page as it comes, its answer at the end; a refusal in its own words. A hook it does not name, one the page may not ask,
+    arguments that are no list, a second job while one runs: refused before anything runs."""
+    import threading
+
+    from liminal_libs.machines import MachinePlugin as Machine
+
+    gate = threading.Event()
+
+    class Puller(Machine):
+        name, title, about, api, order = "puller", "Puller", "a stand-in whose pull is a job", "2.1", 903
+        HOOKS = (*Machine.HOOKS, "pull", "search")
+        JOB_HOOKS = ("pull",)
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "valid": True, "summary": "here", "why": ""}
+
+        def pull(self, engine, image, log=None):
+            if image == "bad":
+                raise ValueError("not an image's name: 'bad'")
+            if image == "odd":
+                from datetime import datetime
+                return {"said": "odd", "ok": True, "when": datetime(2026, 11, 11)}
+            log(f"pulling {image} on {engine}")
+            gate.wait(5)
+            log("Status: Downloaded newer image")
+            return {"said": f"{image} pulled on {engine}", "lines": [], "ok": True}
+
+        def search(self, query):
+            return {"said": "nothing found", "ok": True}
+
+    app = PlatformApp(log=lambda m: None, machines={"puller": Puller()}, assistants={})
+    port = _port(app.start(0))
+    try:
+        status, job = _call(port, "POST", "/api/machines/puller/job", {"action": "hook", "hook": "pull", "args": ["e1", "nginx:stable"]})
+        assert status == 202 and job["action"] == "pull" and job["hook"] is True and job["running"] is True
+        assert _call(port, "POST", "/api/machines/puller/job", {"action": "hook", "hook": "pull", "args": ["e1", "x"]})[0] == 409  # one at a time
+        gate.set()
+        done = _wait_job(port, "puller")
+        assert done["ok"] is True and done["text"] == "pulling nginx:stable on e1\nStatus: Downloaded newer image\n"
+        assert done["answer"] == {"said": "nginx:stable pulled on e1", "lines": [], "ok": True}
+        assert done["done"] == [{"step": "pull", "ok": True, "said": "nginx:stable pulled on e1"}]
+        assert _call(port, "POST", "/api/machines/puller/job", {"action": "hook", "hook": "pull", "args": ["e1", "bad"]})[0] == 202
+        failed = _wait_job(port, "puller")
+        assert failed["ok"] is False and failed["error"] == "ValueError: not an image's name: 'bad'"
+        for body in ({"action": "hook", "hook": "search", "args": ["x"]},  # a hook, but not one it runs as a job
+                     {"action": "hook", "hook": "setup", "args": []},  # one the page never asks by name
+                     {"action": "hook", "hook": "pull", "args": "e1 nginx"}, {"action": "hook", "args": []}, {"action": "reboot"}):
+            assert _call(port, "POST", "/api/machines/puller/job", body)[0] == 400, body
+        # an answer holding what JSON cannot say is kept as words: the plugin's status (which shows the job) stays whole
+        _call(port, "POST", "/api/machines/puller/job", {"action": "hook", "hook": "pull", "args": ["e1", "odd"]})
+        odd = _wait_job(port, "puller")
+        assert odd["ok"] is True and odd["answer"]["when"] == "2026-11-11 00:00:00"
+        assert _call(port, "GET", "/api/machines/puller")[0] == 200 and _call(port, "GET", "/api/status")[0] == 200
+    finally:
+        app.stop()
+
+
+def test_the_page_runs_a_job_form_draws_a_tables_search_box_and_asks_a_details_form_at_once():
+    """0.19.0: a form with `job` is posted as a job and the dialog closes onto its panel (titled by its confirmation's words,
+    its end said there); a table with `search` gets a search box above it (its form's text field, its choices beside it),
+    asked at once on Enter, what is typed kept while the table is drawn again, the plugin's word beside it; a form with
+    nothing to fill and nothing to confirm (a row's Details) is asked as it opens."""
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    assert "d.form.job  // 0.19.0" in js and "{ action: 'hook', hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) }" in js
+    assert "follow(d.name, 'hook', [], what);" in js
+    # a hook's job keeps its title after a reload (picked up by the hook's name, never "Installing ...")
+    assert "if (!['setup', 'update'].includes(j.action)) return j.what || `${m.title}: ${j.action === 'hook' ? 'a job' : j.action}`;" in js
+    assert "else if (!j.running && got.hook && got.answer && got.answer.said) j.term.write(`\\n${String(got.answer.said)}\\n`);" in js
+    assert "if (action === 'hook') {" in js and "panel.scrollIntoView({ block: 'nearest' });" in js  # its panel brought into view
+    assert "if (!['setup', 'update'].includes(j.action) && selected() === name) { await refresh(name); return; }" in js  # focus kept
+    assert "function searchBox(m, t, forms)" in js and "${searchBox(m, t, forms)}" in js and 'role="search"' in js
+    assert "if (!field || f.confirm !== false) return '';" in js  # only a form that changes nothing is asked without its dialog
+    assert "if (c.matches('input')) drafts[key] = c.value;" in js and "delete drafts[key];" in js and "${kb('search')}" in js
+    assert "searchSaid[key] = (err.answer && err.answer.words) || err.message;" in js
+    assert "${esc(busy || s.value ? (searchSaid[key] || '') : '')}" in js  # after Clear the last word goes too
+    assert "if (selected() !== name) return;  // moved on meanwhile" in js and "if (box && had && mayFocus()) box.focus(" in js
+    # refresh() of a plugin not shown leaves the shown one's timer alone (it cleared it first, then returned)
+    at = js.index("async function refresh(name) {")
+    assert js.index("if (selected() !== name) return;", at) < js.index("clearTimeout(live);", at)
+    assert "if (dlg.step === 'confirm' && f.confirm === false) send();" in js
+    assert "again.setSelectionRange(caret[0], caret[1])" in js  # typing goes on where it was after a redraw
+    css = (PlatformApp.STATIC / "platform.css").read_text(encoding="utf-8")
+    assert ".table-search .table-search-input { flex: 1 1 320px; min-width: 0; }" in css
+    assert not [line for line in css.splitlines() if "table-search" in line and ":hover" in line]  # a finger has no hover

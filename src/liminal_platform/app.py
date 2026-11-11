@@ -103,13 +103,16 @@ def _accepting(e: Exception) -> str | None:
 
 
 class Setup:
-    """A machine plugin's job under way, in a thread: its setup, or its packages' update (`action`); what it prints as it
-    comes (`output`, read from an offset by the page's terminal panel), its steps when done."""
+    """A machine plugin's job under way, in a thread: its setup, its packages' update, or one of its hooks (`action`:
+    the hook's name; 0.19.0, `call`: the hook asked with the job's output as its `log`); what it prints as it comes
+    (`output`, read from an offset by the page's terminal panel), its steps (a hook's answer) when done."""
 
-    def __init__(self, machine, steps, action: str = "setup", traffic=None, by: str = "platform"):
+    def __init__(self, machine, steps, action: str = "setup", traffic=None, by: str = "platform", call=None):
         self.machine = machine
         self.action = action
         self.steps = tuple(steps) if steps else None
+        self.call = call  # (log) -> the hook's answer, for a hook asked as a job
+        self.answer = None  # that answer, once it is in
         self.output = Output()
         self.done: list[dict] | None = None
         self.error: str | None = None
@@ -120,7 +123,12 @@ class Setup:
     def _run(self) -> None:
         began = time.perf_counter()
         try:
-            if self.action == "update":
+            if self.call is not None:  # kept as JSON can say it (it is shown with the plugin's status): never a value it cannot
+                self.answer = json.loads(json.dumps(_json_of(self.call(self.output)), default=str))
+                said = self.answer.get("said", "") if isinstance(self.answer, dict) else str(self.answer or "")
+                ok = not (isinstance(self.answer, dict) and self.answer.get("ok") is False)
+                self.done = [{"step": self.action, "ok": ok, "said": said}]
+            elif self.action == "update":
                 self.done = self.machine.update_packages(log=self.output)
             else:
                 self.done = self.machine.setup(log=self.output, steps=self.steps)
@@ -145,6 +153,8 @@ class Setup:
         out = {"machine": self.machine.name, "action": self.action, "steps": list(self.steps or ()), "running": self.running,
                "lines": self.lines[-last:] if last else self.lines, "done": self.done, "error": self.error, "startedAt": self.started,
                "ok": None if self.done is None else (self.error is None and all(d["ok"] is not False for d in self.done))}
+        if self.call is not None:
+            out["hook"], out["answer"] = True, self.answer
         if since is not None:
             out["text"], out["from"], out["offset"] = self.output.read(since)
         return out
@@ -650,12 +660,34 @@ class PlatformApp(App):
                 raise Refused(HTTPStatus.CONFLICT, f"{name} is busy already ({current.action})")
             setup = Setup(m, steps, action, self.traffic, self.NAME)
             self._setups[name] = setup
+            self.traffic.own(m, name)
+            setup.thread.start()  # running before the lock goes: a second ask sees it busy (0.19.0)
         self.log(f"platform: {'updating the packages of' if action == 'update' else 'setting up'} {name}"
                  + (f" ({', '.join(setup.steps)})" if setup.steps else ""))
-        self.traffic.own(m, name)
         self.traffic.record(self.NAME, name, "change", f"{action} started" + (f": {', '.join(setup.steps)}" if setup.steps else ""))
-        setup.thread.start()
         return setup
+
+    def start_hook_job(self, name: str, hook: str, args: list) -> Setup:
+        """One of a plugin's hooks asked as a job (0.19.0; the Docker plugin's pull: a large image takes minutes): only one
+        the page may ask and the plugin names in its JOB_HOOKS, run in a thread with the job's output as its `log`, each
+        line followed on the page as it comes; its answer (or its refusal, in its own words) at the end."""
+        m = self.machine(name)
+        self._refuse_disabled(name)
+        if hook not in self.asks(m) or hook not in tuple(getattr(m, "JOB_HOOKS", ()) or ()):
+            raise Refused(HTTPStatus.BAD_REQUEST, f"{name} runs no {hook!r} as a job")
+        if not isinstance(args, list) or len(args) > 16:
+            raise Refused(HTTPStatus.BAD_REQUEST, "args is a list of the hook's arguments")
+        with self._lock:
+            current = self._setups.get(name)
+            if current is not None and current.running:
+                raise Refused(HTTPStatus.CONFLICT, f"{name} is busy already ({current.action})")
+            job = Setup(m, None, hook, self.traffic, self.NAME, call=lambda log: m.ask(hook, *args, log=log))
+            self._setups[name] = job
+            self.traffic.own(m, name)
+            job.thread.start()  # running before the lock goes: a second ask sees it busy
+        self.log(f"platform: {name} asked {hook} as a job" + (f" {' '.join(map(str, args))}" if args else ""))
+        self.traffic.record(self.NAME, name, "change", f"{hook} started")
+        return job
 
     # -- login terminals (the user: "the plugin also allows for a user to login through a terminal in to the environment")
     def terminal_of(self, name: str) -> Terminal | None:
@@ -756,8 +788,13 @@ class PlatformApp(App):
                 return 200, self.check(name)
             if method == "POST" and action == "job":
                 what = body.get("action")
+                if what == "hook":  # one of its hooks as a job (0.19.0)
+                    hook, args = body.get("hook"), body.get("args") or []
+                    if not isinstance(hook, str):
+                        raise Refused(HTTPStatus.BAD_REQUEST, "hook is a hook's name")
+                    return 202, self.start_hook_job(name, hook, args).describe(since=0)
                 if what not in ("install", "update"):
-                    raise Refused(HTTPStatus.BAD_REQUEST, "action is install or update")
+                    raise Refused(HTTPStatus.BAD_REQUEST, "action is install, update or hook")
                 job = self.start_setup(name, None, "update" if what == "update" else "setup")
                 return 202, job.describe(since=0)
             if action == "terminal" and method == "POST":

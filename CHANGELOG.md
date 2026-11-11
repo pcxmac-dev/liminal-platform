@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.19.0 (2026-11-11)
+
+A plugin's hook asked as a job, and a table's search box (for the Docker plugin's image search; the user: "lets roll in a
+way to import docker images (from various docker repos) with a search that can find things like nginx webserver or
+postfix secure file server w/ all the anti-spam+++").
+- A plugin names the hooks the page may run as a job (`JOB_HOOKS`); a form with `job` is posted as one (`POST
+  api/machines/<name>/job {action: "hook", hook, args}`): the hook runs in a thread with the job's output as its `log`,
+  each line in the job's panel as it comes, its answer (or its refusal, in its own words) said at the end; the dialog
+  closes onto the panel. Only a hook the page may ask and the plugin names; one job at a time per plugin.
+- A status table's `search` ({form, field, value, placeholder}): its form's text field drawn above the table as a search
+  box, the form's choices beside it, asked at once on Enter or Search (such a form changes nothing: its confirm is false),
+  the plugin's word beside it; what is typed kept while the table is drawn again, the caret where it was.
+- A form with nothing to fill and nothing to confirm (a row's Details) is asked as it opens.
+- Mended with it: a job's thread starts before the busy check's lock is let go (two asks at once could start two jobs,
+  installs and updates too); a hook job's answer is kept as JSON can say it (it is shown with the plugin's status); its
+  panel is brought into view and keeps its title after a reload; its end draws that plugin's tables alone, the focus kept;
+  a plugin page's refresh asked while another is shown leaves that one's timer alone (a search answered after you moved
+  on had stopped it); the search box gives the keyboard back after a search, its last word goes with Clear, and only a
+  form whose confirm is false is drawn as one.
+
 ## 0.18.1 (2026-11-10)
 
 The open page keeps its login in touch (the user, of being signed out after ten quiet minutes: "Yes, fix both"). The

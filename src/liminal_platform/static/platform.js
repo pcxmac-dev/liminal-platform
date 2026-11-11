@@ -400,6 +400,72 @@
     const o = s.options[s.selectedIndex];
     if (note) note.textContent = (o && o.getAttribute('title')) || '';
   });
+  // a table's search box (0.19.0, a status table's `search`: {form, field, value, placeholder}; the Docker plugin's image
+  // search, the user: "lets roll in a way to import docker images ... with a search"): the form's text field above the
+  // table, its choices beside it, asked at once on Enter or Search (the form changes nothing: its confirm is false), the
+  // plugin's answer said beside it; what is typed kept while the table is drawn again every 30 s
+  const drafts = {}, searching = {}, searchSaid = {};  // by plugin and form: the text being typed, asked now, the last word
+  function searchBox(m, t, forms) {
+    const s = t.search, f = s && typeof s.form === 'string' && forms[s.form];
+    const field = f && (f.fields.find((x) => x && x.name === s.field) || f.fields.find((x) => x && x.type === 'text'));
+    if (!field || f.confirm !== false) return '';  // only a form that changes nothing is asked without its dialog
+    const key = `${m.name}|${s.form}`, busy = !!searching[key], id = `ts-${m.name}-${s.form}`;
+    const value = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : (s.value ?? field.value ?? '');
+    const attrs = `data-machine="${esc(m.name)}" data-form="${esc(s.form)}"${busy ? ' disabled' : ''}`;
+    const selects = f.fields.filter((x) => x && x !== field && x.type === 'choice' && Array.isArray(x.choices)).map((x) => {
+      const now = drafts[`${key}|${x.name}`] ?? x.value;
+      return `<label class="sr-only" for="${esc(id)}-${esc(x.name)}">${esc(x.label || x.name)}</label>`
+        + `<select id="${esc(id)}-${esc(x.name)}" name="${esc(x.name)}" class="table-search-choice" ${attrs}>`
+        + x.choices.map((c) => `<option value="${esc(c.value)}"${String(c.value) === String(now) ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}>${esc(c.title ?? c.value)}</option>`).join('')
+        + '</select>';
+    }).join('');
+    return `<form class="table-search" role="search" data-machine="${esc(m.name)}" data-form="${esc(s.form)}" novalidate>`
+      + `<label class="sr-only" for="${esc(id)}">${esc(field.label || f.title || 'Search')}</label>`
+      + `<input type="search" id="${esc(id)}" name="${esc(field.name)}" class="table-search-input" value="${esc(value)}" placeholder="${esc(s.placeholder || field.placeholder || '')}" ${kb('search')} ${attrs}>`
+      + selects + `<button type="submit" class="accent table-search-go" ${attrs}>${busy ? 'Searching…' : esc(f.submit || 'Search')}</button>`
+      // the last search's word while the plugin still holds it (after Clear its value is empty: nothing said)
+      + `<span class="muted small table-search-said" role="status">${esc(busy || s.value ? (searchSaid[key] || '') : '')}</span></form>`;
+  }
+  document.addEventListener('submit', async (e) => {
+    const fm = e.target.closest && e.target.closest('form.table-search');
+    if (!fm) return;
+    e.preventDefault();
+    const name = fm.dataset.machine, id = fm.dataset.form, key = `${name}|${id}`;
+    const m = pluginOf(name), f = m && formsOf(m)[id];
+    if (!f || searching[key]) return;
+    const values = {};
+    f.fields.forEach((x) => { if (x && typeof x.name === 'string') values[x.name] = x.value ?? null; });
+    fm.querySelectorAll('[name]').forEach((c) => { values[c.name] = String(c.value || '').trim(); });
+    const text = fm.querySelector('input.table-search-input');
+    if (text && !values[text.name]) { searchSaid[key] = 'Type what to search for first.'; redrawShown(m); return; }
+    const had = fm.contains(document.activeElement);  // the box (or its button) had the keyboard: it gets it back after
+    searching[key] = true;
+    searchSaid[key] = '';
+    redrawShown(m);
+    try {
+      const out = await api('POST', `api/machines/${enc(name)}/ask`, { hook: f.hook, args: argsOf(f, values, []) });
+      searchSaid[key] = out && out.answer && out.answer.said ? cap(String(out.answer.said)) : '';
+      delete drafts[key];
+    } catch (err) {
+      searchSaid[key] = (err.answer && err.answer.words) || err.message;
+    }
+    searching[key] = false;
+    if (selected() !== name) return;  // moved on meanwhile: that page's refresh is left alone; this one's comes on return
+    await refresh(name);
+    const box = $(`ts-${name}-${id}`);
+    if (box && had && mayFocus()) box.focus({ preventScroll: true });  // a keyboard's: back in the box (a finger's: no keyboard called up)
+  });
+  document.addEventListener('input', (e) => {
+    const c = e.target.closest && e.target.closest('form.table-search [name]');
+    if (!c) return;
+    const fm = c.closest('form.table-search'), key = `${fm.dataset.machine}|${fm.dataset.form}`;
+    if (c.matches('input')) drafts[key] = c.value; else drafts[`${key}|${c.name}`] = c.value;
+  });
+  document.addEventListener('change', (e) => {
+    const c = e.target.closest && e.target.closest('form.table-search select[name]');
+    if (c) drafts[`${c.closest('form.table-search').dataset.machine}|${c.closest('form.table-search').dataset.form}|${c.name}`] = c.value;
+  });
+
   function statTables(m) {
     const forms = formsOf(m), can = new Set(m.asks || []);
     const under = (t) => {
@@ -408,7 +474,7 @@
       return buttons ? `<div class="row table-actions">${buttons}</div>` : '';
     };
     const picks = (t) => groupsOf(t.options, can).map((o) => choicesHtml(m, o, `<div class="muted small choices-title">${esc(o.title)}</div>`)).join('');
-    return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}${picks(t)}`
+    return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${searchBox(m, t, forms)}${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}${picks(t)}`
       + (Array.isArray(t.groups) && Array.isArray(t.columns) ? groupedTable(m, t, forms, can)
         : t.select && Array.isArray(t.columns) ? selectTable(m, t, forms, can) : (t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
         + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
@@ -616,6 +682,8 @@
       if (head) { head.tabIndex = -1; head.removeAttribute('autofocus'); }
     }
     focusStep();
+    // 0.19.0: nothing to fill and nothing to confirm (a row's Details, its image given): asked at once, its answer shown
+    if (dlg.step === 'confirm' && f.confirm === false) send();
   }
 
   function dialogEl() {
@@ -814,11 +882,20 @@
         ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: Object.fromEntries(Object.entries(d.values).filter(([, v]) => given(v))) }) }
         : d.form.route === 'settings-forget'  // one setting forgotten (0.15.0)
           ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: {}, forget: [d.values.variable] }) }
-          : await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
+          : d.form.job  // 0.19.0: a hook asked as a job (a pull: minutes), its lines followed in the job's panel
+            ? { job: await api('POST', `api/machines/${enc(d.name)}/job`, { action: 'hook', hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) }) }
+            : await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
     }
     catch (e) { err = e; }
     d.busy = false;
     if (dlg !== d) return;
+    if (!err && out && out.job) {  // the job runs: the dialog closes, its panel follows it (its end said there)
+      const what = filled((d.form.confirm && d.form.confirm.title) || d.form.title || d.form.hook, d.form, d.values).replace(/\?$/, '');
+      const el = $('formDialog');
+      if (el && el.open) el.close();
+      follow(d.name, 'hook', [], what);
+      return;
+    }
     if (!err) {
       d.step = 'done';
       d.answer = out && out.answer;
@@ -872,6 +949,8 @@
     return j.running ? 'running…' : j.ok ? 'done' : j.ok === false ? 'ended with a failure' : '';
   }
   function jobTitle(m, j) {
+    // a hook asked as a job (0.19.0): its confirmation's words; picked up after a reload, by the hook's name
+    if (!['setup', 'update'].includes(j.action)) return j.what || `${m.title}: ${j.action === 'hook' ? 'a job' : j.action}`;
     const what = (j.action === 'update' && j.what) || (checks[m.name] && checks[m.name].data && checks[m.name].data.distribution) || m.title;
     return j.action === 'update' ? `Updating ${what}'s packages` : PREPARING.includes((j.steps || [])[0]) && j.steps.length === 1
       ? `${m.title}: ${j.steps[0]}` : `Installing ${what}`;
@@ -1387,8 +1466,8 @@
     live = setTimeout(() => refresh(m.name), every * 1000);
   }
   async function refresh(name) {
+    if (selected() !== name) return;  // 0.19.0: one not shown (a search answered after you moved on) leaves the shown one's timer
     clearTimeout(live);
-    if (selected() !== name) return;
     const g = gen;
     try {
       const was = st.machines[name], charted = !!(was && was.status && was.status.charts);  // the day's figures: a charted plugin's
@@ -1410,10 +1489,12 @@
   function keepFocus(draw) {
     const a = document.activeElement;
     const key = a && data.contains(a) && a.matches && a.matches(FOCUSED) ? keyOf(a) : null;
+    const caret = key && a.matches('input[type="search"], input[type="text"]') ? [a.selectionStart, a.selectionEnd] : null;  // 0.19.0
     draw();
     if (!key || data.contains(a)) return;
     const again = [...data.querySelectorAll(FOCUSED)].find((b) => keyOf(b) === key);
     if (again) again.focus({ preventScroll: true });
+    if (again && caret && again.setSelectionRange) again.setSelectionRange(caret[0], caret[1]);  // typing goes on where it was
   }
   function redrawShown(m) {
     const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`), pz = $(`paths-${m.name}`);
@@ -1575,6 +1656,10 @@
     say(name, '');
     if (st.machines[name]) st.machines[name].setup = { running: true, action };
     if (selected() === name) { drawData(); drawSide(); }
+    if (action === 'hook') {  // 0.19.0: its panel brought into view (the form that started it may be far above it)
+      const panel = document.querySelector(`[data-panel="job-${CSS.escape(name)}"]`);
+      if (panel) panel.scrollIntoView({ block: 'nearest' });
+    }
     pollJob(name);
   }
 
@@ -1598,6 +1683,7 @@
         j.running = !!got.running;
         j.ok = got.ok;
         if (!j.running && got.error) j.term.write(`\n${got.error}\n`);
+        else if (!j.running && got.hook && got.answer && got.answer.said) j.term.write(`\n${String(got.answer.said)}\n`);  // 0.19.0: as said (an image's name keeps its case)
       } catch (e) {
         j.term.write(`\n${e.message}\n`);
         j.running = false;
@@ -1609,6 +1695,7 @@
     }
     j.reading = false;
     if (jobs[name] !== j) return;
+    if (!['setup', 'update'].includes(j.action) && selected() === name) { await refresh(name); return; }  // a hook's: its tables, the focus kept (0.19.0)
     delete checks[name];  // installed now, perhaps: asked again
     await render();
   }

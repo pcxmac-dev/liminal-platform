@@ -63,6 +63,13 @@ table.stats td .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywh
 /* 0.6.0: a plugin's forms (status.forms): the buttons opening them (under a table, in a row), and the one dialog holding
    the form, its confirmation and the plugin's answer, in the page's theme */
 .table-actions { margin: 6px 0 2px; }
+/* 0.19.0: a table's search box (the Docker plugin's image search): the field wide, its choice and Search beside it, the
+   plugin's word on a line of its own; each on a line of its own on a phone */
+.table-search { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 8px; }
+.table-search .table-search-input { flex: 1 1 320px; min-width: 0; }
+.table-search .table-search-said { flex-basis: 100%; }
+.table-search .table-search-said:empty { display: none; }
+@media (max-width: 700px) { .table-search .table-search-input, .table-search select, .table-search .table-search-go { flex: 1 1 100%; } }
 .choices-title { margin: 8px 0 0; }  /* 0.7.0: a table's own choices (the ports it lists) */
 /* 0.8.0: a plugin's paths (status.paths): its hops in a row, the links between them in their state, traffic moving
    along a link being checked; the colours are the theme's (up: passes, down: stops it, the amber series: in doubt) */
