@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.18.1 (2026-11-10)
+
+The open page keeps its login in touch (the user, of being signed out after ten quiet minutes: "Yes, fix both"). The
+login app started for the platform ends once no page has been in touch with it for ten minutes (LIMINAL_QUIET_SECONDS),
+and the platform's page was in touch only as it opened, so a reload or your account after that found you signed out
+while you were using the platform. While a page is open, shown or not, it asks the login every minute whether you are
+still signed in (`login/api/status`, passed on with your cookie), which keeps the login in touch; the login ends ten
+minutes after the platform's last page closes. Signed out meanwhile (in another page, or the session over), or a login
+that ended anyway and was started again (every session lost): the sign-in again; coming back to the page asks at once;
+no answer (the platform stopped, or its login could not be started): asked again a minute later, the page left as it is.
+On liminal-libs 1.46.1, whose sign-in covers the page by its file's own name too (a page opened at /index.html while
+signed out would otherwise reload into itself every minute).
+- Your account takes a theme chosen after it opened: painted again in place (it kept the theme it first opened in, and
+  with the login drawing no colour of its own round it, liminal-login 0.15.3, the old theme showed inside the new);
+  one not loaded yet and out of sight is made again when next opened.
+- With liminal-login 0.15.3 the sign-in, your account and the charts' bound view show no box of the login's own round
+  it, in every theme.
+
 ## 0.18.0 (2026-11-10)
 
 The platform inherits the login app (the user: "we need to shift over to platform, but make sure that the platform

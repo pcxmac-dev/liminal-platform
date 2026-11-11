@@ -1076,6 +1076,12 @@ def test_the_platform_inherits_the_login_app_and_opens_on_its_sign_in(monkeypatc
         assert b"<title>Liminal Platform</title>" in body and b"platform.js" in body  # signed in: the platform
         conn.request("GET", "/api/trays")
         assert json.loads(conn.getresponse().read())["trays"][0]["icon"] == "lambda"
+        # what the open page asks every minute (0.18.1) reaches the login with the browser's cookie: the library's passing
+        # on, which the keeping relies on (the login is in touch, and says whether that browser is still signed in)
+        conn.request("GET", "/login/api/status", headers={"Cookie": "liminal_login_platform=tok"})
+        assert json.loads(conn.getresponse().read()) == {"signedIn": True}
+        conn.request("GET", "/login/api/status")
+        assert json.loads(conn.getresponse().read()) == {"signedIn": False}
     finally:
         app.stop()
         login.shutdown()
@@ -1085,3 +1091,41 @@ def test_the_platform_inherits_the_login_app_and_opens_on_its_sign_in(monkeypatc
     assert "src=\"login/?embedded=1" in js and "if (!e.data.signedIn) location.reload();" in js
     css = (PlatformApp.STATIC / "platform.css").read_text(encoding="utf-8")
     assert "#main[hidden] { display: none; }" in css and ".bound-view iframe {" in css
+
+
+def test_the_open_platform_page_keeps_its_login_in_touch():
+    """0.18.1 (the user, 2026-11-10, of the login app quitting after ten quiet minutes and so signing them out of the
+    platform they were using: "Yes, fix both"): the login started for the platform ends once no page has been in touch
+    for LIMINAL_QUIET_SECONDS (600 by default), and the page was in touch only as it opened. While a page is open, shown
+    or not, it asks the login every minute whether the browser is still signed in, which keeps the login in touch; only
+    an answer saying signed out brings the sign-in back (a page left as it is when nothing answers), and coming back to
+    the page asks at once."""
+    import re
+
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    keep = int(re.search(r"const KEEP_SECONDS = (\d+);", js).group(1))
+    assert 0 < keep and keep * 4 <= 600 and keep * 4 <= 300  # well inside the login's quiet period (the previews' 300 too)
+    assert "drawRail(); if (trays.length) keepSignedIn(); })" in js  # only an app with its login answering asks
+    assert "try { said = await api('GET', 'login/api/status'); } catch (e) { said = null; }" in js
+    assert "if (said && said.signedIn === false) { location.reload(); return; }" in js and "      keepSignedIn();\n    }, after * 1000);" in js
+    assert "clearTimeout(keeping);" in js
+    # hidden, the page stops its own asking but not this one (the keeping is not cleared with the plugins' timers);
+    # shown again, the login is asked at once
+    seen = re.search(r"document\.addEventListener\('visibilitychange', \(\) => \{(.*?)\n  \}\);", js, flags=re.S).group(1)
+    hidden = re.search(r"if \(document\.hidden\) \{([^}]*)\}", seen).group(1)
+    assert "clearTimeout(live)" in hidden and "keeping" not in hidden
+    assert seen.rstrip().endswith("if (trays.length) keepSignedIn(0);  // back on the page: the login asked at once (signed out meanwhile: the sign-in)")
+
+
+def test_your_account_takes_the_theme_chosen_after_it_opened():
+    """0.18.1 (a review of the sign-in's look, 2026-11-10): your account's page was made in the theme of the moment it first
+    opened and kept it, and once the login draws no colour of its own round it (liminal-login 0.15.3) its old theme showed
+    inside a page in the new one. A theme chosen paints it again in place (the same origin, as the charts' bound view
+    does); one not loaded yet and out of sight is made again in the new theme when next opened."""
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    assert "if (window.LiminalTheme) { await window.LiminalTheme.load(); retheme(); }" in js
+    body = js[js.index("function retheme() {"):js.index("function openLogin(on) {")]
+    assert "const view = $('loginView');" in body and "view.querySelector('iframe').contentWindow" in body
+    assert "w.LiminalTheme.apply(document.body.dataset.theme); return;" in body and "if (view.hidden) view.remove();" in body
+    # the view made anew asks the theme shown then
+    assert "src=\"login/?embedded=1${theme ? `&theme=${encodeURIComponent(theme)}` : ''}\"" in js

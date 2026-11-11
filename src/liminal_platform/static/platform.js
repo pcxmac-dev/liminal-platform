@@ -96,6 +96,18 @@
       + (trays.length ? '<hr>' + trays.map((t) => `<button type="button" class="bound${loginOpen ? ' active' : ''}" data-bound="${esc(t.app)}" title="${esc(t.title)}: who you are, your keys and accounts" data-tip="${esc(t.title)}">${icon(t.icon || 'lambda', 26)}</button>`).join('') : '');
   }
 
+  // your account painted again in the page's theme once it changes (0.18.1): its page was made in the theme of the
+  // moment it first opened and kept it, and since the login draws no colour of its own round it (liminal-login 0.15.3)
+  // its old theme showed inside the new. In place (the same origin), as the charts' bound view does it; not loaded yet
+  // and out of sight: made again in the new theme when you next open it
+  function retheme() {
+    const view = $('loginView');
+    if (!view) return;
+    const w = view.querySelector('iframe').contentWindow;
+    try { if (w && w.LiminalTheme) { w.LiminalTheme.apply(document.body.dataset.theme); return; } } catch (e) { /* not reachable */ }
+    if (view.hidden) view.remove();
+  }
+
   // your account: the login app's page (embedded) over the main area, the rail's own icons taking you back
   function openLogin(on) {
     loginOpen = on;
@@ -1451,7 +1463,7 @@
     try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args: [value] }); }
     catch (e) { say(name, e.message); return; }
     say(name, '');
-    if (window.LiminalTheme) await window.LiminalTheme.load();
+    if (window.LiminalTheme) { await window.LiminalTheme.load(); retheme(); }
     await render();
     const again = data.querySelector(`button.choice[data-hook="${CSS.escape(hook)}"][data-value="${CSS.escape(value)}"]`);
     if (again && had) again.focus({ preventScroll: true });
@@ -1964,15 +1976,36 @@
     const m = shown();
     if (m) refresh(m.name);
     if (selected() === CONNECTIONS) loadTraffic();
+    if (trays.length) keepSignedIn(0);  // back on the page: the login asked at once (signed out meanwhile: the sign-in)
   });
 
   // the login app the platform inherits (0.18.0): its tray at the rail's end; signed out in your account (the login page
   // held there says so), the platform's sign-in again
-  api('GET', 'api/trays').then((d) => { trays = (d && d.trays) || []; drawRail(); }).catch(() => { trays = []; });
+  api('GET', 'api/trays').then((d) => { trays = (d && d.trays) || []; drawRail(); if (trays.length) keepSignedIn(); }).catch(() => { trays = []; });
   window.addEventListener('message', (e) => {
     if (e.origin !== location.origin || !e.data || e.data.liminal !== 'login') return;
     if (!e.data.signedIn) location.reload();
   });
+
+  // 0.18.1 (the user, of being signed out after ten quiet minutes: "Yes, fix both"): the login app started for the
+  // platform ends once no page has been in touch with it for ten minutes (LIMINAL_QUIET_SECONDS), and this page was in
+  // touch only as it opened, so a reload or your account after that found you signed out while you were using the
+  // platform. While the page is open, shown or not, it asks the login every minute whether you are still signed in,
+  // which keeps the login in touch (any quiet period over a minute); it ends ten minutes after the platform's last page
+  // closes. Signed out meanwhile (in another page, or the session over): the sign-in again. A login that ended anyway
+  // (and so lost every session) is started again by the platform and says signed out: the sign-in too. No answer (the
+  // platform stopped, or its login could not be started): asked again a minute later, the page left as it is.
+  const KEEP_SECONDS = 60;
+  let keeping = null;
+  function keepSignedIn(after = KEEP_SECONDS) {
+    clearTimeout(keeping);
+    keeping = setTimeout(async () => {
+      let said = null;
+      try { said = await api('GET', 'login/api/status'); } catch (e) { said = null; }
+      if (said && said.signedIn === false) { location.reload(); return; }
+      keepSignedIn();
+    }, after * 1000);
+  }
 
   render();
 })();
