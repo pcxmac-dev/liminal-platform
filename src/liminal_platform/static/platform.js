@@ -1044,8 +1044,11 @@
     if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
     if (notHere(m)) {
+      // 0.19.1 (the user: "the administration plugins don't seem to work right especially linux which doesn't say anything
+      // about startup"): what it would do where it applies, in its own tables (the Linux admin plugin's sections, the unit it
+      // installs at boot), read only: a plugin not valid here is asked nothing, so no button is drawn
       return `${head}<p class="muted">Not for this machine: ${esc(whyOf(m))}. It stays disabled here; no setup is offered, since none can make it valid on this machine.</p>`
-        + (m.setup || jobs[m.name] ? setupLog(m) : '');
+        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '');
     }
     if (invalid(m)) {
       return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings, above, can make it valid. '

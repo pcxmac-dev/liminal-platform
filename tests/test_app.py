@@ -1221,3 +1221,15 @@ def test_the_page_runs_a_job_form_draws_a_tables_search_box_and_asks_a_details_f
     css = (PlatformApp.STATIC / "platform.css").read_text(encoding="utf-8")
     assert ".table-search .table-search-input { flex: 1 1 320px; min-width: 0; }" in css
     assert not [line for line in css.splitlines() if "table-search" in line and ":hover" in line]  # a finger has no hover
+
+
+def test_a_plugin_not_for_this_machine_shows_what_it_would_do_in_its_tables():
+    """0.19.1 (the user: "the administration plugins don't seem to work right especially linux which doesn't say anything
+    about startup"): beside the reason it is not for this machine, its own tables (the Linux admin plugin's sections and the
+    unit it installs at boot) drawn read only: it is asked nothing here, so no button."""
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    branch = js[js.index("    if (notHere(m)) {\n      // 0.19.1"):]
+    branch = branch[:branch.index("\n    }\n")]
+    assert "`<div id=\"tables-${esc(m.name)}\">${statTables(m)}</div>`" in branch and "no setup is offered" in branch
+    # no button for it: the forms and asks the page draws are those of its asks, and a plugin not valid here has none
+    assert "const can = new Set(m.asks || []), out = {};" in js

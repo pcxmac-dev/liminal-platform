@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.1 (2026-11-11)
+
+A plugin not for this machine shows what it would do where it applies (the user: "the administration plugins don't seem to
+work right especially linux which doesn't say anything about startup"): beside its reason, its own tables (the Linux admin
+plugin's sections and the unit it installs at boot, liminal-libs 1.48.0 and plugin-platform-admin-linux 0.6.0), read
+only: it is asked nothing here, so no button is drawn.
+
 ## 0.19.0 (2026-11-11)
 
 A plugin's hook asked as a job, and a table's search box (for the Docker plugin's image search; the user: "lets roll in a
