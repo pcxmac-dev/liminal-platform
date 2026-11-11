@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.0 (2026-11-11)
+
+Each plugin's page shows the API it attaches to (the user: "each plugin should reflect the the API its attached to, and
+present links that provide documentation, the plugin interface should more or less contain what it already has, BUT, it
+should also expose more of what the API is about"; liminal-libs 1.49.0, plugin API 2.2). After what the page already
+shows, a card for each API the plugin declares: its maker, its form and version, the maker's pages as links (each in a
+tab of its own: the documentation, the reference, the limits, pricing, the status page, changes, the specification, the
+console), what the API is about, where it is reached, how a caller proves who it is, its limits and what costs money,
+the day those facts were read, what the plugin learned of it while it ran, then the API's parts and calls: the ones the
+plugin uses first, the rest behind "more of the API". The machines' and the AI assistants' JSON carry `apis`,
+`apiFacts` and `pluginApi`; a plugin written for an older plugin API says it does not say yet what it attaches to. A
+refresh draws the card again only when it changed, so a box opened stays open.
+
 ## 0.19.1 (2026-11-11)
 
 A plugin not for this machine shows what it would do where it applies (the user: "the administration plugins don't seem to

@@ -26,6 +26,20 @@
   const WRITE = { 'Content-Type': 'application/json', 'X-Liminal-Charts': '1' };
   const $ = (id) => document.getElementById(id);
   const esc = window.LiminalIcons.esc;
+  // -- the API a plugin attaches to (0.20.0, plugin API 2.2; the user, 2026-11-11: "each plugin should reflect the the API
+  // its attached to, and present links that provide documentation ... it should also expose more of what the API is
+  // about"): its cards after what it already shows, drawn by the library's apis.js, in a box of its own that a refresh
+  // draws again only when it changed (a "more of the API" box opened stays open) -----------------------------------------
+  const drawnApis = {};
+  function apiInner(p) {
+    if (!window.LiminalApis) return '';
+    const older = `Written for plugin API ${p.pluginApi || 'before 2.2'}: it does not say yet what it attaches to.`;
+    return window.LiminalApis.html(p.apis, p.apiFacts, { owner: p.name, empty: (p.apis || []).length ? '' : older });
+  }
+  function apiCard(p) {
+    drawnApis[p.name] = apiInner(p);
+    return `<div class="plugin-apis" id="api-${esc(p.name)}">${drawnApis[p.name]}</div>`;
+  }
   const icon = window.LiminalIcons.icon;
   const Charts = window.LiminalCharts;
   const list = $('list'), data = $('data'), side = $('side'), rail = $('rail');
@@ -1041,31 +1055,31 @@
 
   function pluginData(m) {
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
-    if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
+    if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>${apiCard(m)}`;
     const logged = (m.steps || []).length || m.setup;
     if (notHere(m)) {
       // 0.19.1 (the user: "the administration plugins don't seem to work right especially linux which doesn't say anything
       // about startup"): what it would do where it applies, in its own tables (the Linux admin plugin's sections, the unit it
       // installs at boot), read only: a plugin not valid here is asked nothing, so no button is drawn
       return `${head}<p class="muted">Not for this machine: ${esc(whyOf(m))}. It stays disabled here; no setup is offered, since none can make it valid on this machine.</p>`
-        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '');
+        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '') + apiCard(m);
     }
     if (invalid(m)) {
       return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings, above, can make it valid. '
         : hasHook(m, 'check') ? 'Its install, below, can make it valid. '
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
-        + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
+        + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '') + apiCard(m);
     }
     drawnPaths[m.name] = pathsHtml(m);
     return head + settingsButton(m) + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`
-      + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '');
+      + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '') + apiCard(m);
   }
 
   function assistantData(a) {
     const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
-    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>`;
+    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>${apiCard(a)}`;
   }
 
   // -- Connections (0.10.0; the user, 2026-11-08: "the root plugin (platform) will need to visually illustrate how
@@ -1514,6 +1528,11 @@
         if (t) t.innerHTML = tables(m) + statTables(m);
       }
     });
+    const ac = $(`api-${m.name}`);
+    if (ac) {  // what it learned of its APIs, drawn again only when it changed
+      const html = apiInner(m);
+      if (html !== drawnApis[m.name]) { ac.innerHTML = html; drawnApis[m.name] = html; }
+    }
     drawSide();
     const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
     if (sub) sub.textContent = stateLine(m);
