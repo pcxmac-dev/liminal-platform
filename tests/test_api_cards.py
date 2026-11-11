@@ -64,3 +64,33 @@ def test_a_plugins_api_reaches_its_page_with_what_it_learned():
         assert b"window.LiminalApis" in lib  # the library's, served beside the platform's own files
     finally:
         app.stop()
+
+
+def test_a_change_is_logged_without_what_was_filled_in():
+    """0.20.1: the audit before any cloud key went in found a private key pasted into an SSH-key form written to
+    platform.log; a change asked of a plugin is logged by its name and how many arguments it had, never their values."""
+    said = []
+
+    class Keyed(Machine):
+        name, title, about, api, order = "keyed", "Keyed", "a stand-in with a key form", "2.2", 905
+        apis = (API,)
+        HOOKS = (*Machine.HOOKS, "add_key")
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "summary": "ready"}
+
+        def add_key(self, name, key):
+            return {"added": name}
+
+    app = PlatformApp(log=said.append, machines={"keyed": Keyed()}, assistants={})
+    port = _port(app.start(0))
+    try:
+        secret = "-----BEGIN OPENSSH PRIVATE KEY----- AAAAsecretbody"
+        status, out = _call(port, "POST", "/api/machines/keyed/ask", {"hook": "add_key", "args": ["laptop", secret]})
+        assert status == 200 and out == {"answer": {"added": "laptop"}}
+        assert "platform: keyed asked add_key (2 arguments)" in said and not any("secretbody" in s or "laptop" in s for s in said)
+    finally:
+        app.stop()

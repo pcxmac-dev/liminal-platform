@@ -101,7 +101,7 @@ def test_a_plugins_steps_summary_and_asks_by_name(served):
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "setup", "args": []})[0] == 400  # its own route
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": ["Bad Name", [1]]})[0] == 400
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "allow", "args": "x"})[0] == 400
-    assert any("wall asked allow web" in m for m in lines)
+    assert any("wall asked allow (2 arguments)" in m for m in lines) and not any("8443" in m for m in lines)  # never its values (0.20.1)
     assert _call(port, "POST", "/api/machines/wall/ask", {"hook": "wanted", "args": []})[0] == 200
     assert not any("asked wanted" in m for m in lines)  # what only reads is not logged
     assert _call(port, "GET", "/api/machines/box")[1]["steps"] == []  # a plugin without steps offers none
@@ -297,7 +297,7 @@ def test_a_plugins_forms_ask_its_hook_with_what_is_filled_in_and_say_the_answer_
         status, out = ask("home", "milk", None, False)
         assert status == 200 and out == {"answer": {"said": "noted milk under home", "lines": ["1 notes now"], "ok": True}}
         assert ask("home", "eggs", 2, False)[0] == 200 and p.notes == ["milk", "eggs", "eggs"]
-        assert any("noted asked note home milk None False" in x for x in lines)
+        assert any("noted asked note (4 arguments)" in x for x in lines) and not any("milk" in x for x in lines)
         # refused, naming the argument that accepts it: nothing done; accepted, done
         status, out = ask("home", "risky", None, False)
         assert status == 400 and out == {"error": "Risky: a risky note: nothing noted unless the risk is accepted",

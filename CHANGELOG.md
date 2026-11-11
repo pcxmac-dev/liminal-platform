@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.1 (2026-11-11)
+
+What the audit before any cloud key went in found here: a change asked of a plugin is logged by its name and how many
+arguments it had, never their values. A private key pasted into a cloud plugin's SSH-key form had reached platform.log
+before the plugin refused it.
+
 ## 0.20.0 (2026-11-11)
 
 Each plugin's page shows the API it attaches to (the user: "each plugin should reflect the the API its attached to, and

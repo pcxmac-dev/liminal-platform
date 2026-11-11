@@ -627,8 +627,8 @@ class PlatformApp(App):
         self._refuse_disabled(name)
         if hook not in self.asks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} is not asked {hook!r} here: {', '.join(self.asks(m)) or 'nothing'}")
-        if hook not in READS:
-            self.log(f"platform: {name} asked {hook}" + (f" {' '.join(map(str, args))}" if args else ""))
+        if hook not in READS:  # its name and how many arguments, never their values: a key pasted into a form (0.20.1)
+            self.log(f"platform: {name} asked {hook}" + (f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""))
         try:
             with self.traffic.timed(self.NAME, name, "read" if hook in READS else "ask", hook):
                 answer = m.ask(hook, *args)
