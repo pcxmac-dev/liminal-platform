@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.24.3 (2026-11-11)
+
+A plugin's tabs are as they first were (the user, after three other looks: "lets go back to the original tab layout";
+asked which, the first): the plugin's title, then Main and API (APIs for several) as two small words beside it, the one
+shown in the accent on a line of it. 0.24.0's bordered buttons, 0.24.1's lines with a rising stroke and 0.24.2's
+address are gone.
+
 ## 0.24.2 (2026-11-11)
 
 A plugin's tabs read as an address (the user: "the tabs for the plugins should mirror the format of a URI address
