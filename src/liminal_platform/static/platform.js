@@ -87,12 +87,17 @@
   // keeps it; another plugin picked opens on its Main. TABS is the list a later tab is added to.
   const hashParts = () => decodeURIComponent(location.hash.slice(1)).split('/');
   const selected = () => hashParts()[0] || 'machine';
-  const TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];
+  // 0.24.1 (the user, 2026-11-11: "tabs should look more like this \"Windows Firewall___/: API___/: MISC\""): the plugin's
+  // own name is the first tab (its main page), then the others, each a label on a line that ends in a rising stroke, a
+  // colon between two tabs; the one shown has its line and stroke in the accent
+  const TABS = [{ id: 'main', title: (p) => p.title }, { id: 'api', title: () => 'API' }];
   const hasTabs = (p) => !!p && !pending(p) && !!window.LiminalApis && Array.isArray(p.apis);  // a server from before 0.20.0 sends no apis: no tabs
   const tabOf = (p) => { const t = hashParts()[1]; return hasTabs(p) && TABS.some((x) => x.id === t) ? t : 'main'; };
-  const tabsRow = (p) => (!hasTabs(p) ? '' : `<nav class="tabs" role="tablist" aria-label="${esc(p.title)}: its pages">`
-    + TABS.map((t) => `<button type="button" role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`).join('')
-    + '</nav>');
+  const titleRow = (p) => (!hasTabs(p) ? `<h2>${esc(p.title)}</h2>` : `<nav class="tabs" role="tablist" aria-label="${esc(p.title)}: its pages">`
+    + TABS.map((t, i) => {
+      const tab = `<button type="button" role="tab" class="tab${i ? '' : ' title'}" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`;
+      return i ? tab : `<h2>${tab}</h2>`;  // the name is the page's heading still
+    }).join('') + '</nav>');
   let tabPicked = false;  // a tab was just picked: the one now shown takes the focus once the page is drawn
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
   // a finger, a pen and the on-screen keyboard (0.17.0, liminal-libs 1.42.0's touch.js, loaded before this file); without
@@ -1118,7 +1123,7 @@
 
   function pluginData(m) {
     if (pending(m)) return pendingData(m);
-    const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${tabsRow(m)}${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
+    const head = `<div class="data-head">${titleRow(m)}${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
     if (tabOf(m) === 'api') return head + apiCard(m);  // 0.22.0: its API tab, whatever its state (its card is drawn disabled too)
     if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
@@ -1142,7 +1147,7 @@
 
   function assistantData(a) {
     if (pending(a)) return pendingData(a);
-    const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${tabsRow(a)}${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
+    const head = `<div class="data-head">${titleRow(a)}${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
     if (tabOf(a) === 'api') return head + apiCard(a);
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';

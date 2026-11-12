@@ -328,11 +328,23 @@ html.keyboard .term-panel.shell:focus-within .term { height: max(96px, min(340px
    tab for the API"): Main and API, the one shown underlined in the accent; the switches stay at the right. */
 /* 0.24.0 (the user, of the first tabs, two small grey words with a thin line under one: "also i don't see tabs"): each
    tab a button with its own border and ground, the one shown filled in the accent, so they read as tabs at a glance */
-.data-head .tabs { display: flex; align-items: center; gap: 4px; margin-right: auto; margin-left: 6px; }
-.tabs .tab { padding: 5px 16px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text);
-  font-size: 13px; font-weight: 600; }
-.tabs .tab[aria-selected="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
-@media (hover: hover) { .tabs .tab:not([aria-selected="true"]):hover { border-color: var(--text); background: var(--hover); } }
+/* 0.24.1 (the user: "tabs should look more like this \"Windows Firewall___/: API___/: MISC\""): the plugin's name is
+   the first tab; each tab a label on a line that ends in a rising stroke, a colon before every tab but the first; the
+   one shown has its line and stroke in the accent */
+.data-head .tabs { display: flex; align-items: flex-end; flex-wrap: wrap; row-gap: 6px; margin-right: auto; min-width: 0; }
+.data-head .tabs h2 { margin: 0; }
+.tabs .tab { position: relative; margin-right: 30px; padding: 1px 14px 4px 2px; border: 0; border-bottom: 2px solid var(--border);
+  border-radius: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; white-space: nowrap; }
+.tabs .tab.title { font: inherit; letter-spacing: normal; text-transform: none; color: var(--text); }
+.tabs .tab::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 2px; height: 19px; background: var(--border);
+  transform-origin: 50% 100%; transform: skewX(-26deg); }
+.tabs .tab:not(.title)::before { content: ":"; position: absolute; left: -15px; bottom: 2px; color: var(--muted); font-weight: 400;
+  letter-spacing: 0; }
+.tabs .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); background: none; }
+.tabs .tab.title[aria-selected="true"] { color: var(--text); }
+.tabs .tab[aria-selected="true"]::after { background: var(--accent); }
+@media (hover: hover) { .tabs .tab:hover { color: var(--text); background: none; } }
 .plugin-apis .api-cards { margin-top: 10px; }
 
 /* 0.23.0: Connections as a sphere (the user: "treat the plugins like a peripheral interface, and have them on the outer

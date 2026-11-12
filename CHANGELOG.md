@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.1 (2026-11-11)
+
+A plugin's tabs as the user drew them ("tabs should look more like this \"Windows Firewall___/: API___/: MISC\""): the
+plugin's own name is the first tab, its main page (and the page's heading still); then the others, in capitals. Each
+tab is a label on a line that ends in a rising stroke, with a colon before every tab but the first; the one shown has
+its line and stroke in the accent. 0.24.0's bordered buttons and the tab called Main are gone; the API tab says API
+whether a plugin attaches to one or to several.
+
 ## 0.24.0 (2026-11-11)
 
 Connections' sphere comes nearer and goes farther (the user: "i need to be able to zoom in and out the connections").

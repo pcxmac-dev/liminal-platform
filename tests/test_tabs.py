@@ -11,10 +11,13 @@ def test_a_plugins_page_has_tabs_and_its_apis_a_tab_of_their_own(served):
     app, port, lines, box = served
     js, css = _call(port, "GET", "/platform.js")[1], _call(port, "GET", "/platform.css")[1]
     # the tabs, a list the next one is added to; "APIs" when a plugin attaches to several
-    assert b"const TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];" in js
-    assert b'<nav class="tabs" role="tablist"' in js and b'role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}"' in js
-    # beside the title, before the switches, on a machine plugin's page and an AI assistant's
-    assert b"<h2>${esc(m.title)}</h2>${tabsRow(m)}${switchRow(m)}</div>" in js and b"<h2>${esc(a.title)}</h2>${tabsRow(a)}${switchRow(a)}</div>" in js
+    # 0.24.1 (the user: "tabs should look more like this \"Windows Firewall___/: API___/: MISC\""): the plugin's name is the
+    # first tab, the page's heading still; one known by its name alone has its name as a plain heading
+    assert b"const TABS = [{ id: 'main', title: (p) => p.title }, { id: 'api', title: () => 'API' }];" in js
+    assert b'<nav class="tabs" role="tablist"' in js and b'role="tab" class="tab${i ? \'\' : \' title\'}" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}"' in js
+    assert b"return i ? tab : `<h2>${tab}</h2>`;" in js and b"const titleRow = (p) => (!hasTabs(p) ? `<h2>${esc(p.title)}</h2>`" in js
+    # before the switches, on a machine plugin's page and an AI assistant's
+    assert b'<div class="data-head">${titleRow(m)}${switchRow(m)}</div>' in js and b'<div class="data-head">${titleRow(a)}${switchRow(a)}</div>' in js
     # the tab is in the address after the plugin's name: a reload or a link keeps it; Main is the plugin's own address
     assert b"const hashParts = () => decodeURIComponent(location.hash.slice(1)).split('/');" in js
     assert b"const selected = () => hashParts()[0] || 'machine';" in js
@@ -31,8 +34,11 @@ def test_a_plugins_page_has_tabs_and_its_apis_a_tab_of_their_own(served):
     assert b"if (at >= 0 && parts(ac)[at]) parts(ac)[at].focus({ preventScroll: true });" in js
     # the tab picked keeps the focus once the page is drawn again
     assert b"const on = data.querySelector('button.tab[aria-selected=\"true\"]');" in js
-    for part in (b".data-head .tabs {", b"margin-right: auto;", b'.tabs .tab[aria-selected="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }',
-                 b".tabs .tab { padding: 5px 16px; border: 1px solid var(--border);"):
+    # each a label on a line ending in a rising stroke, a colon before every tab but the first, the one shown in the accent
+    for part in (b".data-head .tabs {", b"margin-right: auto;", b"border-bottom: 2px solid var(--border);", b"transform: skewX(-26deg);",
+                 b'.tabs .tab:not(.title)::before { content: ":";', b".tabs .tab.title { font: inherit;",
+                 b'.tabs .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); background: none; }',
+                 b'.tabs .tab[aria-selected="true"]::after { background: var(--accent); }'):
         assert part in css, part
 
 
