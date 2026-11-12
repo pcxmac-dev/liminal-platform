@@ -96,8 +96,12 @@
   const titleRow = (p) => (!hasTabs(p) ? `<h2>${esc(p.title)}</h2>` : `<nav class="tabs" role="tablist" aria-label="${esc(p.title)}: its pages">`
     + TABS.map((t, i) => {
       const tab = `<button type="button" role="tab" class="tab${i ? '' : ' title'}" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`;
-      return i ? tab : `<h2>${tab}</h2>`;  // the name is the page's heading still
+      // 0.24.2 (the user, 2026-11-11: "the tabs for the plugins should mirror the format of a URI address [plugin] : /  /
+      // module1 / module2 / module3"): the plugin's name (the page's heading still), a colon and two strokes, then its
+      // modules, a stroke between two of them
+      return i ? (i > 1 ? stroke('/') : '') + tab : `<h2>${tab}</h2>${stroke(':')}${stroke('/')}${stroke('/')}`;
     }).join('') + '</nav>');
+  const stroke = (s) => `<span class="sep" aria-hidden="true">${s}</span>`;
   let tabPicked = false;  // a tab was just picked: the one now shown takes the focus once the page is drawn
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
   // a finger, a pen and the on-screen keyboard (0.17.0, liminal-libs 1.42.0's touch.js, loaded before this file); without

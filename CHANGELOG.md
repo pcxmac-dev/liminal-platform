@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.2 (2026-11-11)
+
+A plugin's tabs read as an address (the user: "the tabs for the plugins should mirror the format of a URI address
+[plugin] : /  / module1 / module2 / module3"): the plugin's name, a colon and two strokes, then its modules with a
+stroke between two: `Windows Firewall : / / API`. The name is the main page and the page's heading still; the one shown
+is in the accent, on a line of it. 0.24.1's line and rising stroke under each tab are gone. The strokes are drawn, not
+read out: a screen reader hears the tabs alone.
+
 ## 0.24.1 (2026-11-11)
 
 A plugin's tabs as the user drew them ("tabs should look more like this \"Windows Firewall___/: API___/: MISC\""): the
