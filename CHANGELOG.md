@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.23.0 (2026-11-11)
+
+Connections is a sphere (the user: "for the #connections, lets treat the plugins like a peripheral interface, and have
+them on the outer periphery, which is a sphere, objects insantiated using the plugin, orbit the plugin on the
+peripheral, the login/platform object is at the center, logic and intermediary interfaces (abstractions) are on the
+middle periphery, which talk to the plugins and the primary application (platform/integrator/charts)"). Three shells
+round one centre. At the centre the platform, with its login and who asks it (this page, a program) close by. On the
+middle periphery the library's interfaces the plugins are built on (`Firewall`, `WslDistribution`, `Admin`,
+`MachinePlugin`, `AssistantPlugin`): `GET /api/traffic` names each plugin's (`interface`, the nearest class of its line
+that liminal-libs defines; listed in `interfaces`), and what the platform or the login and a plugin say to each other
+is drawn through the plugin's interface. On the outer periphery, a sphere, every plugin, those of one interface
+together; the ones nothing was said to are drawn too, dimmed (`quiet` in the answer). Round a plugin, in orbit, what
+was made or reached with it: the programs it ran, the hosts and apps it reached, the Docker instances it gives (what
+the platform itself reached orbits the centre).
+
+The sphere turns slowly by itself and is turned by a drag, a finger moved sideways or the arrow keys; it rests under
+the pointer and while a part is picked, which is brought to the front, beside the centre. An interface picked lights
+its plugins and what goes through it. The far side is fainter and its names are left out. Nothing moves by itself for a
+reader who asked for reduced motion. The lines' classes, widths, movement and dots, the legend, Pause and the table are
+as they were, and **Columns**, beside **Sphere** at the head, draws the picture as it was (the choice is kept in this
+browser). A platform started before this release names no interfaces: its plugins are grouped as machine plugins and
+AI assistants.
+
 ## 0.22.0 (2026-11-11)
 
 A plugin's page has tabs, and its APIs a tab of their own (the user: "now i need tabs for the main page of each plugin,

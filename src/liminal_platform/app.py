@@ -80,6 +80,17 @@ def _json_of(value):
     return value
 
 
+def interface_of(p) -> dict:
+    """The library's interface a plugin is built on (0.23.0, Connections' middle periphery): the nearest class of its
+    line that liminal-libs defines (a firewall plugin's Firewall, a WSL plugin's WslDistribution, else MachinePlugin or
+    AssistantPlugin), by its name and the first line of what it says of itself."""
+    for c in type(p).__mro__[1:]:
+        if (getattr(c, "__module__", "") or "").startswith("liminal_libs."):
+            said = (c.__doc__ or "").strip().split("\n", 1)[0].strip()
+            return {"id": f"interface:{c.__name__}", "title": c.__name__, "sub": said[:200], "module": c.__module__}
+    return {"id": "interface:Plugin", "title": "Plugin", "sub": "", "module": ""}
+
+
 class HookRefused(Refused):
     """A plugin's hook refusing what it was asked (400) or failing (502), its own words beside the frame's reason (0.6.0:
     a form's answer said in words on the page). `accept`: a refusal naming the argument that accepts it (the Namecheap
@@ -240,17 +251,28 @@ class PlatformApp(App):
         nodes = {n["id"]: n for n in out["nodes"]}
         linked = {end for link in out["links"] for end in (link["from"], link["to"])}
         assistants, hidden = self.assistant_plugins(), []
+        # 0.23.0 (the sphere; the user, 2026-11-11: "treat the plugins like a peripheral interface, and have them on the
+        # outer periphery, which is a sphere ... logic and intermediary interfaces (abstractions) are on the middle
+        # periphery, which talk to the plugins and the primary application"): each plugin names the library's interface it
+        # is built on (`interface`, listed in `interfaces`), and the ones left out of `nodes` are given in `quiet`, so
+        # the whole periphery can be drawn
+        quiet, interfaces = [], {}
         for name, p in {**self.machines(), **assistants}.items():
             state = self._states.get(name) or ("disabled" if not self.enabled(name) else "unknown")
             attached = self.plugin(name) is p
+            face = interface_of(p)
+            interfaces[face["id"]] = face
+            node = {"id": name, "role": "plugin", "title": p.title, "attached": attached, "state": state,
+                    "icon": getattr(p, "ICON", "") or ("analysis" if name in assistants else "chip"),
+                    "kind": "assistant" if name in assistants else "machine", "interface": face["id"]}
             if state != "active" and not attached and name not in linked:
                 hidden.append(name)
+                quiet.append(node)
                 nodes.pop(name, None)
                 continue
-            nodes[name] = {"id": name, "role": "plugin", "title": p.title, "attached": attached, "state": state,
-                           "icon": getattr(p, "ICON", "") or ("analysis" if name in assistants else "chip"),
-                           "kind": "assistant" if name in assistants else "machine"}
+            nodes[name] = node
         out["nodes"], out["hidden"] = list(nodes.values()), sorted(hidden)
+        out["quiet"], out["interfaces"] = quiet, list(interfaces.values())
         return out
 
     # -- disabled plugins (the user, 2026-11-07: "allow me to right click on the icons to disable them on the right

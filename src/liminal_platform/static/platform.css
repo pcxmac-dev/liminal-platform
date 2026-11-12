@@ -332,3 +332,45 @@ html.keyboard .term-panel.shell:focus-within .term { height: max(96px, min(340px
 .tabs .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
 @media (hover: hover) { .tabs .tab:hover { color: var(--text); background: var(--hover); } }
 .plugin-apis .api-cards { margin-top: 10px; }
+
+/* 0.23.0: Connections as a sphere (the user: "treat the plugins like a peripheral interface, and have them on the outer
+   periphery, which is a sphere, objects insantiated using the plugin, orbit the plugin on the peripheral, the
+   login/platform object is at the center, logic and intermediary interfaces (abstractions) are on the middle
+   periphery"). Each part's and each line's --depth is set as the sphere turns: the far side fainter. */
+.conn-tools { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.conn-views { display: inline-flex; gap: 2px; }
+.conn-view[aria-pressed="true"] { color: var(--accent); background: var(--hover); }
+.conn-picture svg.sphere { touch-action: pan-y; cursor: grab; max-height: 80vh; user-select: none; -webkit-user-select: none; }
+.conn-picture svg.sphere:active { cursor: grabbing; }
+.conn-picture .shell { fill: none; stroke: var(--border); stroke-width: 1; }
+.conn-picture .shell.mid { stroke-dasharray: 3 6; opacity: .8; }
+.conn-picture .wire { fill: none; stroke: var(--border); stroke-width: .7; opacity: .6; }
+.conn-picture .wire.mid { stroke-dasharray: 2 6; opacity: .45; }
+.conn-picture .tether { stroke: var(--muted); stroke-width: .8; stroke-dasharray: 2 3; opacity: calc(.7 * var(--depth, 1)); }
+.conn-picture svg.sphere .edge { opacity: calc(.55 * var(--depth, 1)); transition: none; }
+.conn-picture svg.sphere .edge.busy { opacity: var(--depth, 1); }
+.conn-picture svg.sphere.focused .edge:not(.on) { opacity: .06; }
+.conn-picture svg.sphere.focused .edge.on { opacity: 1; }
+.conn-picture svg.sphere .node { opacity: var(--depth, 1); transition: none; }
+.conn-picture svg.sphere .node.state-disabled, .conn-picture svg.sphere .node.state-invalid, .conn-picture svg.sphere .node.quiet { opacity: calc(.5 * var(--depth, 1)); }
+.conn-picture svg.sphere.focused .node:not(.on):not(.picked) { opacity: calc(.25 * var(--depth, 1)); }
+.conn-picture svg.sphere.focused .node.on, .conn-picture svg.sphere.focused .node.picked { opacity: 1; }
+.conn-picture .node circle { fill: var(--panel); stroke: var(--border); stroke-width: 1; }
+.conn-picture .node circle.hit { fill: transparent; stroke: none; pointer-events: none; }
+html.touch .conn-picture .node circle.hit { pointer-events: all; }
+@media (hover: hover) { .conn-picture .node:hover circle:not(.hit):not(.dot) { stroke: var(--text); } }
+.conn-picture .node:focus-visible circle:not(.hit):not(.dot), .conn-picture .node.picked circle:not(.hit):not(.dot) { stroke: var(--accent); stroke-width: 2; }
+.conn-picture .node.role-app circle:not(.hit) { stroke: var(--accent); stroke-width: 1.6; }
+.conn-picture .node.role-interface rect:not(.hit) { fill: var(--bg); stroke: var(--series-3); }
+.conn-picture .node.role-interface .name { font-size: 11px; font-weight: 600; }
+.conn-picture .node .label { font-size: 10.5px; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.conn-picture .node.far .label { display: none; }
+.conn-picture .node.far.on .label, .conn-picture .node.far.picked .label { display: block; }
+.conn-picture .node.object circle:not(.hit) { fill: var(--muted); stroke: var(--bg); }
+.conn-picture .node.object.kind-host circle:not(.hit) { fill: var(--series-1); }
+.conn-picture .node.object.kind-app circle:not(.hit) { fill: var(--accent); }
+.conn-picture .node.object.kind-instance circle:not(.hit) { fill: var(--up); }
+.conn-picture .node.object .label { display: none; font-size: 10px; fill: var(--muted); }
+.conn-picture .node.object:focus-visible .label, .conn-picture .node.object.on .label, .conn-picture .node.object.picked .label { display: block; }
+@media (hover: hover) { .conn-picture .node.object:hover .label { display: block; } }
+@media (max-width: 700px) { .conn-picture svg.sphere { min-width: 0; } }

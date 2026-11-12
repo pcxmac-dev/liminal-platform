@@ -1261,18 +1261,29 @@
       + `${heads}<g class="edges">${edges}</g><g class="pulses" id="conn-pulses"></g><g class="nodes">${m.nodes.map(nodeSvg).join('')}</g></svg>`;
   }
 
+  // 0.23.0: on the sphere an interface picked holds its plugins and what goes through it; a plugin, what orbits it
+  const focusMembers = () => { const n = connView === 'sphere' && sphere.model && focusNode ? sphere.model.byId.get(focusNode) : null; return n && n.role === 'interface' ? new Set(n.members.map((p) => p.id)) : null; };
+  const touchesFocus = (l, members) => l.from === focusNode || l.to === focusNode || (!!members && (members.has(l.from) || members.has(l.to)) && sphereVia(l) === focusNode);
+
   function paintLinks(t) {  // each line's width, whether it moves, its words; the box picked and what it talks to
     const svg = $('conn-svg');
     if (!svg) return;
     const byKey = new Map((t.links || []).map((l) => [linkKey(l), l]));
-    const near = new Set();
-    (t.links || []).forEach((l) => { if (l.from === focusNode) near.add(l.to); if (l.to === focusNode) near.add(l.from); });
+    const near = new Set(), members = focusMembers(), sph = connView === 'sphere' ? sphere.model : null;
+    (t.links || []).forEach((l) => {
+      if (!focusNode || !touchesFocus(l, members)) return;
+      near.add(l.from); near.add(l.to);
+      const via = sph ? sphereVia(l) : '';
+      if (via) near.add(via);
+    });
+    if (members) members.forEach((id) => near.add(id));
+    if (sph && focusNode) sph.nodes.forEach((n) => { if (n.owner === focusNode) near.add(n.id); if (n.id === focusNode && n.owner) near.add(n.owner); });
     svg.querySelectorAll('path.edge').forEach((p) => {
       const l = byKey.get(p.dataset.link);
       if (!l) return;
       p.setAttribute('stroke-width', (1.2 + Math.min(3.6, Math.log10(l.count + 1) * 1.3)).toFixed(2));
       p.classList.toggle('busy', t.now - l.last < 4);
-      p.classList.toggle('on', !!focusNode && (l.from === focusNode || l.to === focusNode));
+      p.classList.toggle('on', !!focusNode && touchesFocus(l, members));
       p.firstElementChild.textContent = linkTip(t, l);
     });
     svg.classList.toggle('focused', !!focusNode);
@@ -1300,6 +1311,271 @@
     });
   }
 
+  // -- Connections as a sphere (0.23.0; the user, 2026-11-11: "for the #connections, lets treat the plugins like a
+  // peripheral interface, and have them on the outer periphery, which is a sphere, objects insantiated using the plugin,
+  // orbit the plugin on the peripheral, the login/platform object is at the center, logic and intermediary interfaces
+  // (abstractions) are on the middle periphery, which talk to the plugins and the primary application
+  // (platform/integrator/charts)"). Three shells round one centre:
+  //   the centre: the platform, with its login and who asks it (this page, a program) close by;
+  //   the middle periphery: the library's interfaces the plugins are built on (Firewall, WslDistribution, Admin,
+  //     MachinePlugin, AssistantPlugin: the platform's answer names each plugin's), each under its own plugins; what the
+  //     platform or the login and a plugin say to each other is drawn through the plugin's interface;
+  //   the outer periphery, a sphere: every plugin, the ones of one interface together, the quiet ones dimmed;
+  //   round a plugin, in orbit: what was made or reached with it (the programs it ran, the hosts and apps it reached, the
+  //     Docker instances it gives).
+  // The sphere turns slowly by itself and is turned by a drag, a finger or the arrow keys; it rests under the pointer,
+  // while a part is picked (which is brought to the front) and for a reader who asked for no motion. The lines, their
+  // classes, widths, movement and dots, the picking, the legend and the table are the columns' own; "Columns" draws the
+  // picture as it was.
+  const VIEW_KEY = 'liminal:platform:conn-view';
+  let connView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'columns' ? 'columns' : 'sphere'; } catch (e) { return 'sphere'; } })();
+  const SPH = { W: 800, H: 590, cx: 400, cy: 296, R: 226, D: 3.4, MID: 0.52, CORE: 0.2, OUT: 1.07, ORBIT: 8 };
+  const sphere = { yaw: 0.55, pitch: -0.3, t: 0, model: null, raf: 0, last: 0, drag: null, dragged: false, hover: false, aim: null, dirty: true, frame: 0 };
+  const vAdd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  const vMul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const vCross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const vDot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const vNorm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const fib = (i, n) => { const y = 1 - (2 * (i + 0.5)) / n, r = Math.sqrt(Math.max(0, 1 - y * y)); return [Math.cos(GOLDEN * i) * r, y, Math.sin(GOLDEN * i) * r]; };
+  // a point at the angle `r` from the direction `c`, round it by `phi`
+  function around(c, r, phi) {
+    const u = vNorm(vCross(Math.abs(c[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0], c)), v = vCross(c, u);
+    return vNorm(vAdd(vMul(c, Math.cos(r)), vMul(vAdd(vMul(u, Math.cos(phi)), vMul(v, Math.sin(phi))), Math.sin(r))));
+  }
+
+  function sphereModel(t) {  // every part in its place on its shell, the links between the parts drawn
+    const STATE = { active: 0, attached: 0, unknown: 1, invalid: 2, disabled: 3 };
+    const all = [...(t.nodes || []), ...(t.quiet || []).map((n) => ({ ...n, quiet: true }))].map((n) => ({ ...n, title: String(n.title || n.id) }));
+    const byId = new Map(all.map((n) => [n.id, n]));
+    const app = all.find((n) => n.role === 'app'), login = all.find((n) => n.role === 'login');
+    const callers = all.filter((n) => n.role === 'caller').sort((a, b) => (a.id === 'page' ? -1 : b.id === 'page' ? 1 : a.title.localeCompare(b.title)));
+    const plugins = all.filter((n) => n.role === 'plugin');
+    const links = (t.links || []).filter((l) => !kindsOff.has(l.kind));
+    // the middle periphery: an interface for the plugins built on it (a platform from before 0.23.0 names none: by kind)
+    const named = new Map((t.interfaces || []).map((f) => [f.id, f])), faces = new Map();
+    plugins.forEach((p) => {
+      p.interface = p.interface || `interface:${p.kind === 'assistant' ? 'AssistantPlugin' : 'MachinePlugin'}`;
+      if (!faces.has(p.interface)) {
+        const f = named.get(p.interface) || {};
+        faces.set(p.interface, { id: p.interface, role: 'interface', title: String(f.title || p.interface.split(':')[1]), members: [],
+          sub: String(f.sub || 'an interface of the library: what its plugins are built on') });
+      }
+      faces.get(p.interface).members.push(p);
+    });
+    const groups = [...faces.values()].sort((a, b) => b.members.length - a.members.length || a.title.localeCompare(b.title));
+    // each interface's direction, apart from the others by the room its plugins take on the sphere
+    const N = Math.max(1, plugins.length);
+    groups.forEach((g, i) => { g.dir = groups.length === 1 ? [0, 0.25, 1] : fib(i, groups.length); g.cap = Math.acos(Math.max(-0.6, 1 - (1.3 * g.members.length) / N)); });
+    for (let pass = 0; pass < 90; pass += 1) {
+      for (let i = 0; i < groups.length; i += 1) {
+        for (let j = i + 1; j < groups.length; j += 1) {
+          const a = groups[i], b = groups[j], gap = Math.acos(Math.max(-1, Math.min(1, vDot(a.dir, b.dir)))), want = (a.cap + b.cap) * 0.82;
+          if (gap >= want) continue;
+          const k = (want - gap) * 0.18, da = a.dir, db = b.dir;
+          a.dir = vNorm(vAdd(da, vMul(db, -k)));
+          b.dir = vNorm(vAdd(db, vMul(da, -k)));
+        }
+      }
+    }
+    groups.forEach((g) => {
+      g.dir = vNorm(g.dir);
+      g.p = vMul(g.dir, SPH.MID);
+      g.members.sort((a, b) => (STATE[a.state] ?? 1) - (STATE[b.state] ?? 1) || a.title.localeCompare(b.title));
+      g.members.forEach((p, k) => { p.p = g.members.length === 1 ? g.dir : around(g.dir, g.cap * 0.9 * Math.sqrt((k + 0.5) / g.members.length), k * GOLDEN); });
+      byId.set(g.id, g);
+    });
+    // the centre: the platform, its login and who asks it close by
+    const close = [...(login ? [login] : []), ...callers];
+    if (app) app.p = [0, 0, 0];
+    close.forEach((n, i) => { n.p = vMul(fib(i, Math.max(3, close.length)), SPH.CORE); });
+    // in orbit round a plugin: what was made or reached with it (round the centre: what the platform itself reached)
+    const lastOf = new Map(), talk = new Map();
+    links.forEach((l) => {
+      [l.from, l.to].forEach((id) => lastOf.set(id, Math.max(lastOf.get(id) || 0, l.last)));
+      const a = byId.get(l.from), b = byId.get(l.to);
+      const out = a && a.role === 'outside' ? [a, b] : b && b.role === 'outside' ? [b, a] : null;
+      if (!out || !out[1] || out[1].role === 'outside') return;
+      const m = talk.get(out[0].id) || new Map();
+      m.set(out[1].id, (m.get(out[1].id) || 0) + l.count + (out[1].role === 'plugin' ? 1e6 : 0));  // a plugin first, then whoever says most
+      talk.set(out[0].id, m);
+    });
+    const objects = all.filter((n) => n.role === 'outside');
+    objects.forEach((o) => { const m = talk.get(o.id); o.owner = m ? [...m].sort((x, y) => y[1] - x[1])[0][0] : (app ? app.id : ''); });
+    ((st && st.instances) || []).forEach((i) => {  // the Docker instances a plugin gives
+      const id = `instance:${i.name}`;
+      if (!byId.has(i.source) || byId.has(id)) return;
+      const o = { id, role: 'outside', kind: 'instance', title: i.name, sub: `a Docker instance: ${i.where}`, icon: 'docker', owner: i.source, made: true };
+      objects.push(o);
+      byId.set(id, o);
+    });
+    const owned = new Map();
+    objects.forEach((o) => { if (!owned.has(o.owner)) owned.set(o.owner, []); owned.get(o.owner).push(o); });
+    let more = 0;
+    const orbiting = [];
+    owned.forEach((list) => {
+      list.sort((a, b) => (b.made ? 1 : 0) - (a.made ? 1 : 0) || (lastOf.get(b.id) || 0) - (lastOf.get(a.id) || 0));
+      more += Math.max(0, list.length - SPH.ORBIT * 2);
+      const kept = list.slice(0, SPH.ORBIT * 2).sort((a, b) => a.title.localeCompare(b.title));
+      kept.forEach((o, k) => { o.slot = k % SPH.ORBIT; o.tier = Math.floor(k / SPH.ORBIT); o.of = Math.min(SPH.ORBIT, kept.length - o.tier * SPH.ORBIT); orbiting.push(o); });
+    });
+    const drawn = [...(app ? [app] : []), ...close, ...groups, ...plugins, ...orbiting];
+    const ids = new Set(drawn.map((n) => n.id));
+    return { nodes: drawn, byId, links: links.filter((l) => ids.has(l.from) && ids.has(l.to)), more, app, tethers: orbiting.filter((o) => o.made), H: SPH.H };
+  }
+
+  // how a link is drawn: through its plugin's interface (the platform or the login with a plugin), an arc over the sphere
+  // (two parts of the periphery), else straight (the centre's own, a plugin and what orbits it)
+  function sphereRoute(m, l) {
+    const a = m.byId.get(l.from), b = m.byId.get(l.to);
+    const inner = (n) => n.role === 'app' || n.role === 'login' || n.role === 'caller';
+    const plugin = a.role === 'plugin' && inner(b) ? a : b.role === 'plugin' && inner(a) ? b : null;
+    if (plugin) return { via: m.byId.get(plugin.interface) || null };
+    const outer = (n) => n.role === 'plugin' || (n.role === 'outside' && n.owner !== (m.app && m.app.id));
+    return { arc: outer(a) && outer(b) && a.owner !== b.id && b.owner !== a.id };
+  }
+  const sphereVia = (l) => { const m = sphere.model; if (!m || !m.byId.has(l.from) || !m.byId.has(l.to)) return ''; const r = sphereRoute(m, l); return r.via ? r.via.id : ''; };
+
+  function sphereNodeSvg(n) {
+    const tip = n.role === 'interface' ? `${n.title}: ${n.sub} (${n.members.length} plugin${n.members.length === 1 ? '' : 's'})` : nodeTip(n);
+    const open = `<g class="node role-${esc(n.role)} state-${esc(n.state || 'none')}${n.quiet ? ' quiet' : ''}${n.owner !== undefined ? ` object kind-${esc(n.kind || 'process')}` : ''}" data-node="${esc(n.id)}"`
+      + ` tabindex="0" role="button" aria-pressed="false" aria-label="${esc(tip)}"><title>${esc(tip)}</title>`;
+    const ic = (size) => icon(n.icon || 'plug', size).replace('<svg ', `<svg x="${-size / 2}" y="${-size / 2}" `);
+    if (n.role === 'interface') {
+      const w = Math.round(18 + n.title.length * 6.3);
+      return `${open}<rect class="hit" x="${-w / 2}" y="-17" width="${w}" height="34" rx="7"/><rect x="${-w / 2}" y="-10" width="${w}" height="20" rx="10"/><text class="name" y="3.6" text-anchor="middle">${esc(n.title)}</text></g>`;
+    }
+    if (n.owner !== undefined) return `${open}<circle class="hit" r="11"/><circle r="4.4"/><text class="label" x="8" y="3.5">${esc(cut(n.title, 26))}</text></g>`;
+    const r = n.role === 'app' ? 21 : n.role === 'plugin' ? 13 : 12, size = n.role === 'app' ? 22 : 15;
+    const dot = n.role === 'plugin' ? `<circle class="dot" cx="${r * 0.72}" cy="${-r * 0.72}" r="3.3"/>` : '';
+    return `${open}<circle class="hit" r="${r + 5}"/><circle r="${r}"/>${ic(size)}${dot}<text class="label" y="${r + 12}" text-anchor="middle">${esc(cut(n.title, 22))}</text></g>`;
+  }
+
+  function sphereSvg(m) {
+    const pairs = new Map();
+    m.links.forEach((l) => { const k = `${l.from}|${l.to}`; if (!pairs.has(k)) pairs.set(k, []); pairs.get(k).push(l.kind); });
+    pairs.forEach((kinds) => kinds.sort((a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b)));
+    m.offs = new Map(m.links.map((l) => { const kinds = pairs.get(`${l.from}|${l.to}`); return [linkKey(l), (kinds.indexOf(l.kind) - (kinds.length - 1) / 2) * 3]; }));
+    const edges = m.links.map((l) => `<path class="edge k-${esc(l.kind)}" data-link="${esc(linkKey(l))}" d="M0 0"><title></title></path>`).join('');
+    const rim = (r) => (SPH.R * r * SPH.D) / Math.sqrt(SPH.D * SPH.D - r * r);  // a shell's outline as it is seen
+    const wires = Array.from({ length: 8 }, (_, i) => `<path class="wire${i > 5 ? ' mid' : ''}" d="M0 0"/>`).join('');
+    return `<svg id="conn-svg" class="sphere" viewBox="0 0 ${SPH.W} ${SPH.H}" role="group" aria-label="Who talks to whom, on a sphere: the platform at the centre, `
+      + `${m.nodes.filter((n) => n.role === 'interface').length} interfaces on the middle periphery, ${m.nodes.filter((n) => n.role === 'plugin').length} plugins on the outer one, ${m.links.length} links. Drag it, or use the arrow keys, to turn it.">`
+      + `<circle class="shell" cx="${SPH.cx}" cy="${SPH.cy}" r="${rim(1).toFixed(1)}"/><circle class="shell mid" cx="${SPH.cx}" cy="${SPH.cy}" r="${rim(SPH.MID).toFixed(1)}"/>`
+      + `<g class="wires">${wires}</g><g class="tethers">${m.tethers.map((o) => `<line class="tether" data-of="${esc(o.id)}"/>`).join('')}</g>`
+      + `<g class="edges">${edges}</g><g class="pulses" id="conn-pulses"></g><g class="nodes">${m.nodes.map(sphereNodeSvg).join('')}</g></svg>`;
+  }
+
+  // the picture's elements found once it is built: each part's, each line's and how it is drawn
+  function sphereBind(m) {
+    const svg = $('conn-svg');
+    m.nodes.forEach((n) => { n.el = svg.querySelector(`g.node[data-node="${CSS.escape(n.id)}"]`); });
+    m.edges = m.links.map((l) => ({ l, a: m.byId.get(l.from), b: m.byId.get(l.to), off: m.offs.get(linkKey(l)) || 0, ...sphereRoute(m, l),
+      el: svg.querySelector(`path.edge[data-link="${CSS.escape(linkKey(l))}"]`) }));
+    m.wires = [...svg.querySelectorAll('path.wire')];
+    m.lines = m.tethers.map((o) => ({ o, owner: m.byId.get(o.owner), el: svg.querySelector(`line.tether[data-of="${CSS.escape(o.id)}"]`) }));
+  }
+
+  function sphereDraw() {  // every part and line where the sphere's turn puts it now
+    const m = sphere.model, svg = $('conn-svg');
+    if (!m || !m.edges || !svg || !svg.classList.contains('sphere')) return;
+    const cy = Math.cos(sphere.yaw), sy = Math.sin(sphere.yaw), cp = Math.cos(sphere.pitch), sp = Math.sin(sphere.pitch);
+    const proj = (p) => {
+      const x = p[0] * cy + p[2] * sy, z0 = -p[0] * sy + p[2] * cy, y = p[1] * cp - z0 * sp, z = p[1] * sp + z0 * cp, s = SPH.D / (SPH.D - z);
+      return [SPH.cx + SPH.R * x * s, SPH.cy - SPH.R * y * s, z, s];
+    };
+    const f = (v) => v.toFixed(1);
+    const depth = (z) => (z < 0 ? 0.34 + 0.4 * (z + 1) : 0.78 + 0.22 * z).toFixed(2);  // the far side fainter
+    m.nodes.forEach((n) => {
+      if (n.owner !== undefined) {  // in orbit: round its plugin on the periphery, or round the centre
+        const owner = m.byId.get(n.owner), turn = (2 * Math.PI * n.slot) / Math.max(1, n.of) + sphere.t * (n.tier % 2 ? -0.32 : 0.42);
+        n.p = owner && owner.role === 'plugin' ? vMul(around(owner.p, 0.115 + 0.055 * n.tier, turn), SPH.OUT)
+          : vMul(vNorm([Math.cos(turn), 0.42 * Math.sin(turn + 1), Math.sin(turn)]), 0.33 + 0.07 * n.tier);
+      }
+      n.q = proj(n.p);
+      if (!n.el) return;
+      n.el.setAttribute('transform', `translate(${f(n.q[0])} ${f(n.q[1])}) scale(${(0.62 + 0.38 * n.q[3]).toFixed(3)})`);
+      n.el.style.setProperty('--depth', depth(n.q[2]));
+      n.el.classList.toggle('far', n.q[2] < 0.08);
+    });
+    m.edges.forEach((e) => {
+      if (!e.el || !e.a.q || !e.b.q) return;
+      const A = e.a.q, B = e.b.q, len = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1, ox = (-(B[1] - A[1]) / len) * e.off, oy = ((B[0] - A[0]) / len) * e.off;
+      const at = (q) => `${f(q[0] + ox)} ${f(q[1] + oy)}`;
+      let d = `M${at(A)}L${at(B)}`, z = (A[2] + B[2]) / 2;
+      if (e.via && e.via.q) { d = `M${at(A)}L${at(e.via.q)}L${at(B)}`; z = (A[2] + B[2] + e.via.q[2]) / 3; } else if (e.arc) {
+        const mid = vAdd(e.a.p, e.b.p), high = Math.hypot(mid[0], mid[1], mid[2]) < 0.2 ? around(vNorm(e.a.p), Math.PI / 2, 0) : vNorm(mid);
+        d = `M${at(A)}Q${at(proj(vMul(high, 1.34)))} ${at(B)}`;
+      }
+      e.el.setAttribute('d', d);
+      e.el.style.setProperty('--depth', depth(z));
+    });
+    m.lines.forEach((t) => {
+      if (!t.el || !t.owner || !t.owner.q) return;
+      t.el.setAttribute('x1', f(t.owner.q[0])); t.el.setAttribute('y1', f(t.owner.q[1])); t.el.setAttribute('x2', f(t.o.q[0])); t.el.setAttribute('y2', f(t.o.q[1]));
+      t.el.style.setProperty('--depth', depth(t.o.q[2]));
+    });
+    // the sphere's own lines: three meridians, the equator and two parallels; the middle periphery's equator and a meridian
+    const ring = (r, lift, tilt) => {
+      const flat = Math.sqrt(Math.max(0, 1 - lift * lift)), pts = [];
+      for (let i = 0; i <= 40; i += 1) {
+        const a = (2 * Math.PI * i) / 40, q = tilt === null ? proj([r * flat * Math.cos(a), r * lift, r * flat * Math.sin(a)])
+          : proj([r * Math.sin(a) * Math.cos(tilt), r * Math.cos(a), r * Math.sin(a) * Math.sin(tilt)]);
+        pts.push(`${f(q[0])} ${f(q[1])}`);
+      }
+      return `M${pts.join('L')}`;
+    };
+    const shapes = [[1, 0, 0], [1, 0, Math.PI / 3], [1, 0, (2 * Math.PI) / 3], [1, 0, null], [1, 0.57, null], [1, -0.57, null], [SPH.MID, 0, null], [SPH.MID, 0, 0]];
+    m.wires.forEach((w, i) => w.setAttribute('d', ring(...shapes[i])));
+    sphere.frame += 1;
+    if (sphere.frame % 14 === 1) {  // the nearer parts over the farther ones (now and then: the order changes slowly)
+      const layer = svg.querySelector('g.nodes');
+      [...m.nodes].filter((n) => n.el).sort((a, b) => a.q[2] - b.q[2]).forEach((n) => { if (n.el !== document.activeElement && !n.el.contains(document.activeElement)) layer.appendChild(n.el); });
+    }
+  }
+
+  function sphereTick(now) {
+    sphere.raf = 0;
+    const svg = $('conn-svg');
+    if (!svg || !svg.classList.contains('sphere') || selected() !== CONNECTIONS || document.hidden) return;  // started again when it is shown
+    const dt = sphere.last ? Math.min(0.1, (now - sphere.last) / 1000) : 0;
+    sphere.last = now;
+    const calm = still();
+    let moved = sphere.dirty;
+    if (sphere.aim) {  // a part picked: brought to the front
+      const k = calm ? 1 : 1 - Math.pow(0.002, dt), dy = sphere.aim.yaw - sphere.yaw, dp = sphere.aim.pitch - sphere.pitch;
+      sphere.yaw += dy * k; sphere.pitch += dp * k; moved = true;
+      if (Math.abs(dy) + Math.abs(dp) < 0.004) sphere.aim = null;
+    } else if (!calm && !sphere.drag && !sphere.hover && !focusNode) { sphere.yaw += dt * 0.075; moved = true; }
+    if (!calm && sphere.model && sphere.model.nodes.some((n) => n.owner !== undefined)) { sphere.t += dt; moved = true; }
+    if (moved) { sphereDraw(); sphere.dirty = false; }
+    sphere.raf = requestAnimationFrame(sphereTick);
+  }
+  function sphereRun() { sphere.dirty = true; if (!sphere.raf) { sphere.last = 0; sphere.raf = requestAnimationFrame(sphereTick); } }
+  function sphereAim(id) {  // the turn that brings a part of a periphery to the front
+    const n = sphere.model && sphere.model.byId.get(id);
+    if (!n || !n.p || Math.hypot(n.p[0], n.p[1], n.p[2]) < 0.3) return;
+    // to the front, but right of the centre and above it: straight in front it would cover its interface and the centre
+    const d = vNorm(n.p), yaw = Math.atan2(-d[0], d[2]) + 0.6, turns = Math.round((sphere.yaw - yaw) / (2 * Math.PI));
+    sphere.aim = { yaw: yaw + turns * 2 * Math.PI, pitch: Math.max(-1.2, Math.min(1.2, Math.atan2(d[1], Math.hypot(d[0], d[2])) - 0.32)) };
+    sphereRun();
+  }
+  function sphereTurn(dyaw, dpitch) {
+    sphere.aim = null;
+    sphere.yaw += dyaw;
+    sphere.pitch = Math.max(-1.35, Math.min(1.35, sphere.pitch + dpitch));
+    sphereRun();
+  }
+  function setConnView(v) {
+    if (v === connView || !['sphere', 'columns'].includes(v)) return;
+    connView = v;
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) { /* while the page lives */ }
+    connShape = '';
+    drawData();
+    const again = data.querySelector(`button.conn-view[data-view="${v}"]`);
+    if (again) again.focus({ preventScroll: true });
+  }
+
   function summaryOf(t) {
     const total = (t.links || []).reduce((s, l) => s + l.count, 0), failed = (t.links || []).reduce((s, l) => s + l.failed, 0);
     return `since ${clockOf(t.since)} · ${total} interaction${total === 1 ? '' : 's'} on ${(t.links || []).length} link${(t.links || []).length === 1 ? '' : 's'}`
@@ -1307,7 +1583,8 @@
   }
 
   function rowsHtml(t, since) {
-    const rows = (t.recent || []).filter((r) => !kindsOff.has(r.kind) && (!focusNode || r.from === focusNode || r.to === focusNode)).slice(0, 60);
+    const members = focusMembers();
+    const rows = (t.recent || []).filter((r) => !kindsOff.has(r.kind) && (!focusNode || touchesFocus(r, members))).slice(0, 60);
     if (!rows.length) return `<tr><td colspan="6" class="muted">${focusNode ? 'Nothing said to it or by it yet.' : 'Nothing yet.'}</td></tr>`;
     return rows.map((r) => `<tr class="${since >= 0 && r.seq > since ? 'new' : ''}${r.ok ? '' : ' failed'}"><td class="mono small">${esc(clockOf(r.at))}</td>`
       + `<td>${esc(nodeTitle(t, r.from))} → ${esc(nodeTitle(t, r.to))}</td><td><span class="kind k-${esc(r.kind)}">${esc(r.kind)}</span></td>`
@@ -1316,7 +1593,10 @@
   }
 
   function connectionsData() {
-    return `<div class="data-head"><h2>Connections</h2><button type="button" class="conn-pause" aria-pressed="${trafficPaused}">${trafficPaused ? 'Resume' : 'Pause'}</button></div>
+    const view = (v, words, tip) => `<button type="button" class="conn-view" data-view="${v}" aria-pressed="${connView === v}" title="${tip}">${words}</button>`;
+    return `<div class="data-head"><h2>Connections</h2><span class="conn-tools"><span class="conn-views" role="group" aria-label="How the picture is drawn">`
+      + `${view('sphere', 'Sphere', 'The platform at the centre, the interfaces round it, the plugins on the sphere')}${view('columns', 'Columns', 'Who asks, the platform, its plugins, what they reach: in four columns')}</span>`
+      + `<button type="button" class="conn-pause" aria-pressed="${trafficPaused}">${trafficPaused ? 'Resume' : 'Pause'}</button></span></div>
       <div class="muted small">who talks to whom on this platform, as it happens: a line for each kind of interaction between two parts</div>
       <p class="error" id="err-connections"></p>
       <div class="muted small" id="conn-summary" aria-live="off">${traffic ? esc(summaryOf(traffic)) : 'Asking the platform…'}</div>
@@ -1332,19 +1612,26 @@
     ((t && t.links) || []).forEach((l) => { counts[l.kind] = (counts[l.kind] || 0) + l.count; });
     const legend = CLASS_ORDER.filter((k) => classes[k]).map((k) => `<button type="button" class="legend-item k-${k}" data-kind="${k}" aria-pressed="${!kindsOff.has(k)}">`
       + `<span class="swatch-line" aria-hidden="true"></span><span class="what"><span>${k} <span class="muted">${counts[k] || 0}</span></span><span class="sub">${esc(classes[k])}</span></span></button>`).join('');
-    const n = focusNode && t ? (t.nodes || []).find((x) => x.id === focusNode) : null;
+    const n = focusNode && t ? ((t.nodes || []).find((x) => x.id === focusNode) || (connView === 'sphere' && sphere.model && sphere.model.byId.get(focusNode)) || null) : null;
     let picked = '';
     if (n) {
-      const mine = (t.links || []).filter((l) => l.from === n.id || l.to === n.id);
-      const rows = mine.map((l) => `<tr><td>${l.from === n.id ? `→ ${esc(nodeTitle(t, l.to))}` : `← ${esc(nodeTitle(t, l.from))}`}</td><td><span class="kind k-${esc(l.kind)}">${esc(l.kind)}</span></td>`
+      const members = focusMembers();
+      const mine = (t.links || []).filter((l) => touchesFocus(l, members));
+      const rows = mine.map((l) => `<tr><td>${l.from === n.id ? `→ ${esc(nodeTitle(t, l.to))}` : l.to === n.id ? `← ${esc(nodeTitle(t, l.from))}` : `${esc(nodeTitle(t, l.from))} → ${esc(nodeTitle(t, l.to))}`}</td><td><span class="kind k-${esc(l.kind)}">${esc(l.kind)}</span></td>`
         + `<td class="num">${l.count}${l.failed ? ` <span class="bad">(${l.failed} failed)</span>` : ''}</td><td class="num">${l.ms ? `${l.ms} ms` : ''}</td></tr>`).join('');
-      picked = `<h4>${esc(n.title)}</h4><div class="muted small">${esc(n.sub || n.role)}${n.role === 'plugin' && n.state ? ` · ${esc(n.state)}` : ''}</div>
+      picked = `<h4>${esc(n.title)}</h4><div class="muted small">${esc(n.sub || n.role)}${n.role === 'plugin' && n.state ? ` · ${esc(n.state)}` : ''}${members ? ` · built on it: ${esc(n.members.map((p) => p.title).join(', '))}` : ''}</div>
         <div class="row">${n.role === 'plugin' && pluginOf(n.id) ? `<button type="button" data-select="${esc(n.id)}">Its page</button> ` : ''}<button type="button" class="conn-unpick">Every part</button></div>
         ${rows ? `<table class="list conn-links"><thead><tr><th>With</th><th>Class</th><th class="num">Times</th><th class="num">Mean</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="small muted">Nothing said to it or by it yet.</div>'}`;
     }
     return `<h3>${icon('plug', 20)} Connections</h3><div class="muted small">the platform, its page, its login, its plugins and what they reach</div>${picked}
       <h4>Classes</h4><div class="legend">${legend}</div><div class="muted small">A class switched off leaves the picture and the table.</div>
-      <h4>Reading it</h4><p class="small">Who asks is on the left: this page, or a program. The platform asks its plugins; the platform and its plugins
+      <h4>Reading it</h4>${connView === 'sphere' ? `<p class="small">The platform is at the centre, with its login and who asks it (this page, a program) close by.
+      Round it, on the middle periphery, the library's interfaces the plugins are built on: what the platform or the login and a plugin say
+      to each other is drawn through the plugin's interface. The plugins are on the outer periphery, a sphere, those of one interface
+      together, the quiet ones dimmed. What was made or reached with a plugin orbits it: the programs it ran, the hosts and apps it
+      reached, the Docker instances it gives. A line's colour is its class and its width how often; it moves while it carried something
+      in the last seconds, and a dot runs along it for each new interaction. Drag the sphere, or use the arrow keys, to turn it; it rests
+      under the pointer. Pick a part to bring it to the front and see its own links.</p>` : ''}<p class="small"${connView === 'sphere' ? ' hidden' : ''}>Who asks is on the left: this page, or a program. The platform asks its plugins; the platform and its plugins
       read and keep their settings through the login, under the platform; on the right, what they reach: programs, hosts, the framework's
       other apps. A line's colour is its class and its width how often; it moves while it carried something in the last seconds, and a dot
       runs along it for each new interaction. Pick a box to see its own links.</p>`;
@@ -1360,12 +1647,14 @@
   function updateConnections(rebuild) {
     const t = traffic, graph = $('conn-graph');
     if (!t || !graph || selected() !== CONNECTIONS) return;
-    const m = connectionsModel(t), shape = shapeOf(m);
+    const sph = connView === 'sphere';  // 0.23.0
+    const m = sph ? sphereModel(t) : connectionsModel(t), shape = `${connView}/${shapeOf(m)}`;
     if (rebuild || shape !== connShape || !$('conn-svg')) {
-      graph.innerHTML = connectionsSvg(m);
-      fitLabels($('conn-svg'));
+      graph.innerHTML = sph ? sphereSvg(m) : connectionsSvg(m);
+      if (sph) { sphere.model = m; sphereBind(m); sphereDraw(); } else { sphere.model = null; fitLabels($('conn-svg')); }
       connShape = shape;
     }
+    if (sph) sphereRun();
     paintLinks(t);
     const since = trafficSeq;
     pulses(t, since);
@@ -1398,6 +1687,7 @@
 
   function pickNode(id) {
     focusNode = focusNode === id ? null : id;
+    if (focusNode && connView === 'sphere') sphereAim(focusNode);  // brought to the front
     updateConnections(false);
   }
 
@@ -1984,6 +2274,9 @@
     const lb = e.target.closest('#rail button[data-bound]');  // the login's lambda: your account, or back (0.18.0)
     if (lb) { openLogin(!loginOpen); return; }
     if (loginOpen && e.target.closest('#rail [data-select]')) openLogin(false);  // the rail's own icons take you back
+    if (sphere.dragged && e.target.closest('#conn-svg')) { sphere.dragged = false; return; }  // the end of a drag picks nothing
+    const cv = e.target.closest('button.conn-view[data-view]');  // Connections: the sphere or the columns
+    if (cv) { setConnView(cv.dataset.view); return; }
     const pz = e.target.closest('button.conn-pause');  // Connections: pause or resume the asking
     if (pz) {
       trafficPaused = !trafficPaused;
@@ -2263,11 +2556,41 @@
 
   // Connections: a box picked with Enter or Space too
   data.addEventListener('keydown', (e) => {
+    const turn = { ArrowLeft: [-0.14, 0], ArrowRight: [0.14, 0], ArrowUp: [0, -0.14], ArrowDown: [0, 0.14] }[e.key];
+    if (turn && e.target.closest && e.target.closest('#conn-svg.sphere')) { e.preventDefault(); sphereTurn(turn[0], turn[1]); return; }
     const nd = e.target.closest && e.target.closest('#conn-svg [data-node]');
     if (!nd || (e.key !== 'Enter' && e.key !== ' ')) return;
     e.preventDefault();
     pickNode(nd.dataset.node);
   });
+
+  // the sphere turned by a drag (a mouse, a pen, a finger sideways: up and down is the page's scroll), resting under a mouse
+  data.addEventListener('pointerdown', (e) => {
+    if (e.button || !e.target.closest || !e.target.closest('#conn-svg.sphere')) return;
+    sphere.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: sphere.yaw, pitch: sphere.pitch, moved: false };
+  });
+  window.addEventListener('pointermove', (e) => {
+    const d = sphere.drag;
+    if (!d || e.pointerId !== d.id) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) < 5) return;
+    d.moved = true;
+    sphere.aim = null;
+    sphere.yaw = d.yaw + dx * 0.0085;
+    sphere.pitch = Math.max(-1.35, Math.min(1.35, d.pitch + dy * 0.0085));
+    sphereRun();
+  });
+  const dragEnd = (e) => {
+    const d = sphere.drag;
+    if (!d || e.pointerId !== d.id) return;
+    sphere.drag = null;
+    if (d.moved) { sphere.dragged = true; setTimeout(() => { sphere.dragged = false; }, 300); }  // the click that follows picks nothing
+  };
+  window.addEventListener('pointerup', dragEnd);
+  window.addEventListener('pointercancel', dragEnd);
+  data.addEventListener('pointerover', (e) => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('#conn-svg.sphere')) sphere.hover = true; });
+  data.addEventListener('pointerout', (e) => { if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('#conn-svg.sphere')) sphere.hover = false; });
+  data.addEventListener('pointerleave', () => { sphere.hover = false; });
 
   window.addEventListener('hashchange', draw);
   document.addEventListener('visibilitychange', () => {
