@@ -326,11 +326,13 @@ html.keyboard .term-panel.shell:focus-within .term { height: max(96px, min(340px
 
 /* 0.22.0: a plugin's tabs, beside its title (the user: "i need tabs for the main page of each plugin, each plugin has a
    tab for the API"): Main and API, the one shown underlined in the accent; the switches stay at the right. */
-.data-head .tabs { display: flex; align-items: flex-end; gap: 2px; margin-right: auto; }
-.tabs .tab { padding: 4px 12px; border: 0; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; background: none;
-  color: var(--muted); font-size: 13px; }
-.tabs .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
-@media (hover: hover) { .tabs .tab:hover { color: var(--text); background: var(--hover); } }
+/* 0.24.0 (the user, of the first tabs, two small grey words with a thin line under one: "also i don't see tabs"): each
+   tab a button with its own border and ground, the one shown filled in the accent, so they read as tabs at a glance */
+.data-head .tabs { display: flex; align-items: center; gap: 4px; margin-right: auto; margin-left: 6px; }
+.tabs .tab { padding: 5px 16px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text);
+  font-size: 13px; font-weight: 600; }
+.tabs .tab[aria-selected="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
+@media (hover: hover) { .tabs .tab:not([aria-selected="true"]):hover { border-color: var(--text); background: var(--hover); } }
 .plugin-apis .api-cards { margin-top: 10px; }
 
 /* 0.23.0: Connections as a sphere (the user: "treat the plugins like a peripheral interface, and have them on the outer
@@ -374,3 +376,10 @@ html.touch .conn-picture .node circle.hit { pointer-events: all; }
 .conn-picture .node.object:focus-visible .label, .conn-picture .node.object.on .label, .conn-picture .node.object.picked .label { display: block; }
 @media (hover: hover) { .conn-picture .node.object:hover .label { display: block; } }
 @media (max-width: 700px) { .conn-picture svg.sphere { min-width: 0; } }
+
+/* 0.24.0: the sphere nearer and farther (the user: "i need to be able to zoom in and out the connections"). Nearer, it is
+   larger than its picture: what is outside is cut off, not drawn over the page. */
+.conn-picture svg.sphere { overflow: hidden; border-radius: var(--radius); }
+.conn-zoom-tools { display: inline-flex; align-items: center; gap: 2px; }
+.conn-zoom { min-width: 28px; padding: 3px 8px; }
+.conn-zoom.level { min-width: 54px; color: var(--muted); font-variant-numeric: tabular-nums; }

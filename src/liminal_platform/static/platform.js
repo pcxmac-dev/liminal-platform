@@ -1330,7 +1330,43 @@
   const VIEW_KEY = 'liminal:platform:conn-view';
   let connView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'columns' ? 'columns' : 'sphere'; } catch (e) { return 'sphere'; } })();
   const SPH = { W: 800, H: 590, cx: 400, cy: 296, R: 226, D: 3.4, MID: 0.52, CORE: 0.2, OUT: 1.07, ORBIT: 8 };
-  const sphere = { yaw: 0.55, pitch: -0.3, t: 0, model: null, raf: 0, last: 0, drag: null, dragged: false, hover: false, aim: null, dirty: true, frame: 0 };
+  const sphere = { yaw: 0.55, pitch: -0.3, t: 0, model: null, raf: 0, last: 0, drag: null, dragged: false, hover: false, aim: null, dirty: true, frame: 0,
+    zoom: 1, ox: 0, oy: 0, fingers: new Map(), pinch: null };
+  // 0.24.0 (the user, 2026-11-11: "i need to be able to zoom in and out the connections"): the sphere nearer or farther by
+  // the wheel (what is under the pointer stays under it), a pinch, the head's − and + and the keys + and −; its measure
+  // between them is the way back to the whole sphere (so is 0). Nearer, Shift and a drag moves the picture, a drag still
+  // turns the sphere, and a part picked comes to the middle of what is shown.
+  const ZOOM = [0.5, 6];
+  function svgBox() {  // where the picture's own 800 by 590 lies on the screen
+    const svg = $('conn-svg');
+    if (!svg) return null;
+    const r = svg.getBoundingClientRect(), k = Math.min(r.width / SPH.W, r.height / SPH.H) || 1;
+    return { k, x: r.left + (r.width - SPH.W * k) / 2, y: r.top + (r.height - SPH.H * k) / 2 };
+  }
+  const svgPoint = (x, y) => { const b = svgBox(); return b ? [(x - b.x) / b.k, (y - b.y) / b.k] : [SPH.cx, SPH.cy]; };
+  function zoomSaid() {
+    const el = $('conn-zoom-level');
+    if (el) el.textContent = `${Math.round(sphere.zoom * 100)}%`;
+    data.querySelectorAll('button.conn-zoom[data-zoom]').forEach((b) => {
+      b.disabled = (b.dataset.zoom === 'in' && sphere.zoom >= ZOOM[1]) || (b.dataset.zoom === 'out' && sphere.zoom <= ZOOM[0]);
+    });
+  }
+  function keepInSight() {  // the sphere never moved wholly out of the picture
+    const reach = SPH.R * sphere.zoom;
+    sphere.ox = Math.max(-reach, Math.min(reach, sphere.ox));
+    sphere.oy = Math.max(-reach, Math.min(reach, sphere.oy));
+  }
+  function sphereZoom(factor, px = SPH.cx, py = SPH.cy) {
+    const was = sphere.zoom, now = Math.max(ZOOM[0], Math.min(ZOOM[1], was * factor)), k = now / was;
+    if (now === was) return;
+    sphere.zoom = now;
+    sphere.ox = now <= 1 ? 0 : px - SPH.cx - k * (px - SPH.cx - sphere.ox);  // the point under the pointer stays there
+    sphere.oy = now <= 1 ? 0 : py - SPH.cy - k * (py - SPH.cy - sphere.oy);
+    keepInSight();
+    zoomSaid();
+    sphereRun();
+  }
+  function sphereWhole() { sphere.zoom = 1; sphere.ox = 0; sphere.oy = 0; zoomSaid(); sphereRun(); }
   const vAdd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
   const vMul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
   const vCross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -1473,6 +1509,7 @@
     m.edges = m.links.map((l) => ({ l, a: m.byId.get(l.from), b: m.byId.get(l.to), off: m.offs.get(linkKey(l)) || 0, ...sphereRoute(m, l),
       el: svg.querySelector(`path.edge[data-link="${CSS.escape(linkKey(l))}"]`) }));
     m.wires = [...svg.querySelectorAll('path.wire')];
+    m.shells = [...svg.querySelectorAll('circle.shell')];
     m.lines = m.tethers.map((o) => ({ o, owner: m.byId.get(o.owner), el: svg.querySelector(`line.tether[data-of="${CSS.escape(o.id)}"]`) }));
   }
 
@@ -1480,9 +1517,10 @@
     const m = sphere.model, svg = $('conn-svg');
     if (!m || !m.edges || !svg || !svg.classList.contains('sphere')) return;
     const cy = Math.cos(sphere.yaw), sy = Math.sin(sphere.yaw), cp = Math.cos(sphere.pitch), sp = Math.sin(sphere.pitch);
+    const R = SPH.R * sphere.zoom, mx = SPH.cx + sphere.ox, my = SPH.cy + sphere.oy, grow = Math.pow(sphere.zoom, 0.3);  // 0.24.0: nearer or farther
     const proj = (p) => {
       const x = p[0] * cy + p[2] * sy, z0 = -p[0] * sy + p[2] * cy, y = p[1] * cp - z0 * sp, z = p[1] * sp + z0 * cp, s = SPH.D / (SPH.D - z);
-      return [SPH.cx + SPH.R * x * s, SPH.cy - SPH.R * y * s, z, s];
+      return [mx + R * x * s, my - R * y * s, z, s];
     };
     const f = (v) => v.toFixed(1);
     const depth = (z) => (z < 0 ? 0.34 + 0.4 * (z + 1) : 0.78 + 0.22 * z).toFixed(2);  // the far side fainter
@@ -1494,7 +1532,7 @@
       }
       n.q = proj(n.p);
       if (!n.el) return;
-      n.el.setAttribute('transform', `translate(${f(n.q[0])} ${f(n.q[1])}) scale(${(0.62 + 0.38 * n.q[3]).toFixed(3)})`);
+      n.el.setAttribute('transform', `translate(${f(n.q[0])} ${f(n.q[1])}) scale(${((0.62 + 0.38 * n.q[3]) * grow).toFixed(3)})`);
       n.el.style.setProperty('--depth', depth(n.q[2]));
       n.el.classList.toggle('far', n.q[2] < 0.08);
     });
@@ -1527,6 +1565,10 @@
     };
     const shapes = [[1, 0, 0], [1, 0, Math.PI / 3], [1, 0, (2 * Math.PI) / 3], [1, 0, null], [1, 0.57, null], [1, -0.57, null], [SPH.MID, 0, null], [SPH.MID, 0, 0]];
     m.wires.forEach((w, i) => w.setAttribute('d', ring(...shapes[i])));
+    m.shells.forEach((c, i) => {  // the shells' outlines, as near as the sphere is
+      const r = i ? SPH.MID : 1;
+      c.setAttribute('cx', f(mx)); c.setAttribute('cy', f(my)); c.setAttribute('r', f((R * r * SPH.D) / Math.sqrt(SPH.D * SPH.D - r * r)));
+    });
     sphere.frame += 1;
     if (sphere.frame % 14 === 1) {  // the nearer parts over the farther ones (now and then: the order changes slowly)
       const layer = svg.querySelector('g.nodes');
@@ -1545,7 +1587,8 @@
     if (sphere.aim) {  // a part picked: brought to the front
       const k = calm ? 1 : 1 - Math.pow(0.002, dt), dy = sphere.aim.yaw - sphere.yaw, dp = sphere.aim.pitch - sphere.pitch;
       sphere.yaw += dy * k; sphere.pitch += dp * k; moved = true;
-      if (Math.abs(dy) + Math.abs(dp) < 0.004) sphere.aim = null;
+      sphere.ox -= sphere.ox * k; sphere.oy -= sphere.oy * k;  // 0.24.0: and the picture back to its middle
+      if (Math.abs(dy) + Math.abs(dp) < 0.004 && Math.abs(sphere.ox) + Math.abs(sphere.oy) < 0.5) { sphere.aim = null; sphere.ox = 0; sphere.oy = 0; }
     } else if (!calm && !sphere.drag && !sphere.hover && !focusNode) { sphere.yaw += dt * 0.075; moved = true; }
     if (!calm && sphere.model && sphere.model.nodes.some((n) => n.owner !== undefined)) { sphere.t += dt; moved = true; }
     if (moved) { sphereDraw(); sphere.dirty = false; }
@@ -1556,8 +1599,9 @@
     const n = sphere.model && sphere.model.byId.get(id);
     if (!n || !n.p || Math.hypot(n.p[0], n.p[1], n.p[2]) < 0.3) return;
     // to the front, but right of the centre and above it: straight in front it would cover its interface and the centre
-    const d = vNorm(n.p), yaw = Math.atan2(-d[0], d[2]) + 0.6, turns = Math.round((sphere.yaw - yaw) / (2 * Math.PI));
-    sphere.aim = { yaw: yaw + turns * 2 * Math.PI, pitch: Math.max(-1.2, Math.min(1.2, Math.atan2(d[1], Math.hypot(d[0], d[2])) - 0.32)) };
+    const near = Math.max(1, sphere.zoom);  // 0.24.0: nearer, less beside the centre, so it stays in what is shown
+    const d = vNorm(n.p), yaw = Math.atan2(-d[0], d[2]) + 0.6 / near, turns = Math.round((sphere.yaw - yaw) / (2 * Math.PI));
+    sphere.aim = { yaw: yaw + turns * 2 * Math.PI, pitch: Math.max(-1.2, Math.min(1.2, Math.atan2(d[1], Math.hypot(d[0], d[2])) - 0.32 / near)) };
     sphereRun();
   }
   function sphereTurn(dyaw, dpitch) {
@@ -1594,7 +1638,11 @@
 
   function connectionsData() {
     const view = (v, words, tip) => `<button type="button" class="conn-view" data-view="${v}" aria-pressed="${connView === v}" title="${tip}">${words}</button>`;
-    return `<div class="data-head"><h2>Connections</h2><span class="conn-tools"><span class="conn-views" role="group" aria-label="How the picture is drawn">`
+    const zoom = connView !== 'sphere' ? '' : `<span class="conn-zoom-tools" role="group" aria-label="How near the sphere is">`
+      + `<button type="button" class="conn-zoom" data-zoom="out" title="Farther (the − key, or the wheel)" aria-label="Zoom out"${sphere.zoom <= ZOOM[0] ? ' disabled' : ''}>−</button>`
+      + `<button type="button" class="conn-zoom level" data-zoom="whole" id="conn-zoom-level" title="The whole sphere again (the 0 key)" aria-label="The whole sphere again">${Math.round(sphere.zoom * 100)}%</button>`
+      + `<button type="button" class="conn-zoom" data-zoom="in" title="Nearer (the + key, or the wheel)" aria-label="Zoom in"${sphere.zoom >= ZOOM[1] ? ' disabled' : ''}>+</button></span>`;
+    return `<div class="data-head"><h2>Connections</h2><span class="conn-tools">${zoom}<span class="conn-views" role="group" aria-label="How the picture is drawn">`
       + `${view('sphere', 'Sphere', 'The platform at the centre, the interfaces round it, the plugins on the sphere')}${view('columns', 'Columns', 'Who asks, the platform, its plugins, what they reach: in four columns')}</span>`
       + `<button type="button" class="conn-pause" aria-pressed="${trafficPaused}">${trafficPaused ? 'Resume' : 'Pause'}</button></span></div>
       <div class="muted small">who talks to whom on this platform, as it happens: a line for each kind of interaction between two parts</div>
@@ -1631,7 +1679,8 @@
       together, the quiet ones dimmed. What was made or reached with a plugin orbits it: the programs it ran, the hosts and apps it
       reached, the Docker instances it gives. A line's colour is its class and its width how often; it moves while it carried something
       in the last seconds, and a dot runs along it for each new interaction. Drag the sphere, or use the arrow keys, to turn it; it rests
-      under the pointer. Pick a part to bring it to the front and see its own links.</p>` : ''}<p class="small"${connView === 'sphere' ? ' hidden' : ''}>Who asks is on the left: this page, or a program. The platform asks its plugins; the platform and its plugins
+      under the pointer. The wheel, a pinch, + and − bring it nearer or farther (0: the whole sphere again); nearer, Shift and a drag
+      moves the picture. Pick a part to bring it to the front and see its own links.</p>` : ''}<p class="small"${connView === 'sphere' ? ' hidden' : ''}>Who asks is on the left: this page, or a program. The platform asks its plugins; the platform and its plugins
       read and keep their settings through the login, under the platform; on the right, what they reach: programs, hosts, the framework's
       other apps. A line's colour is its class and its width how often; it moves while it carried something in the last seconds, and a dot
       runs along it for each new interaction. Pick a box to see its own links.</p>`;
@@ -2275,6 +2324,8 @@
     if (lb) { openLogin(!loginOpen); return; }
     if (loginOpen && e.target.closest('#rail [data-select]')) openLogin(false);  // the rail's own icons take you back
     if (sphere.dragged && e.target.closest('#conn-svg')) { sphere.dragged = false; return; }  // the end of a drag picks nothing
+    const zb = e.target.closest('button.conn-zoom[data-zoom]');  // Connections: the sphere nearer, farther, whole again (0.24.0)
+    if (zb) { if (zb.dataset.zoom === 'whole') sphereWhole(); else sphereZoom(zb.dataset.zoom === 'in' ? 1.3 : 1 / 1.3); return; }
     const cv = e.target.closest('button.conn-view[data-view]');  // Connections: the sphere or the columns
     if (cv) { setConnView(cv.dataset.view); return; }
     const pz = e.target.closest('button.conn-pause');  // Connections: pause or resume the asking
@@ -2558,6 +2609,12 @@
   data.addEventListener('keydown', (e) => {
     const turn = { ArrowLeft: [-0.14, 0], ArrowRight: [0.14, 0], ArrowUp: [0, -0.14], ArrowDown: [0, 0.14] }[e.key];
     if (turn && e.target.closest && e.target.closest('#conn-svg.sphere')) { e.preventDefault(); sphereTurn(turn[0], turn[1]); return; }
+    const nearer = { '+': 1.3, '=': 1.3, '-': 1 / 1.3, _: 1 / 1.3 }[e.key];  // 0.24.0: + and − nearer and farther, 0 the whole sphere
+    if ((nearer || e.key === '0') && !e.ctrlKey && !e.metaKey && !e.altKey && e.target.closest && e.target.closest('#conn-svg.sphere')) {
+      e.preventDefault();
+      if (nearer) sphereZoom(nearer); else sphereWhole();
+      return;
+    }
     const nd = e.target.closest && e.target.closest('#conn-svg [data-node]');
     if (!nd || (e.key !== 'Enter' && e.key !== ' ')) return;
     e.preventDefault();
@@ -2567,20 +2624,52 @@
   // the sphere turned by a drag (a mouse, a pen, a finger sideways: up and down is the page's scroll), resting under a mouse
   data.addEventListener('pointerdown', (e) => {
     if (e.button || !e.target.closest || !e.target.closest('#conn-svg.sphere')) return;
-    sphere.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: sphere.yaw, pitch: sphere.pitch, moved: false };
+    sphere.fingers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (sphere.fingers.size === 2) {  // 0.24.0: a second finger: a pinch, nearer or farther
+      const [a, b] = [...sphere.fingers.values()];
+      sphere.pinch = { gap: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, zoom: sphere.zoom };
+      sphere.drag = null;
+      return;
+    }
+    sphere.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: sphere.yaw, pitch: sphere.pitch, ox: sphere.ox, oy: sphere.oy, pan: e.shiftKey, moved: false };
   });
+  data.addEventListener('wheel', (e) => {  // 0.24.0: the wheel over the sphere: nearer or farther, about the pointer
+    if (!e.target.closest || !e.target.closest('#conn-svg.sphere')) return;
+    e.preventDefault();
+    const at = svgPoint(e.clientX, e.clientY), by = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    sphereZoom(Math.exp(-by * (e.ctrlKey ? 0.01 : 0.0016)), at[0], at[1]);
+  }, { passive: false });
   window.addEventListener('pointermove', (e) => {
+    if (sphere.fingers.has(e.pointerId)) sphere.fingers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (sphere.pinch && sphere.fingers.size >= 2) {  // the fingers apart: nearer; together: farther; about their middle
+      const [a, b] = [...sphere.fingers.values()], at = svgPoint((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      sphereZoom((sphere.pinch.zoom * (Math.hypot(a[0] - b[0], a[1] - b[1]) / sphere.pinch.gap)) / sphere.zoom, at[0], at[1]);
+      return;
+    }
     const d = sphere.drag;
     if (!d || e.pointerId !== d.id) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < 5) return;
     d.moved = true;
     sphere.aim = null;
-    sphere.yaw = d.yaw + dx * 0.0085;
-    sphere.pitch = Math.max(-1.35, Math.min(1.35, d.pitch + dy * 0.0085));
+    if (d.pan) {  // Shift: the picture moved, the sphere as it is turned
+      const k = (svgBox() || { k: 1 }).k;
+      sphere.ox = d.ox + dx / k;
+      sphere.oy = d.oy + dy / k;
+      keepInSight();
+    } else {
+      sphere.yaw = d.yaw + dx * 0.0085;
+      sphere.pitch = Math.max(-1.35, Math.min(1.35, d.pitch + dy * 0.0085));
+    }
     sphereRun();
   });
   const dragEnd = (e) => {
+    sphere.fingers.delete(e.pointerId);
+    if (sphere.pinch && sphere.fingers.size < 2) {  // a pinch over: the click that follows picks nothing
+      sphere.pinch = null;
+      sphere.dragged = true;
+      setTimeout(() => { sphere.dragged = false; }, 300);
+    }
     const d = sphere.drag;
     if (!d || e.pointerId !== d.id) return;
     sphere.drag = null;

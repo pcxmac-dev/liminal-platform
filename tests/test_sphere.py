@@ -36,6 +36,29 @@ def test_the_traffic_names_the_interfaces_and_gives_the_quiet_plugins(served):
     assert t["quiet"] == [] and t["hidden"] == [] and len(t["interfaces"]) == 2
 
 
+def test_the_sphere_comes_nearer_and_goes_farther(served):
+    """0.24.0 (the user, 2026-11-11: "i need to be able to zoom in and out the connections")."""
+    app, port, lines, box = served
+    js, css = _call(port, "GET", "/platform.js")[1], _call(port, "GET", "/platform.css")[1]
+    assert b"const ZOOM = [0.5, 6];" in js and b"const R = SPH.R * sphere.zoom, mx = SPH.cx + sphere.ox, my = SPH.cy + sphere.oy" in js
+    # the wheel about the pointer, the page's own scroll left alone anywhere else
+    assert b"data.addEventListener('wheel', (e) => {" in js and b"}, { passive: false });" in js
+    wheel = js[js.index(b"data.addEventListener('wheel'"):js.index(b"}, { passive: false });")]
+    assert b"if (!e.target.closest || !e.target.closest('#conn-svg.sphere')) return;" in wheel and wheel.index(b"return;") < wheel.index(b"e.preventDefault();")
+    assert b"sphere.ox = now <= 1 ? 0 : px - SPH.cx - k * (px - SPH.cx - sphere.ox);" in js  # what is under the pointer stays there
+    # a pinch, the head's buttons, the keys
+    assert b"if (sphere.fingers.size === 2) {" in js and b"sphere.pinch = { gap: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, zoom: sphere.zoom };" in js
+    for part in (b'class="conn-zoom" data-zoom="out"', b'class="conn-zoom level" data-zoom="whole" id="conn-zoom-level"', b'class="conn-zoom" data-zoom="in"',
+                 b"if (zb.dataset.zoom === 'whole') sphereWhole(); else sphereZoom(zb.dataset.zoom === 'in' ? 1.3 : 1 / 1.3);",
+                 b"const nearer = { '+': 1.3, '=': 1.3, '-': 1 / 1.3, _: 1 / 1.3 }[e.key];", b"if (nearer) sphereZoom(nearer); else sphereWhole();"):
+        assert part in js, part
+    assert b"const zoom = connView !== 'sphere' ? ''" in js  # the columns have none
+    # nearer: Shift and a drag moves the picture, never wholly out of sight; a part picked comes back to the middle
+    assert b"if (d.pan) {" in js and b"pan: e.shiftKey" in js and b"function keepInSight()" in js
+    assert b"sphere.ox -= sphere.ox * k; sphere.oy -= sphere.oy * k;" in js
+    assert b".conn-picture svg.sphere { overflow: hidden;" in css  # what is outside the picture is cut off
+
+
 def test_the_page_draws_connections_as_a_sphere(served):
     app, port, lines, box = served
     js, css = _call(port, "GET", "/platform.js")[1], _call(port, "GET", "/platform.css")[1]

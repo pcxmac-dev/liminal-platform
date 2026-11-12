@@ -31,7 +31,8 @@ def test_a_plugins_page_has_tabs_and_its_apis_a_tab_of_their_own(served):
     assert b"if (at >= 0 && parts(ac)[at]) parts(ac)[at].focus({ preventScroll: true });" in js
     # the tab picked keeps the focus once the page is drawn again
     assert b"const on = data.querySelector('button.tab[aria-selected=\"true\"]');" in js
-    for part in (b".data-head .tabs {", b"margin-right: auto;", b'.tabs .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }'):
+    for part in (b".data-head .tabs {", b"margin-right: auto;", b'.tabs .tab[aria-selected="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }',
+                 b".tabs .tab { padding: 5px 16px; border: 1px solid var(--border);"):
         assert part in css, part
 
 

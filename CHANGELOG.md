@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.24.0 (2026-11-11)
+
+Connections' sphere comes nearer and goes farther (the user: "i need to be able to zoom in and out the connections").
+The wheel over the sphere, about the pointer (what is under it stays under it); a pinch of two fingers; − and + at the
+head, with the sphere's measure between them, which is the way back to the whole sphere; the keys + and −, and 0 for
+the whole sphere, when the picture has the focus. From half its size to six times. Nearer, a drag still turns the
+sphere and Shift and a drag moves the picture; the parts grow a little with it, so their names stay readable; a part
+picked comes to the middle of what is shown. What is outside the picture is cut off, not drawn over the page. The
+wheel scrolls the page as before anywhere but over the sphere. The page's files alone changed: a platform already
+running serves them at its next reload.
+
+A plugin's tabs look like tabs (the user, of 0.22.0's two small grey words with a thin line under one: "also i don't
+see tabs"): each a button with its own border and ground beside the title, the one shown filled in the accent.
+
 ## 0.23.0 (2026-11-11)
 
 Connections is a sphere (the user: "for the #connections, lets treat the plugins like a peripheral interface, and have
