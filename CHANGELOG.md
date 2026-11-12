@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.21.0 (2026-11-11)
+
+The page shows at once and the plugins pop in as each answers (the user: "when starting platform there is a long pause
+before anything is visible, there needs instead to be a way that all plugins pop in to existance after loading, and that
+perhaps the main icon/page should show loading status"). The pause was not the start (under a second) but the page's
+first question: it asked the whole status, which asks every plugin one after another, and drew nothing until the last
+had answered (nine seconds on the user's PC with 22 machine plugins, the Windows firewall alone almost five). Now the
+page asks `GET /api/overview` first, which asks no plugin anything: the app, this machine and every plugin by its name,
+title and icon, enabled or not, hidden or not. It draws from that at once, every plugin in its place in the list,
+dimmed, "loading"; then it asks each plugin for its status on its own, all at the same time (`GET /api/machines/NAME`,
+and the new `GET /api/assistants` and `GET /api/docker` beside `GET /api/instances`), and each comes alive as its answer
+arrives: its row in the list, its line in this machine's table, its icon popping into the tray. A slow plugin holds no
+other back, and one picked before its answer is in says it is being asked. The loading status: a ring round the chip
+(the platform's own icon) filling with the answers, its tooltip counting them, and a line at the list's head ("Loading
+plugins: 7 of 27") while the page fills for the first time. When everything is asked again later (a switch thrown, a
+setup ended) what the page holds stays as it is until each new answer comes, the chip's ring alone showing it; that
+takes as long as the slowest plugin now, not as long as all of them together. The tray follows a plugin asked on its
+own at once (it followed only a whole status, else a minute later). A platform started before this release has no
+overview: the page asks it the whole status, as before. `GET /api/status` is as it was (the command line's status).
+Nothing moves for a reader who asked for reduced motion.
+
 ## 0.20.1 (2026-11-11)
 
 What the audit before any cloud key went in found here: a change asked of a plugin is logged by its name and how many

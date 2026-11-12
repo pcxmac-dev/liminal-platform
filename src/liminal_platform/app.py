@@ -562,6 +562,38 @@ class PlatformApp(App):
                 "machines": machines, "active": self.active(), "disabled": sorted(self.disabled()), "assistants": self.assistants(),
                 "instances": self.instances(), "plugins": self.plugins()}
 
+    def overview(self) -> dict:
+        """What the page draws at once (0.21.0; the user, 2026-11-11: "when starting platform there is a long pause before
+        anything is visible, there needs instead to be a way that all plugins pop in to existance after loading, and that
+        perhaps the main icon/page should show loading status"): the app, this machine and every platform plugin by its
+        name, title and icon, enabled or not, hidden or not, in the state it was last found in (None: not asked yet). No
+        plugin is asked anything here: the page asks each for its status on its own (GET api/machines/NAME, GET
+        api/assistants, api/docker, api/instances) and draws it as its answer comes, where the whole status (GET
+        api/status) asks them one after another and answers once the slowest has."""
+        off, hidden = self.disabled(), self.hidden()
+        with self._lock:
+            states = dict(self._states)
+
+        def row(name: str, p, kind: str, icon: str) -> dict:
+            return {"name": name, "title": p.title, "about": p.about, "version": p.version, "icon": getattr(p, "ICON", "") or icon,
+                    "kind": kind, "enabled": name not in off, "hidden": name in hidden,
+                    "state": "disabled" if name in off else states.get(name)}
+
+        return {"app": self.describe(), "machine": facts(), "disabled": sorted(off),
+                "plugins": [*(row(n, m, "machine", "chip") for n, m in self.machines().items()),
+                            *(row(n, p, "assistant", "analysis") for n, p in self.assistant_plugins().items())]}
+
+    def _tray_follows(self, name: str, active: bool) -> None:
+        """The tray's active plugins kept in step with one plugin's state just read (0.21.0): the page asks each plugin on
+        its own now, and the list is otherwise only asked again after ACTIVE_SECONDS (a whole status sets it anew)."""
+        order = list(self.machines())
+        with self._lock:
+            if self._active is None or name not in order:
+                return
+            names = set(self._active[1])
+            (names.add if active else names.discard)(name)
+            self._active = (self._active[0], [n for n in order if n in names])
+
     def machine_status(self, m) -> dict:
         on = self.enabled(m.name)
         if not on:  # asked nothing
@@ -583,6 +615,7 @@ class PlatformApp(App):
         with self._lock:
             (self._invalid.add if state == "invalid" else self._invalid.discard)(m.name)
             self._states[m.name] = state
+        self._tray_follows(m.name, state == "active")
         self._settle(m, state == "active")
         with self._lock:
             setup = self._setups.get(m.name)
@@ -773,6 +806,12 @@ class PlatformApp(App):
         body = body or {}
         if method == "GET" and path == "/api/status":
             return 200, self.status()
+        if method == "GET" and path == "/api/overview":  # 0.21.0: at once, no plugin asked; then each part on its own
+            return 200, self.overview()
+        if method == "GET" and path == "/api/assistants":
+            return 200, {"assistants": self.assistants()}
+        if method == "GET" and path == "/api/docker":
+            return 200, docker_mod.Docker(env={}).describe()
         if method == "GET" and path == "/api/machines":
             return 200, {"machines": [self.machine_status(m) for m in self.machines().values()]}
         if method == "GET" and path == "/api/instances":

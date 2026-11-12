@@ -43,7 +43,8 @@ liminal-platform machine wsl-ubuntu run -- docker ps
 
 ## The API
 
-`GET /api/status`, `GET /api/machines`, `GET /api/machines/<name>`, `POST /api/machines/<name>/setup`
+`GET /api/status`, `GET /api/overview` (what the page draws at once: no plugin asked), `GET /api/assistants`,
+`GET /api/docker`, `GET /api/machines`, `GET /api/machines/<name>`, `POST /api/machines/<name>/setup`
 (`{"steps": [...]}`, 202; `GET` the same path for the lines and the result), `POST /api/machines/<name>/run`
 (`{"command": [...]}`), `POST /api/machines/<name>/ask` (`{"hook": ..., "args": [...]}`: one of a plugin's hooks by
 name; a refusal answers 400 and a failure 502, with the plugin's own `words` and, for a refusal that names the argument

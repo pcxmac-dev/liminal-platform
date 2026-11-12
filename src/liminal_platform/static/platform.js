@@ -45,8 +45,27 @@
   const Charts = window.LiminalCharts;
   const list = $('list'), data = $('data'), side = $('side'), rail = $('rail');
   if (new URLSearchParams(location.search).get('embedded') === '1') document.body.classList.add('embedded');
-  let st = null;  // the last GET api/status
+  let st = null;  // what the platform said last: the overview (GET api/overview), then each part's own answer (0.21.0)
   let tray = null;  // the last GET api/tray
+  // 0.21.0 (the user, 2026-11-11: "when starting platform there is a long pause before anything is visible, there needs
+  // instead to be a way that all plugins pop in to existance after loading, and that perhaps the main icon/page should
+  // show loading status"): the page asked the whole status at once and drew nothing until the slowest plugin had answered
+  // (the plugins are asked one after another: nine seconds on the user's PC). Now it draws at once from the overview, which
+  // asks no plugin anything: every plugin in its place, dimmed, "loading"; then each is asked on its own, all at the same
+  // time, and comes alive as its answer arrives (its row in the list, its icon popping into the tray). The chip, the
+  // platform's own icon, carries a ring filling with the answers, and the list's head says how many are in.
+  let loading = null;  // while the plugins are being asked: {first, total, done}; first: nothing was drawn before
+  // the plugins whose answer just came in, active, by when: their rows and icons drawn popping in, once. A row or an icon
+  // drawn again while it pops (the next answer in) goes on from where it was, not from its start
+  const POP_MS = 340;  // platform.css's pop-in
+  const poppedAt = {};
+  const popOf = (name) => {  // ' pop' and where its animation is, or nothing
+    const at = poppedAt[name], gone = at === undefined ? POP_MS : performance.now() - at;
+    if (gone >= POP_MS) { delete poppedAt[name]; return null; }
+    return { cls: ' pop', style: ` style="animation-delay:-${Math.round(gone)}ms"` };
+  };
+  let asking = 0;  // the number of the latest ask of everything (render): an older one changed under never asks again
+  const pending = (m) => !!(m && m.pending);  // known by its name alone: asked for its status, the answer not in yet
   // the login app the platform inherits (0.18.0; the user: "make sure that the platform inherits the login app so we can
   // login to platform"): its tray after a divider at the rail's end (GET api/trays), your account over the main area
   let trays = [], loginOpen = false;
@@ -93,8 +112,8 @@
   const off = (m) => userOff(m) || invalid(m);
   const whyOf = (m) => m.why || 'not valid';
   const notHere = (m) => invalid(m) && !!(m.status && m.status.applies === false);  // not for this machine at all: no setup offered
-  const chipOf = (m) => (off(m) ? '<span class="chip">disabled</span>' : '<span class="chip up">active</span>');
-  const stateLine = (m) => (userOff(m) ? 'disabled' : notHere(m) ? `not for this machine: ${whyOf(m)}` : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
+  const chipOf = (m) => (pending(m) ? '<span class="chip wait">loading</span>' : off(m) ? '<span class="chip">disabled</span>' : '<span class="chip up">active</span>');
+  const stateLine = (m) => (pending(m) ? 'loading…' : userOff(m) ? 'disabled' : notHere(m) ? `not for this machine: ${whyOf(m)}` : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
   function say(name, text) {  // a plugin's trouble, at the head of its page
     const el = $(`err-${name}`);
     if (el) el.textContent = text || '';
@@ -107,8 +126,28 @@
     // a plugin's icon: its name and the right click in its tooltip; a long press (menu.js, 0.17.0) opens the same menu,
     // headed by its name alone (its data-tip)
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
-      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}" data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)" data-tip="${esc(i.title)}">${icon(i.icon || 'chip', 24)}</button>`).join('') : '')
+      + (items.length ? '<hr>' + items.map((i) => `<button type="button" class="${sel === i.id ? 'active' : ''}${(popOf(i.id) || { cls: '' }).cls}"${(popOf(i.id) || { style: '' }).style} data-select="${esc(i.id)}" title="${esc(i.title)} (right click: hide or disable)" data-tip="${esc(i.title)}">${icon(i.icon || 'chip', 24)}</button>`).join('') : '')
       + (trays.length ? '<hr>' + trays.map((t) => `<button type="button" class="bound${loginOpen ? ' active' : ''}" data-bound="${esc(t.app)}" title="${esc(t.title)}: who you are, your keys and accounts" data-tip="${esc(t.title)}">${icon(t.icon || 'lambda', 26)}</button>`).join('') : '');
+    progress();
+  }
+
+  // -- the loading status (0.21.0): a ring round the chip filling as the plugins answer, and while the page is drawn for
+  // the first time a line at the list's head saying how many are in; both set in place, nothing drawn again for them --
+  const loadingWords = () => (!loading ? '' : `${loading.first ? 'Loading plugins' : 'Asking the plugins again'}: ${loading.done} of ${loading.total}`);
+  const loadingLine = () => (!loading || !loading.first ? '' : `<div class="loading-line" id="loading-line" role="status"><span class="bar"><span style="width:${loading.total ? Math.round(100 * loading.done / loading.total) : 0}%"></span></span><span class="words">${esc(loadingWords())}</span></div>`);
+  function progress() {
+    const chip = $('railChip'), line = $('loading-line');
+    const name = `${(tray && tray.title) || 'Platform'}: this machine`;
+    if (chip) {
+      chip.classList.toggle('loading', !!loading);
+      chip.style.setProperty('--p', loading && loading.total ? String(Math.round(100 * loading.done / loading.total)) : '0');
+      chip.title = loading ? `${name} (${loadingWords().toLowerCase()})` : name;
+    }
+    if (line && !loading) line.remove();
+    else if (line) {
+      line.querySelector('.bar > span').style.width = `${loading.total ? Math.round(100 * loading.done / loading.total) : 0}%`;
+      line.querySelector('.words').textContent = loadingWords();
+    }
   }
 
   // your account painted again in the page's theme once it changes (0.18.1): its page was made in the theme of the
@@ -155,20 +194,24 @@
   // -- the list: this machine, its machine plugins, the AI assistants -----------------------------------
   function drawList() {
     const sel = selected();
-    const item = (id, ic, title, sub, cls = '') => `<button type="button" class="item${sel === id ? ' active' : ''}${cls}" data-select="${esc(id)}">${icon(ic, 20)}
+    const item = (id, ic, title, sub, cls = '', more = '') => `<button type="button" class="item${sel === id ? ' active' : ''}${cls}"${more} data-select="${esc(id)}">${icon(ic, 20)}
       <span class="what"><span>${esc(title)}</span><span class="sub">${esc(sub)}</span></span></button>`;
     const f = st.machine;
     const machines = Object.values(st.machines);
-    list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>`
+    // one not answered yet (0.21.0) keeps its place, dimmed; the one whose answer just came pops in
+    const cls = (p) => (pending(p) ? ' pending' : off(p) ? ' off' : '') + (popOf(p.name) || { cls: '' }).cls;
+    const more = (p) => (popOf(p.name) || { style: '' }).style;
+    list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>${loadingLine()}`
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
       + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
-      + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), off(m) ? ' off' : '')).join('')
+      + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m))).join('')
         : '<div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
-      + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, a.icon || 'analysis', a.title, off(a) ? stateLine(a) : (a.vendor || a.about), off(a) ? ' off' : '')).join('') : '');
+      + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, a.icon || 'analysis', a.title, pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a))).join('') : '');
   }
 
   // -- the middle: the selected one's data ------------------------------------------------------------
   function instancesTable() {
+    if (st.instancesPending) return `<h4>Docker instances</h4><div class="muted small">Loading…</div>`;  // 0.21.0: asked, not in yet
     if (!st.instances.length) return `<h4>Docker instances</h4><div class="muted small">None yet: Docker here, a context, or a machine plugin with Docker inside.</div>`;
     return `<h4>Docker instances</h4><table class="list"><thead><tr><th>Name</th><th>Where</th><th>Command</th><th>From</th></tr></thead><tbody>`
       + st.instances.map((i) => `<tr><td class="mono">${esc(i.name)}</td><td>${esc(i.where)}</td><td class="mono">${esc(i.command)}</td><td>${esc(i.source)}</td></tr>`).join('') + `</tbody></table>`;
@@ -1054,7 +1097,13 @@
     p.querySelector('.term-keys').hidden = !sh.alive;
   }
 
+  // one picked before its answer is in (0.21.0): who it is, and that it is being asked; its page once it has answered
+  const pendingData = (p) => `<div class="data-head"><h2>${esc(p.title)}</h2></div><div class="muted small">${esc(p.about || '')}</div><p class="error" id="err-${esc(p.name)}"></p>
+    <p class="muted loading-words" role="status">Loading: ${esc(p.title)} is being asked for its status. Its page shows here as soon as it answers.</p>`;
+  const pendingSide = (p, ic) => `<h3>${icon(p.icon || ic, 20)} ${esc(p.title)} ${chipOf(p)}</h3><div class="muted small">${esc(p.name)}${p.version ? ` · ${esc(p.version)}` : ''}</div><p class="summary">loading…</p>`;
+
   function pluginData(m) {
+    if (pending(m)) return pendingData(m);
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
     if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>${apiCard(m)}`;
     const logged = (m.steps || []).length || m.setup;
@@ -1077,6 +1126,7 @@
   }
 
   function assistantData(a) {
+    if (pending(a)) return pendingData(a);
     const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
@@ -1399,7 +1449,7 @@
         <dt>Processor</dt><dd>${esc(f.cpus)} cpus${f.processor ? ` · ${esc(f.processor)}` : ''}</dd>
         <dt>Memory</dt><dd>${esc(f.memoryMb)} MB</dd>
         <dt>Python</dt><dd>${esc(f.python)}</dd>
-        <dt>Docker here</dt><dd>${d.available ? `engine ${esc(d.engine)} (${esc(d.command)})` : esc(d.problem || 'not installed')}${d.wsl ? ` · WSL 2 ${d.wsl.present ? 'present' : 'absent'}` : ''}</dd>
+        <dt>Docker here</dt><dd>${d.pending ? 'loading…' : d.available ? `engine ${esc(d.engine)} (${esc(d.command)})` : esc(d.problem || 'not installed')}${d.wsl ? ` · WSL 2 ${d.wsl.present ? 'present' : 'absent'}` : ''}</dd>
       </dl>
       <h4>Active plugins</h4><div class="small">${(st.active || []).length ? st.active.map(esc).join(', ') : 'none'}</div>
       ${(st.disabled || []).length ? `<h4>Disabled</h4><div class="small">${st.disabled.map(esc).join(', ')}</div>` : ''}
@@ -1407,6 +1457,7 @@
   }
 
   function pluginSide(m) {
+    if (pending(m)) return pendingSide(m, 'chip');
     const head = `<h3>${icon(m.icon || 'chip', 20)} ${esc(m.title)} ${chipOf(m)}</h3><div class="muted small">${esc(m.name)}${m.version ? ` · ${esc(m.version)}` : ''}</div>`;
     if (userOff(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>`;
     const running = m.setup && m.setup.running;
@@ -1423,6 +1474,7 @@
   }
 
   function assistantSide(a) {
+    if (pending(a)) return pendingSide(a, 'analysis');
     return `<h3>${icon(a.icon || 'analysis', 20)} ${esc(a.title)} ${chipOf(a)}</h3><div class="muted small">${esc(a.name)}${a.version ? ` · ${esc(a.version)}` : ''}</div>
       <p class="summary">${esc(userOff(a) ? 'Disabled: enable it with the switch on its page.' : invalid(a) ? `Disabled while not valid: ${whyOf(a)}` : 'active')}</p>
       <dl class="facts"><dt>vendor</dt><dd>${esc(a.vendor || '')}</dd><dt>model</dt><dd>${esc(a.model || '')}</dd></dl>`;
@@ -1446,22 +1498,121 @@
     else { clearTimeout(trafficTimer); trafficGen += 1; }
   }
 
-  async function render() {
-    const g = ++gen;
+  // the platform not answering, said: a terminal on the page stays where it is, typed into still (0.17.0: a view never
+  // replaces the field typed in): the trouble said at the head of its plugin's page, the next answer drawing it all
+  // again; else the pane says it
+  function sayTrouble(e) {
+    const line = st && data.querySelector('.term-panel.shell') ? $(`err-${selected()}`) : null;
+    if (line) line.textContent = e.message; else data.innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  }
+  const followJobs = () => Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running && !(jobs[m.name] && jobs[m.name].running)) follow(m.name, m.setup.action, m.setup.steps); });
+
+  // a platform started before 0.21.0 (the page's files are read from its checkout at each request, its routes are those it
+  // started with): the whole status at once, as the page asked it until then
+  async function renderWhole(g) {
     let fresh;
     try { fresh = await Promise.all([api('GET', 'api/status'), api('GET', 'api/tray')]); }
-    catch (e) {
-      if (g !== gen) return;
-      // a terminal on the page stays where it is, typed into still (0.17.0: a view never replaces the field typed in): the
-      // trouble said at the head of its plugin's page, the next answer drawing it all again; else the pane says it, as before
-      const line = st && data.querySelector('.term-panel.shell') ? $(`err-${selected()}`) : null;
-      if (line) line.textContent = e.message; else data.innerHTML = `<p class="error">${esc(e.message)}</p>`;
-      return;
-    }
+    catch (e) { if (g === gen) sayTrouble(e); return; }
     if (g !== gen) return;  // something changed meanwhile: a newer answer is on its way
     [st, tray] = fresh;
     draw();
-    Object.values(st.machines).forEach((m) => { if (m.setup && m.setup.running && !(jobs[m.name] && jobs[m.name].running)) follow(m.name, m.setup.action, m.setup.steps); });
+    followJobs();
+  }
+
+  // -- everything asked (0.21.0): the overview at once, then every plugin on its own, each drawn as it answers ----------
+  // what the page holds, made of the overview: a plugin it holds already stays as it is until its new answer comes (nothing
+  // flickers when everything is asked again); one it does not is known by its name alone, pending
+  function held(ov) {
+    const was = st || { machines: {}, assistants: [] };
+    const blank = (p) => ({ name: p.name, title: p.title, about: p.about, version: p.version, icon: p.icon, enabled: p.enabled, hidden: p.hidden,
+      state: p.enabled ? 'loading' : 'disabled', valid: null, why: '', pending: true, status: {}, hooks: [], asks: [], steps: [], settings: [], setup: null });
+    const machines = {};
+    ov.plugins.filter((p) => p.kind === 'machine').forEach((p) => { machines[p.name] = was.machines[p.name] || blank(p); });
+    const assistants = ov.plugins.filter((p) => p.kind === 'assistant').map((p) => (was.assistants || []).find((a) => a.name === p.name) || blank(p));
+    return { app: ov.app, machine: ov.machine, machines, assistants, disabled: ov.disabled || [], active: (was.active || []).filter((n) => machines[n]),
+      docker: was.docker || { pending: true }, instances: was.instances || [], instancesPending: !was.instances || !!was.instancesPending };
+  }
+  const unanswered = () => !!st && (Object.values(st.machines).some(pending) || (st.assistants || []).some(pending) || !!st.instancesPending || !!(st.docker && st.docker.pending));
+  const unanswering = (p, e) => ({ ...p, pending: false, state: 'invalid', valid: false, why: e.message, status: { present: false, problem: e.message } });
+
+  // some answers in (`names`): counted; while the page is being filled for the first time, drawn at once: the list and the
+  // tray (those now active popping in), and the middle and the right when they show this machine or one of them
+  function arrived(job, names, count = names.length) {
+    job.done += count;
+    if (!job.first) { progress(); return; }
+    names.forEach((n) => { const p = pluginOf(n); if (p && !off(p)) poppedAt[n] = performance.now(); });
+    drawRail();
+    drawList();
+    const sel = selected();
+    if (sel === 'machine' || names.includes(sel)) { drawData(); drawSide(); schedule(); }
+  }
+
+  async function render() {
+    const g = ++gen, mine = ++asking;
+    let job = null;
+    // changed under it (a switch thrown meanwhile): what it was told is dropped, as ever; asked again only while the page
+    // still waits for a plugin's first answer and no newer ask is on its way
+    const dropped = () => {
+      if (mine !== asking) return undefined;
+      if (unanswered()) return render();
+      if (loading === job) { loading = null; progress(); }
+      return undefined;
+    };
+    let ov;
+    try { ov = await api('GET', 'api/overview'); }
+    catch (e) {
+      if (e.status === 404) return renderWhole(g);
+      if (g === gen) sayTrouble(e);
+      return undefined;
+    }
+    if (g !== gen) return dropped();
+    st = held(ov);
+    if (!tray) tray = { app: ov.app.app, icon: ov.app.icon, title: ov.app.title, items: [] };  // the server's once every answer is in
+    const names = Object.keys(st.machines);
+    job = { first: unanswered(), total: names.length + st.assistants.length, done: 0 };
+    loading = job;
+    if (job.first) draw(); else progress();
+    const asks = names.map(async (name) => {
+      let m;
+      try { m = await api('GET', `api/machines/${enc(name)}`); }
+      catch (e) {  // not answered: said in its place when the page holds nothing of it; what it holds stays otherwise
+        if (g !== gen) return;
+        if (!pending(st.machines[name])) { arrived(job, [], 1); return; }
+        m = unanswering(st.machines[name], e);
+      }
+      if (g !== gen) return;
+      st.machines[name] = m;
+      st.active = Object.values(st.machines).filter((x) => !pending(x) && x.state === 'active').map((x) => x.name);
+      trayFollows(name, !off(m));
+      arrived(job, [name]);
+    });
+    asks.push((async () => {
+      const count = st.assistants.length;
+      let got;
+      try { got = (await api('GET', 'api/assistants')).assistants || []; }
+      catch (e) { if (g !== gen) return; got = st.assistants.map((a) => (pending(a) ? unanswering(a, e) : a)); }
+      if (g !== gen) return;
+      st.assistants = got;
+      got.forEach((a) => trayFollows(a.name, !off(a)));
+      arrived(job, got.map((a) => a.name), count);
+    })());
+    const rest = async (path, keep) => {  // Docker here and the Docker instances: this machine's page
+      let got = null;
+      try { got = await api('GET', path); } catch (e) { got = null; }
+      if (g !== gen) return;
+      keep(got);
+      if (job.first && selected() === 'machine') { drawData(); drawSide(); }
+    };
+    asks.push(rest('api/docker', (d) => { if (d) st.docker = d; else if (st.docker.pending) st.docker = { available: false, problem: 'the platform did not say' }; }));
+    asks.push(rest('api/instances', (d) => { if (d) st.instances = d.instances || []; st.instancesPending = false; }));
+    await Promise.all(asks);
+    if (g !== gen) return dropped();
+    try { const t = await api('GET', 'api/tray'); if (g === gen) tray = t; } catch (e) { /* the tray as the answers made it */ }
+    if (g !== gen) return dropped();
+    if (loading === job) loading = null;
+    draw();
+    followJobs();
+    return undefined;
   }
 
   // -- the shown plugin asked again while it is on the page, drawn in place: its figures at their interval (the day's
