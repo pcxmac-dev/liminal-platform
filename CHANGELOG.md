@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.22.0 (2026-11-11)
+
+A plugin's page has tabs, and its APIs a tab of their own (the user: "now i need tabs for the main page of each plugin,
+each plugin has a tab for the API, and on the APIs organize each API description so that they can expand and contract
+so they take up less space, kind of like the firewall"). Beside a plugin's title: **Main**, what its page showed until
+now but the APIs, and **API** ("APIs" when it attaches to several), what it attaches to. The switches stay at the
+right. The tab is in the address after the plugin's name (`#wsl-gentoo/api`), so a reload or a link keeps it; another
+plugin picked opens on its Main; the machine plugins and the AI assistants have them alike, whatever their state. On
+the API tab each API is one line with a round (+), as the firewall's groups have: its maker, name, form and version
+and how much of it is used here; opened, its description, and its parts and its calls as two more such lines (the
+library's folded cards, liminal-libs 1.50.0; with an older library the cards are drawn whole). Closed at first, but a
+plugin's only API; what was opened stays open across the page's refreshes and in this browser. While the API tab is
+shown the plugin is still asked at its interval, and only its cards are drawn again when what it learned changed, the
+line or link that had the focus keeping it. The tabs are a list in the page's script (`TABS`), for the next one.
+
 ## 0.21.0 (2026-11-11)
 
 The page shows at once and the plugins pop in as each answers (the user: "when starting platform there is a long pause

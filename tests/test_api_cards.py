@@ -58,7 +58,9 @@ def test_a_plugins_api_reaches_its_page_with_what_it_learned():
         assert page.index(b'src="charts.js"') < page.index(b'src="apis.js"') < page.index(b'src="platform.js"')
         js = _call(port, "GET", "/platform.js")[1]
         assert b"function apiCard(p)" in js and b"window.LiminalApis.html(p.apis, p.apiFacts" in js
-        assert b"setupLog(m) : '') + apiCard(m);" in js and b"${apiCard(a)}" in js  # after what it already shows
+        # 0.22.0: on a tab of their own (tests/test_tabs.py), no longer after what the page already shows
+        assert b"if (tabOf(m) === 'api') return head + apiCard(m);" in js and b"if (tabOf(a) === 'api') return head + apiCard(a);" in js
+        assert b"setupLog(m) : '') + apiCard(m);" not in js and b"${apiCard(a)}" not in js
         assert b"if (html !== drawnApis[m.name])" in js  # a refresh draws it again only when it changed
         lib = _call(port, "GET", "/apis.js")[1]
         assert b"window.LiminalApis" in lib  # the library's, served beside the platform's own files

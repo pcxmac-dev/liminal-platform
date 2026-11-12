@@ -323,3 +323,12 @@ html.keyboard .term-panel.shell:focus-within .term { height: max(96px, min(340px
   .app-list .item.pop, #rail button.pop, #rail button.master.loading svg { animation: none; }
   .loading-line .bar > span { transition: none; }
 }
+
+/* 0.22.0: a plugin's tabs, beside its title (the user: "i need tabs for the main page of each plugin, each plugin has a
+   tab for the API"): Main and API, the one shown underlined in the accent; the switches stay at the right. */
+.data-head .tabs { display: flex; align-items: flex-end; gap: 2px; margin-right: auto; }
+.tabs .tab { padding: 4px 12px; border: 0; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; background: none;
+  color: var(--muted); font-size: 13px; }
+.tabs .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+@media (hover: hover) { .tabs .tab:hover { color: var(--text); background: var(--hover); } }
+.plugin-apis .api-cards { margin-top: 10px; }

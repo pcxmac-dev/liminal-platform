@@ -35,7 +35,7 @@
     // a server from before 0.20.0 sends no `apis` (the page's files are read from the checkout at each request): no card
     if (!window.LiminalApis || !Array.isArray(p.apis)) return '';
     const older = `Written for plugin API ${p.pluginApi || 'before 2.2'}: it does not say yet what it attaches to.`;
-    return window.LiminalApis.html(p.apis, p.apiFacts, { owner: p.name, empty: (p.apis || []).length ? '' : older });
+    return window.LiminalApis.html(p.apis, p.apiFacts, { owner: p.name, empty: (p.apis || []).length ? '' : older, fold: true });
   }
   function apiCard(p) {
     drawnApis[p.name] = apiInner(p);
@@ -79,7 +79,21 @@
   const PREPARING = ['wsl', 'update', 'version'];  // setup steps that prepare this PC: never locked by its check
   const enc = encodeURIComponent;
   const hasHook = (m, h) => (m.hooks || []).includes(h);
-  const selected = () => decodeURIComponent(location.hash.slice(1)) || 'machine';
+  // 0.22.0 (the user, 2026-11-11: "now i need tabs for the main page of each plugin, each plugin has a tab for the API,
+  // and on the APIs organize each API description so that they can expand and contract so they take up less space, kind
+  // of like the firewall"): a plugin's page has tabs beside its title: Main (what it showed until now, but the APIs) and
+  // API (what it attaches to, each API a line with a (+) that opens to its description: the library's folded cards,
+  // liminal-libs 1.50.0). The tab is in the address after the plugin's name (#wsl-gentoo/api), so a reload or a link
+  // keeps it; another plugin picked opens on its Main. TABS is the list a later tab is added to.
+  const hashParts = () => decodeURIComponent(location.hash.slice(1)).split('/');
+  const selected = () => hashParts()[0] || 'machine';
+  const TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];
+  const hasTabs = (p) => !!p && !pending(p) && !!window.LiminalApis && Array.isArray(p.apis);  // a server from before 0.20.0 sends no apis: no tabs
+  const tabOf = (p) => { const t = hashParts()[1]; return hasTabs(p) && TABS.some((x) => x.id === t) ? t : 'main'; };
+  const tabsRow = (p) => (!hasTabs(p) ? '' : `<nav class="tabs" role="tablist" aria-label="${esc(p.title)}: its pages">`
+    + TABS.map((t) => `<button type="button" role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`).join('')
+    + '</nav>');
+  let tabPicked = false;  // a tab was just picked: the one now shown takes the focus once the page is drawn
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
   // a finger, a pen and the on-screen keyboard (0.17.0, liminal-libs 1.42.0's touch.js, loaded before this file); without
   // it, the page as a mouse and a keyboard have it
@@ -1104,33 +1118,35 @@
 
   function pluginData(m) {
     if (pending(m)) return pendingData(m);
-    const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
-    if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>${apiCard(m)}`;
+    const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${tabsRow(m)}${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
+    if (tabOf(m) === 'api') return head + apiCard(m);  // 0.22.0: its API tab, whatever its state (its card is drawn disabled too)
+    if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
     if (notHere(m)) {
       // 0.19.1 (the user: "the administration plugins don't seem to work right especially linux which doesn't say anything
       // about startup"): what it would do where it applies, in its own tables (the Linux admin plugin's sections, the unit it
       // installs at boot), read only: a plugin not valid here is asked nothing, so no button is drawn
       return `${head}<p class="muted">Not for this machine: ${esc(whyOf(m))}. It stays disabled here; no setup is offered, since none can make it valid on this machine.</p>`
-        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '') + apiCard(m);
+        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '');
     }
     if (invalid(m)) {
       return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings, above, can make it valid. '
         : hasHook(m, 'check') ? 'Its install, below, can make it valid. '
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
-        + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '') + apiCard(m);
+        + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
     drawnPaths[m.name] = pathsHtml(m);
     return head + settingsButton(m) + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`
-      + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '') + apiCard(m);
+      + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '');
   }
 
   function assistantData(a) {
     if (pending(a)) return pendingData(a);
-    const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
+    const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${tabsRow(a)}${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
+    if (tabOf(a) === 'api') return head + apiCard(a);
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
-    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>${apiCard(a)}`;
+    return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>`;
   }
 
   // -- Connections (0.10.0; the user, 2026-11-08: "the root plugin (platform) will need to visually illustrate how
@@ -1408,6 +1424,11 @@
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
     Object.values(shells).forEach((sh) => { if (sh.panel && !sh.panel.isConnected) sh.term.attach(null); });  // not shown: not drawn
     data.scrollTop = scrolled;
+    if (tabPicked) {  // 0.22.0: the tab now shown keeps the focus a click or a key gave its button
+      tabPicked = false;
+      const on = data.querySelector('button.tab[aria-selected="true"]');
+      if (on) on.focus({ preventScroll: true });
+    }
   }
   function drawAround(panel, html, name) {  // the pane's other parts replaced, the panel never taken out (false: no slot for it)
     const t = document.createElement('template');
@@ -1667,11 +1688,12 @@
   }
   function redrawShown(m) {
     const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`), pz = $(`paths-${m.name}`);
+    const onApi = tabOf(m) === 'api' && !!$(`api-${m.name}`);  // 0.22.0: its API tab is shown: its cards alone, below
     if (pz && !off(m)) {  // its paths drawn again only when they changed: the moving traffic goes on
       const html = pathsHtml(m);
       if (html !== drawnPaths[m.name]) { pz.innerHTML = html; drawnPaths[m.name] = html; }
     }
-    keepFocus(() => {
+    if (!onApi) keepFocus(() => {
       if (!off(m) && !m.status.charts && t) {
         t.innerHTML = tables(m) + statTables(m);  // its tables alone: a terminal or a job's panel beside them stays as it is
       } else if (off(m) || !box || !Charts.update(box, chartsOf(m), { id: m.name })) { drawData(); }  // other charts: drawn anew
@@ -1683,7 +1705,15 @@
     const ac = $(`api-${m.name}`);
     if (ac) {  // what it learned of its APIs, drawn again only when it changed
       const html = apiInner(m);
-      if (html !== drawnApis[m.name]) { ac.innerHTML = html; drawnApis[m.name] = html; }
+      if (html !== drawnApis[m.name]) {
+        // 0.22.0: a line, a link or a box that had the focus in the cards has it again (what a plugin learned of its API
+        // moves with every answer while its API tab is shown)
+        const parts = (el) => [...el.querySelectorAll('summary, a[href], button')];
+        const at = ac.contains(document.activeElement) ? parts(ac).indexOf(document.activeElement) : -1;
+        ac.innerHTML = html;
+        drawnApis[m.name] = html;
+        if (at >= 0 && parts(ac)[at]) parts(ac)[at].focus({ preventScroll: true });
+      }
     }
     drawSide();
     const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
@@ -1994,6 +2024,14 @@
     if (mg) { if (!mg.disabled) moveChosen(mg); return; }
     const mc = e.target.closest('button.move-clear[data-table]');
     if (mc) { chosenOf(mc.dataset.machine, mc.dataset.table).clear(); redrawTables(mc.dataset.machine, pickSel('select.move-to', mc)); return; }
+    const tb = e.target.closest('button.tab[data-tab]');  // 0.22.0: a plugin's tab: Main is the plugin's own address
+    if (tb) {
+      if (tb.getAttribute('aria-selected') === 'true') return;
+      tabPicked = true;
+      data.scrollTop = 0;
+      location.hash = tb.dataset.tab === 'main' ? tb.dataset.machine : `${tb.dataset.machine}/${tb.dataset.tab}`;
+      return;
+    }
     const pick = e.target.closest('[data-select]');
     if (pick) { location.hash = pick.dataset.select === 'machine' ? '' : pick.dataset.select; return; }
     const sp = e.target.closest('button[data-span]');
