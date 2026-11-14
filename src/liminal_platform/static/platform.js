@@ -3,7 +3,7 @@
 // described as a list of details w/ the specifics in the right hand column, just like the charts had a right hand
 // column"; "active plugins, will be part of the tray on the very right side"; "use the black boundary (around the
 // icon) to serve as the tray border, it can stretch vertically to include more icons or plugins"):
-//   the list (this machine, its machine plugins, the AI assistants) | the selected one's data | its specifics | the tray
+//   the list (this machine, its machine plugins, the cloud plugins, the AI assistants) | the selected one's data | its specifics | the tray
 // The tray is the platform's chip, a divider, then an icon per active plugin, all in the one dark box. A right click
 // on a plugin's icon offers to disable it ("allow me to right click on the icons to disable them on the right icon
 // menu"); the switch at the head of a plugin's page enables or disables it ("enable disable switch (left to right) on
@@ -208,13 +208,17 @@
     tray = { ...tray, items: [...own, ...plugins] };
   }
 
-  // -- the list: this machine, its machine plugins, the AI assistants -----------------------------------
+  // -- the list: this machine, its machine plugins, the cloud plugins, the AI assistants -----------------
+  // A machine plugin's section (0.25.0; the user, 2026-11-14: "classify the cloud plugins under the 'cloud plugins' section
+  // which should be on the far left"): "cloud" for a cloud provider's account. A server older than 0.25.0 sends none, so
+  // every plugin is a machine plugin there, as before.
+  const isCloud = (m) => m.section === 'cloud';
   function drawList() {
     const sel = selected();
     const item = (id, ic, title, sub, cls = '', more = '') => `<button type="button" class="item${sel === id ? ' active' : ''}${cls}"${more} data-select="${esc(id)}">${icon(ic, 20)}
       <span class="what"><span>${esc(title)}</span><span class="sub">${esc(sub)}</span></span></button>`;
     const f = st.machine;
-    const machines = Object.values(st.machines);
+    const all = Object.values(st.machines), machines = all.filter((m) => !isCloud(m)), clouds = all.filter(isCloud);
     // one not answered yet (0.21.0) keeps its place, dimmed; the one whose answer just came pops in
     const cls = (p) => (pending(p) ? ' pending' : off(p) ? ' off' : '') + (popOf(p.name) || { cls: '' }).cls;
     const more = (p) => (popOf(p.name) || { style: '' }).style;
@@ -223,6 +227,7 @@
       + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
       + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m))).join('')
         : '<div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
+      + (clouds.length ? `<h4>Cloud plugins</h4>` + clouds.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m))).join('') : '')
       + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, a.icon || 'analysis', a.title, pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a))).join('') : '');
   }
 
@@ -235,11 +240,14 @@
   }
 
   function machineData() {
-    const rows = Object.values(st.machines).map((m) => `<tr class="pick" data-select="${esc(m.name)}"><td>${icon(m.icon || 'chip', 18)}</td>
+    const all = Object.values(st.machines);
+    const rows = (list) => list.map((m) => `<tr class="pick" data-select="${esc(m.name)}"><td>${icon(m.icon || 'chip', 18)}</td>
       <td>${esc(m.title)}</td><td class="muted">${esc(m.version || '')}</td><td>${chipOf(m)}</td><td>${esc(stateLine(m))}</td></tr>`).join('');
+    const table = (list) => `<table class="list"><thead><tr><th></th><th>Plugin</th><th>Version</th><th>State</th><th>What it says</th></tr></thead><tbody>${rows(list)}</tbody></table>`;
+    const machines = all.filter((m) => !isCloud(m)), clouds = all.filter(isCloud);
     return `<h2>${esc(st.machine.host)}</h2><div class="muted small">this machine, and the plugins that set it up for the framework</div>
-      <h4>Machine plugins</h4>${rows ? `<table class="list"><thead><tr><th></th><th>Plugin</th><th>Version</th><th>State</th><th>What it says</th></tr></thead><tbody>${rows}</tbody></table>`
-        : '<div class="muted small">None installed.</div>'}
+      <h4>Machine plugins</h4>${machines.length ? table(machines) : '<div class="muted small">None installed.</div>'}
+      ${clouds.length ? `<h4>Cloud plugins</h4><div class="muted small">the cloud accounts the platform reads, each with its own key</div>${table(clouds)}` : ''}
       ${instancesTable()}`;
   }
 
@@ -1887,7 +1895,7 @@
   // flickers when everything is asked again); one it does not is known by its name alone, pending
   function held(ov) {
     const was = st || { machines: {}, assistants: [] };
-    const blank = (p) => ({ name: p.name, title: p.title, about: p.about, version: p.version, icon: p.icon, enabled: p.enabled, hidden: p.hidden,
+    const blank = (p) => ({ name: p.name, title: p.title, about: p.about, version: p.version, icon: p.icon, section: p.section, enabled: p.enabled, hidden: p.hidden,
       state: p.enabled ? 'loading' : 'disabled', valid: null, why: '', pending: true, status: {}, hooks: [], asks: [], steps: [], settings: [], setup: null });
     const machines = {};
     ov.plugins.filter((p) => p.kind === 'machine').forEach((p) => { machines[p.name] = was.machines[p.name] || blank(p); });

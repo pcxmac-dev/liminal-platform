@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.25.0 (2026-11-14)
+
+The cloud plugins have their own section in the list on the left (the user: "classify the cloud plugins under the 'cloud plugins' section which should be on the far left"). The list is now This machine, Machine plugins,
+Cloud plugins, AI assistants. Each machine plugin's overview row and status carry its `section`, from liminal-libs
+1.51.0's `MachinePlugin.SECTION`: "machine" unless the plugin says "cloud". The machine's own page lists the cloud plugins
+in a Cloud plugins table of their own. A server older than 0.25.0 sends no section, and the page then draws every plugin
+under Machine plugins, as before.
+
 ## 0.24.3 (2026-11-11)
 
 A plugin's tabs are as they first were (the user, after three other looks: "lets go back to the original tab layout";

@@ -113,6 +113,18 @@ def _accepting(e: Exception) -> str | None:
     return name if isinstance(name, str) and name.isidentifier() else None
 
 
+SECTIONS = ("machine", "cloud")  # the list's sections for machine plugins, in its order (0.25.0)
+
+
+def section_of(plugin) -> str:
+    """The section of the list a machine plugin is drawn under (0.25.0; the user, 2026-11-14: "classify the cloud plugins
+    under the 'cloud plugins' section which should be on the far left"). The plugin's own word, liminal-libs 1.51.0's
+    `MachinePlugin.SECTION`: "cloud" for a cloud provider's account. Anything else, or none from an older library or
+    plugin, is "machine"."""
+    section = getattr(plugin, "SECTION", "")
+    return section if section in SECTIONS else "machine"
+
+
 class Setup:
     """A machine plugin's job under way, in a thread: its setup, its packages' update, or one of its hooks (`action`:
     the hook's name; 0.19.0, `call`: the hook asked with the job's output as its `log`); what it prints as it comes
@@ -598,8 +610,8 @@ class PlatformApp(App):
 
         def row(name: str, p, kind: str, icon: str) -> dict:
             return {"name": name, "title": p.title, "about": p.about, "version": p.version, "icon": getattr(p, "ICON", "") or icon,
-                    "kind": kind, "enabled": name not in off, "hidden": name in hidden,
-                    "state": "disabled" if name in off else states.get(name)}
+                    "kind": kind, "section": section_of(p) if kind == "machine" else kind, "enabled": name not in off,
+                    "hidden": name in hidden, "state": "disabled" if name in off else states.get(name)}
 
         return {"app": self.describe(), "machine": facts(), "disabled": sorted(off),
                 "plugins": [*(row(n, m, "machine", "chip") for n, m in self.machines().items()),
@@ -642,7 +654,7 @@ class PlatformApp(App):
         with self._lock:
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
-                "icon": getattr(m, "ICON", "") or "chip", "enabled": on, "valid": valid, "why": why, "state": state,
+                "icon": getattr(m, "ICON", "") or "chip", "section": section_of(m), "enabled": on, "valid": valid, "why": why, "state": state,
                 "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
                 "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m), **self.api_card(m, on)}
