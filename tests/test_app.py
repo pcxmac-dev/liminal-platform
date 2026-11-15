@@ -1039,32 +1039,35 @@ def test_the_login_terminal_keeps_a_phones_word_its_end_and_a_mouses_ways(served
 def test_the_platform_inherits_the_login_app_and_opens_on_its_sign_in(monkeypatch):
     """0.18.0 (the user, 2026-11-10: "we need to shift over to platform, but make sure that the platform inherits the login
     app so we can login to platform"; "using secret user"): the platform's page is the sign-in (the login app's page held
-    in it, the secret user its default way in) until the browser is signed in there; its own login (8796, its users
-    apart from the charts app's), under /login/, its lambda at the rail's end opening your account over the main area.
-    A stand-in plays the login app; nothing is started."""
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    in it, the secret user its default way in) until the browser is signed in there; its own login (its users apart from
+    the charts app's), under /login/, its lambda at the rail's end opening your account over the main area. Since
+    liminal-libs 1.52.0 that login is an object the platform holds, at the platform's own port (the user, 2026-11-14:
+    "the platform and integrator inherit the login function, they are separate login instances, class vs object"; "i
+    only want ports for liminal-login ; liminal-platform ; liminal-charts ; liminal-integrator"): no login at 8796, none
+    started. A stand-in plays the login class."""
+    from liminal_libs.apps import App
+    from liminal_libs.apps import app as app_mod
 
-    class Login(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
+    class StandInLogin(App):
+        NAME, ICON = "login", "lambda"
 
-        def do_GET(self):
-            signed = "liminal_login_platform=tok" in (self.headers.get("Cookie") or "")
-            data = ({"signedIn": signed} if self.path.startswith("/api/status") else
-                    {"app": "login", "icon": "lambda", "title": "Login: Liminal Platform", "items": []})
-            body = json.dumps(data).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+        def __init__(self, log=print, superclass=None):
+            super().__init__(log)
+            self.superclass, self.TITLE = superclass, f"Login: {superclass.TITLE}"
 
-    login = ThreadingHTTPServer(("127.0.0.1", 0), Login)
-    threading.Thread(target=login.serve_forever, daemon=True).start()
-    assert PlatformApp.LOGIN_URL_VAR == "LIMINAL_PLATFORM_LOGIN_URL" and PlatformApp.LOGIN_URL == "http://127.0.0.1:8796"
-    monkeypatch.setenv("LIMINAL_PLATFORM_LOGIN_URL", f"http://127.0.0.1:{login.server_address[1]}")
+        def session(self, handler):
+            return "a session" if "liminal_login_platform=tok" in (handler.headers.get("Cookie") or "") else None
+
+        def api(self, handler, method, path, query, body):
+            if method == "GET" and path == "/api/status":
+                return 200, {"signedIn": self.session(handler) is not None}
+            return super().api(handler, method, path, query, body)
+
+    monkeypatch.setattr(PlatformApp, "LOGIN_CLASS", StandInLogin)
+    for var in ("LIMINAL_PLATFORM_LOGIN", "LIMINAL_PLATFORM_LOGIN_URL"):
+        monkeypatch.delenv(var, raising=False)
     app = PlatformApp(log=lambda m: None, machines={}, assistants={})
+    assert app.inherits_login() and not hasattr(app_mod, "start_app")
     port = _port(app.start(0))
     try:
         conn = HTTPConnection("127.0.0.1", port, timeout=10)
@@ -1082,10 +1085,9 @@ def test_the_platform_inherits_the_login_app_and_opens_on_its_sign_in(monkeypatc
         assert json.loads(conn.getresponse().read()) == {"signedIn": True}
         conn.request("GET", "/login/api/status")
         assert json.loads(conn.getresponse().read()) == {"signedIn": False}
+        assert app.login_object().superclass is app  # the one thing it points to
     finally:
         app.stop()
-        login.shutdown()
-        login.server_close()
     js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
     assert "api('GET', 'api/trays')" in js and 'data-bound="${esc(t.app)}"' in js and "function openLogin(on)" in js
     assert "src=\"login/?embedded=1" in js and "if (!e.data.signedIn) location.reload();" in js
