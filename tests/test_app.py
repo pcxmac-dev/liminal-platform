@@ -1196,6 +1196,76 @@ def test_a_hook_asked_as_a_job_shows_its_lines_as_they_come_and_its_end():
         app.stop()
 
 
+def test_a_job_refused_before_its_first_line_offers_what_accepts_it_as_an_asks_refusal_does():
+    """liminal-libs 1.55.0: the firewalls' GeoIP install (a 60 MB download) runs as a job, behind a licence the user
+    accepts in so many words. A job's refusal ended in its panel, so the page could not offer that as its second
+    confirmation: a hook asked as a job that refuses before its first line, naming the argument that accepts it, is now
+    refused as an ask is (400, the plugin's words and that argument), no job left for the page to follow (the last one
+    kept); asked again with it true, it runs as a job, its lines followed. A refusal naming nothing stays the job's own
+    end, as before. Asked of the app directly: nothing is served, no port is opened."""
+    import threading
+
+    from liminal_libs.apps import Refused
+    from liminal_libs.machines import MachinePlugin as Machine
+
+    class Refusal(ValueError):
+        accept = "accept_terms"
+
+    gate = threading.Event()
+
+    class Licensed(Machine):
+        name, title, about, api, order = "licensed", "Licensed", "a stand-in whose download is a job behind a licence", "2.1", 904
+        HOOKS = (*Machine.HOOKS, "fetch")
+        JOB_HOOKS = ("fetch",)
+
+        def present(self):
+            return True
+
+        def status(self):
+            return {"present": True, "valid": True, "summary": "here", "why": ""}
+
+        def fetch(self, accept_terms=False, log=None):
+            if accept_terms is not True:
+                raise Refusal("the terms come first: accept them")
+            log("downloading 1.0 MB of 2.0 MB (50%)")
+            gate.wait(5)
+            log("2.0 MB downloaded")
+            return {"said": "installed", "ok": True}
+
+    def job(args):  # as the server answers it: a Refused raised is {"error": its reason} with its status
+        try:
+            return app.api(None, "POST", "/api/machines/licensed/job", {}, {"action": "hook", "hook": "fetch", "args": args})
+        except Refused as e:
+            return e.status, {"error": e.reason}
+
+    def follow():
+        for _ in range(250):
+            got = app.api(None, "GET", "/api/machines/licensed/job", {"since": "0"}, None)[1]
+            if not got["running"]:
+                return got
+            time.sleep(0.02)
+        raise AssertionError("the job did not end")
+
+    app = PlatformApp(log=lambda m: None, machines={"licensed": Licensed()}, assistants={})
+    try:
+        status, refused = job([False])
+        assert status == 400 and refused == {"error": "Refusal: the terms come first: accept them",
+                                             "words": "the terms come first: accept them", "accept": "accept_terms"}
+        assert follow() == {"machine": "licensed", "running": False, "lines": [], "done": None, "text": "", "from": 0,
+                            "offset": 0}  # no job left: the page offers the licence, not a panel
+        status, running = job([True])  # accepted, in so many words: a job
+        assert status == 202 and running["hook"] is True and running["running"] is True
+        assert job([False])[0] == 409  # one at a time, as before
+        gate.set()
+        done = follow()
+        assert done["ok"] is True and done["text"] == "downloading 1.0 MB of 2.0 MB (50%)\n2.0 MB downloaded\n"
+        assert done["answer"] == {"said": "installed", "ok": True}
+        status, refused = job([None])  # refused again: the last job (its end) is what the page still shows
+        assert status == 400 and refused["accept"] == "accept_terms" and follow()["answer"] == {"said": "installed", "ok": True}
+    finally:
+        app.stop()
+
+
 def test_the_page_runs_a_job_form_draws_a_tables_search_box_and_asks_a_details_form_at_once():
     """0.19.0: a form with `job` is posted as a job and the dialog closes onto its panel (titled by its confirmation's words,
     its end said there); a table with `search` gets a search box above it (its form's text field, its choices beside it),

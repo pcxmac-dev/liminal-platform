@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.28.0 (2026-11-16)
+
+A job refused before it begins is offered as a second confirmation, as an ask's refusal is. liminal-libs 1.55.0's GeoIP
+install (the firewalls' World Wide Web tab) runs as a job, a 60 MB download with its progress in the plugin's panel, and
+refuses until its licence is accepted, naming the argument that accepts it (`accept_licence`).
+
+- `start_hook_job` waits up to `JOB_REFUSAL_S` (1 s) for the job's first line or its end. A refusal before the first
+  line that names an accepting argument comes back as an ask's refusal does: 400, with the plugin's words and `accept`.
+  The page then offers its second confirmation and asks the job again with that argument true; platform.js needed no
+  change, since its accept step resends the same job form. The refused job is forgotten, and the one before it kept.
+- Every other refusal still ends as the job's error, in its panel, as before.
+- A job's end now wakes a panel's read waiting on its lines (`Setup._run` ends with `output.finish()`).
+- A job hook that prints nothing in its first second (Docker's pull, while it checks the engine) gets its 202 up to
+  1 s later.
+
+Tests: a job refused before its first line answers 400 with the plugin's words and what accepts it, leaving no job to
+follow; asked again, accepted, it runs as a job, one at a time, its lines followed to its answer; refused once more,
+the last job is what the page still shows.
+
 ## 0.27.0 (2026-11-15)
 
 A plugin's own tabs. The user, 2026-11-14: "so for the firewall's both are going to get a 'world wide web view'"; "there

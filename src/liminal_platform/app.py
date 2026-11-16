@@ -37,6 +37,9 @@ MAX_INPUT = 8192  # characters of keys a page sends at once
 MAX_SETTING = 4096  # characters of one setting entered on a plugin's page
 MAX_WAIT = 5.0  # seconds a page's read may be held until there is output (the echo at once, one read at a time)
 KEPT_SHOWN = 4000  # characters of a terminal open already a page is shown when it comes back to it
+# a hook asked as a job that refuses before its first line, naming the argument that accepts the refusal (a licence to
+# accept: liminal-libs 1.55.0's GeoIP install), is waited for this long at most, and refused as an ask's refusal is
+JOB_REFUSAL_S = 1.0
 
 
 def _wait(query: dict) -> float:
@@ -204,6 +207,7 @@ class Setup:
         self.steps = tuple(steps) if steps else None
         self.call = call  # (log) -> the hook's answer, for a hook asked as a job
         self.answer = None  # that answer, once it is in
+        self.refused: HookRefused | None = None  # its refusal before its first line, naming what accepts it (an ask's)
         self.output = Output()
         self.done: list[dict] | None = None
         self.error: str | None = None
@@ -226,10 +230,14 @@ class Setup:
         except Exception as e:  # noqa: BLE001 - the page gets the words
             self.error = f"{type(e).__name__}: {e}"
             self.done = []
+            accept = _accepting(e) if self.call is not None and isinstance(e, (TypeError, ValueError, LookupError)) else None
+            if accept and not self.output.end:  # before its first line: the page offers it as a second confirmation
+                self.refused = HookRefused(HTTPStatus.BAD_REQUEST, self.error, str(e), accept)
         if self.traffic is not None:
             ok = self.error is None and all(d.get("ok") is not False for d in self.done or [] if isinstance(d, dict))
             self.traffic.record(self.by, self.machine.name, "change", f"{self.action} ended" + ("" if ok else ": it failed"),
                                 (time.perf_counter() - began) * 1000, ok)
+        self.output.finish()  # its end told to whoever waits on its lines (start_hook_job, the panel's next read)
 
     @property
     def running(self) -> bool:
@@ -832,7 +840,12 @@ class PlatformApp(App):
     def start_hook_job(self, name: str, hook: str, args: list) -> Setup:
         """One of a plugin's hooks asked as a job (0.19.0; the Docker plugin's pull: a large image takes minutes): only one
         the page may ask and the plugin names in its JOB_HOOKS, run in a thread with the job's output as its `log`, each
-        line followed on the page as it comes; its answer (or its refusal, in its own words) at the end."""
+        line followed on the page as it comes; its answer (or its refusal, in its own words) at the end.
+
+        A refusal before the job's first line that names the argument accepting it (liminal-libs 1.55.0's GeoIP install:
+        its licence) is a HookRefused, as an ask's is, so the page offers its second confirmation and asks the job again
+        with that argument true; that job is forgotten (the one before it kept). It is waited for JOB_REFUSAL_S at most:
+        a hook that prints its first line or ends sooner is not waited for longer."""
         m = self.machine(name)
         self._refuse_disabled(name)
         if hook not in self.asks(m) or hook not in tuple(getattr(m, "JOB_HOOKS", ()) or ()):
@@ -850,6 +863,16 @@ class PlatformApp(App):
         # its name and how many arguments, never their values (0.20.1, as an ask's)
         self.log(f"platform: {name} asked {hook} as a job" + (f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""))
         self.traffic.record(self.NAME, name, "change", f"{hook} started")
+        job.output.wait(0, JOB_REFUSAL_S)  # its first line, or its end
+        if job.refused is not None:
+            job.thread.join(JOB_REFUSAL_S)  # it has ended: a second ask, accepted, does not find it busy
+            with self._lock:
+                if self._setups.get(name) is job:
+                    if current is None:
+                        del self._setups[name]
+                    else:
+                        self._setups[name] = current
+            raise job.refused
         return job
 
     # -- login terminals (the user: "the plugin also allows for a user to login through a terminal in to the environment")
@@ -961,7 +984,10 @@ class PlatformApp(App):
                     hook, args = body.get("hook"), body.get("args") or []
                     if not isinstance(hook, str):
                         raise Refused(HTTPStatus.BAD_REQUEST, "hook is a hook's name")
-                    return 202, self.start_hook_job(name, hook, args).describe(since=0)
+                    try:
+                        return 202, self.start_hook_job(name, hook, args).describe(since=0)
+                    except HookRefused as e:  # refused before it began, naming what accepts it: the plugin's words with it
+                        return e.status, e.answer()
                 if what not in ("install", "update"):
                     raise Refused(HTTPStatus.BAD_REQUEST, "action is install, update or hook")
                 job = self.start_setup(name, None, "update" if what == "update" else "setup")
