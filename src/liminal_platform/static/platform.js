@@ -1191,10 +1191,13 @@
         + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '');
     }
     if (invalid(m)) {
+      // 0.29.0 (the user: "still need linux firewall"): its own tables too, read only, as one not for this machine has
+      // them: what it needs before it is valid (the Linux firewall's root for its read and a firewall tool; inside WSL,
+      // what WSL changes), said where it is read
       return `${head}${settingsButton(m)}<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. ${(m.settings || []).length ? 'Its settings, above, can make it valid. '
         : hasHook(m, 'check') ? 'Its install, below, can make it valid. '
         : (m.steps || []).length ? 'Its setup, on the right, can make it valid. ' : ''}It is enabled again by itself once it is valid.</p>`
-        + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
+        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + installHtml(m) + (logged || jobs[m.name] ? setupLog(m) : '');
     }
     drawnPaths[m.name] = pathsHtml(m);
     return head + settingsButton(m) + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`

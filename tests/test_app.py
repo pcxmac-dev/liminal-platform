@@ -1305,3 +1305,23 @@ def test_a_plugin_not_for_this_machine_shows_what_it_would_do_in_its_tables():
     assert "`<div id=\"tables-${esc(m.name)}\">${statTables(m)}</div>`" in branch and "no setup is offered" in branch
     # no button for it: the forms and asks the page draws are those of its asks, and a plugin not valid here has none
     assert "const can = new Set(m.asks || []), out = {};" in js
+
+
+def test_a_plugin_not_valid_yet_shows_what_it_needs_in_its_tables():
+    """0.29.0 (the user: "still need linux firewall"; inside WSL's Ubuntu the Linux firewall could not be read, sudo asking
+    for a password and no firewall tool installed, and its page said only that it could not be read): a plugin not valid
+    yet has its own tables drawn too, under the reason, read only as one not for this machine has them (the server sends
+    it no asks, so the page draws neither an ask's button nor a form's): the Linux firewall's What the firewall needs here,
+    and inside WSL its Under WSL."""
+    import inspect
+
+    import liminal_platform.app as app_module
+
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    branch = js[js.index("    if (invalid(m)) {\n      // 0.29.0"):]
+    branch = branch[:branch.index("\n    }\n")]
+    assert "Disabled while it is not valid: ${esc(whyOf(m))}." in branch
+    assert "`<div id=\"tables-${esc(m.name)}\">${statTables(m)}</div>` + installHtml(m)" in branch
+    assert "a && can.has(a.hook)" in js[js.index("function askButton(m, a, can) {"):]  # an ask's button: only what it may be asked
+    assert "can.has(f.hook)" in js[js.index("function formsOf(m) {"):js.index("function formButton(m, b, forms) {")]
+    assert '"asks": self.asks(m) if state == "active" else []' in inspect.getsource(app_module)  # none while not active

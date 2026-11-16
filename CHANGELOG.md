@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.29.0 (2026-11-16)
+
+A plugin not valid yet shows what it needs. The user: "still need linux firewall". Inside WSL's Ubuntu the Linux firewall
+could not be read (sudo asks for a password there, and no firewall tool is installed), and its page said only that.
+
+- A plugin that is not valid yet now has its own tables drawn under the reason, as one not for this machine has them.
+- They are read only: the server sends such a plugin no asks, so the page draws neither an ask's button nor a form's.
+- The Linux firewall 0.8.1 puts "What the firewall needs here" there, and inside WSL its "Under WSL" table.
+
+Tests: the branch, and that what it draws is read only.
+
 ## 0.28.0 (2026-11-16)
 
 A job refused before it begins is offered as a second confirmation, as an ask's refusal is. liminal-libs 1.55.0's GeoIP
