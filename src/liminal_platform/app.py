@@ -113,14 +113,17 @@ def _accepting(e: Exception) -> str | None:
     return name if isinstance(name, str) and name.isidentifier() else None
 
 
-SECTIONS = ("machine", "cloud")  # the list's sections for machine plugins, in its order (0.25.0)
+SECTIONS = ("machine", "virtualization", "os", "cloud")  # the list's sections for machine plugins, in its order (0.25.0, 0.26.0)
 
 
 def section_of(plugin) -> str:
     """The section of the list a machine plugin is drawn under (0.25.0; the user, 2026-11-14: "classify the cloud plugins
-    under the 'cloud plugins' section which should be on the far left"). The plugin's own word, liminal-libs 1.51.0's
-    `MachinePlugin.SECTION`: "cloud" for a cloud provider's account. Anything else, or none from an older library or
-    plugin, is "machine"."""
+    under the 'cloud plugins' section which should be on the far left"; 0.26.0, 2026-11-15: "platform needs a
+    virtualization plugins section"; "just like cloud plugins"; "then OS plugins"). The plugin's own word, liminal-libs
+    1.51.0's `MachinePlugin.SECTION`: "virtualization" for a hypervisor's or a container engine's (Hyper-V, libvirt, LXD,
+    Docker, Kubernetes, Windows containers), "os" for an operating system's (WSL's distributions, the Windows and Linux
+    administration and firewalls), "cloud" for a cloud provider's account. Anything else, or none from an older library
+    or plugin, is "machine"."""
     section = getattr(plugin, "SECTION", "")
     return section if section in SECTIONS else "machine"
 

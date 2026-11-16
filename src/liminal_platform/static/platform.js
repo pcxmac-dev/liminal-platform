@@ -3,7 +3,7 @@
 // described as a list of details w/ the specifics in the right hand column, just like the charts had a right hand
 // column"; "active plugins, will be part of the tray on the very right side"; "use the black boundary (around the
 // icon) to serve as the tray border, it can stretch vertically to include more icons or plugins"):
-//   the list (this machine, its machine plugins, the cloud plugins, the AI assistants) | the selected one's data | its specifics | the tray
+//   the list (this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI assistants) | the selected one's data | its specifics | the tray
 // The tray is the platform's chip, a divider, then an icon per active plugin, all in the one dark box. A right click
 // on a plugin's icon offers to disable it ("allow me to right click on the icons to disable them on the right icon
 // menu"); the switch at the head of a plugin's page enables or disables it ("enable disable switch (left to right) on
@@ -208,26 +208,31 @@
     tray = { ...tray, items: [...own, ...plugins] };
   }
 
-  // -- the list: this machine, its machine plugins, the cloud plugins, the AI assistants -----------------
+  // -- the list: this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI assistants ---------
   // A machine plugin's section (0.25.0; the user, 2026-11-14: "classify the cloud plugins under the 'cloud plugins' section
-  // which should be on the far left"): "cloud" for a cloud provider's account. A server older than 0.25.0 sends none, so
-  // every plugin is a machine plugin there, as before.
-  const isCloud = (m) => m.section === 'cloud';
+  // which should be on the far left"; 0.26.0, 2026-11-15: "platform needs a virtualization plugins section"; "just like
+  // cloud plugins"; "then OS plugins"): "virtualization" for a hypervisor's or a container engine's, "os" for an operating
+  // system's (WSL's distributions, the administration and the firewalls), "cloud" for a cloud provider's account. Each
+  // section is drawn when it has plugins, in this order. A server older than 0.25.0 sends no section, and one older than
+  // 0.26.0 says "machine" for the virtualization and OS plugins: they stay under Machine plugins there, as before.
+  const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins']];
+  const sectionOf = (m) => (SECTIONS.some(([s]) => s === m.section) ? m.section : 'machine');
+  const inSection = (all, s) => all.filter((m) => sectionOf(m) === s);
   function drawList() {
     const sel = selected();
     const item = (id, ic, title, sub, cls = '', more = '') => `<button type="button" class="item${sel === id ? ' active' : ''}${cls}"${more} data-select="${esc(id)}">${icon(ic, 20)}
       <span class="what"><span>${esc(title)}</span><span class="sub">${esc(sub)}</span></span></button>`;
     const f = st.machine;
-    const all = Object.values(st.machines), machines = all.filter((m) => !isCloud(m)), clouds = all.filter(isCloud);
+    const all = Object.values(st.machines);
     // one not answered yet (0.21.0) keeps its place, dimmed; the one whose answer just came pops in
     const cls = (p) => (pending(p) ? ' pending' : off(p) ? ' off' : '') + (popOf(p.name) || { cls: '' }).cls;
     const more = (p) => (popOf(p.name) || { style: '' }).style;
+    const drawn = (m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m));
     list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>${loadingLine()}`
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
       + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
-      + `<h4>Machine plugins</h4>` + (machines.length ? machines.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m))).join('')
-        : '<div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
-      + (clouds.length ? `<h4>Cloud plugins</h4>` + clouds.map((m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m))).join('') : '')
+      + (all.length ? SECTIONS.map(([s, title]) => { const mine = inSection(all, s); return mine.length ? `<h4>${title}</h4>` + mine.map(drawn).join('') : ''; }).join('')
+        : '<h4>Machine plugins</h4><div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
       + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, a.icon || 'analysis', a.title, pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a))).join('') : '');
   }
 
@@ -244,10 +249,17 @@
     const rows = (list) => list.map((m) => `<tr class="pick" data-select="${esc(m.name)}"><td>${icon(m.icon || 'chip', 18)}</td>
       <td>${esc(m.title)}</td><td class="muted">${esc(m.version || '')}</td><td>${chipOf(m)}</td><td>${esc(stateLine(m))}</td></tr>`).join('');
     const table = (list) => `<table class="list"><thead><tr><th></th><th>Plugin</th><th>Version</th><th>State</th><th>What it says</th></tr></thead><tbody>${rows(list)}</tbody></table>`;
-    const machines = all.filter((m) => !isCloud(m)), clouds = all.filter(isCloud);
+    const notes = {  // a section's line under its heading (0.26.0); Machine plugins is drawn even with none
+      virtualization: 'the hypervisors and container engines: their virtual machines, containers and clusters',
+      os: "the operating systems: WSL's distributions, and this machine's own administration and firewall",
+      cloud: 'the cloud accounts the platform reads, each with its own key' };
+    const sections = SECTIONS.map(([s, title]) => {
+      const mine = inSection(all, s);
+      if (s === 'machine') return `<h4>${title}</h4>${mine.length ? table(mine) : '<div class="muted small">None installed.</div>'}`;
+      return mine.length ? `<h4>${title}</h4><div class="muted small">${esc(notes[s])}</div>${table(mine)}` : '';
+    }).join('');
     return `<h2>${esc(st.machine.host)}</h2><div class="muted small">this machine, and the plugins that set it up for the framework</div>
-      <h4>Machine plugins</h4>${machines.length ? table(machines) : '<div class="muted small">None installed.</div>'}
-      ${clouds.length ? `<h4>Cloud plugins</h4><div class="muted small">the cloud accounts the platform reads, each with its own key</div>${table(clouds)}` : ''}
+      ${sections}
       ${instancesTable()}`;
   }
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.26.0 (2026-11-15)
+
+Two more sections in the list on the left, built the way Cloud plugins is (the user: "platform needs a virtualization
+plugins section"; "just like cloud plugins"; "then OS plugins"). The list is now This machine, Machine plugins,
+Virtualization plugins, OS plugins, Cloud plugins, AI assistants. Each plugin names its own section with liminal-libs
+1.51.0's `MachinePlugin.SECTION`, and the server now knows two more words for it:
+- "virtualization": a hypervisor's or a container engine's plugin (Hyper-V, libvirt, LXD, Docker, Kubernetes, Windows
+  containers);
+- "os": an operating system's plugin (WSL's distributions, and the Windows and Linux administration and firewalls).
+
+The machine's own page draws a table for each section that has plugins, each with a line saying what it holds. A section
+is drawn only when it has plugins, and with no plugin at all Machine plugins says so. A server older than 0.26.0 says
+"machine" for these plugins, so they stay under Machine plugins there, as before.
+
 ## 0.25.0 (2026-11-14)
 
 The cloud plugins have their own section in the list on the left (the user: "classify the cloud plugins under the 'cloud plugins' section which should be on the far left"). The list is now This machine, Machine plugins,
