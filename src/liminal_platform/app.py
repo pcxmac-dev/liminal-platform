@@ -3,9 +3,12 @@ plugins (their status, a setup run in a thread with its lines kept, a command, d
 instances and the plugins attached."""
 from __future__ import annotations
 
+import itertools
 import json
+import math
 import os
 import platform as py_platform
+import re
 import threading
 import time
 from http import HTTPStatus
@@ -16,9 +19,15 @@ from liminal_libs import layout
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
 from liminal_libs.machines.terminal import Output, Terminal
 
+try:  # a declared tab's id (url-safe) and the fewest seconds between its asks, as liminal-libs apps/tabs.py says them
+    from liminal_libs.apps.tabs import ID as TAB_ID, MIN_EVERY as TAB_MIN_EVERY
+except ImportError:  # a library from before its tabs: no plugin of it declares one, and a tab is what apps/tabs.py makes
+    TAB_ID, TAB_MIN_EVERY = re.compile(r"[A-Za-z0-9_-]{1,40}"), 1.0
+
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
 READS = ("present", "status", "view", "charts", "instances", "wanted", "services", "startups", "processes")  # asks not logged
+# (and a plugin's tab hooks: PlatformApp.reads_of)
 DIR_VAR = "LIMINAL_PLATFORM_DIR"  # the platform's own folder: its log, which plugins are disabled
 LOGIN_VAR = "LIMINAL_PLATFORM_LOGIN"  # memory: a scratch preview's login, nothing it saves leaving the process
 PLUGINS_FILE = "plugins.json"
@@ -126,6 +135,62 @@ def section_of(plugin) -> str:
     or plugin, is "machine"."""
     section = getattr(plugin, "SECTION", "")
     return section if section in SECTIONS else "machine"
+
+
+OWN_TABS = ("main", "api")  # the page's own tabs on every plugin's page: a declared tab never takes their place
+TAB_MAX_EVERY = 3600.0  # the most seconds between a tab's asks
+MAX_TABS = 8  # declared tabs drawn on one plugin's page
+MAX_TAB_TITLE = 60  # characters of a tab's title
+
+
+def _tab_said(t) -> dict | None:
+    """One declared tab as it says itself: a Tab's as_dict(), or a dict in that shape; None for anything else."""
+    try:
+        d = t.as_dict() if callable(getattr(t, "as_dict", None)) else t
+    except Exception:  # noqa: BLE001 - not a tab
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def tabs_of(plugin) -> list[dict]:
+    """The tabs a machine plugin declares after Main and API (the user, 2026-11-14: "so for the firewall's both are going
+    to get a 'world wide web view'"; "there needs to be a way to 'filter' (another tab)"): liminal-libs apps/tabs.py's
+    `Tab`s in its `TABS`, each as its `as_dict()` says it, {id, title, hook, every}; none from an older library or plugin.
+    The page asks a tab's hook every `every` seconds while the tab is shown, and the platform asks it as a read: noted as
+    one in who talks to whom, never logged, never a change. So a tab is left out when its hook is the setup, a command,
+    the settings or the scan (asked through their own routes, or not at all) or one of its jobs; so is one whose id is
+    Main's, API's or an earlier tab's (in any case), and one that cannot say itself. Its every is kept between
+    TAB_MIN_EVERY and TAB_MAX_EVERY seconds, its title to MAX_TAB_TITLE characters (its id when it has none); MAX_TABS at
+    the most."""
+    try:
+        declared = list(itertools.islice(iter(getattr(plugin, "TABS", ()) or ()), 4 * MAX_TABS))
+        jobs = {h for h in (getattr(plugin, "JOB_HOOKS", ()) or ()) if isinstance(h, str)}
+    except Exception:  # noqa: BLE001 - a declaration that cannot be read: no tabs
+        return []
+    out: list[dict] = []
+    seen = set(OWN_TABS)
+    for t in declared:
+        d = _tab_said(t)
+        if d is None:
+            continue
+        tid, title, hook, every = d.get("id"), d.get("title"), d.get("hook"), d.get("every", 5.0)
+        if not isinstance(tid, str) or not TAB_ID.fullmatch(tid) or tid.lower() in seen:
+            continue
+        if not isinstance(hook, str) or not hook.isidentifier() or hook in NOT_ASKED or hook in jobs:
+            continue
+        if isinstance(every, bool) or not isinstance(every, (int, float)) or not math.isfinite(every):
+            continue
+        seen.add(tid.lower())
+        words = title.strip()[:MAX_TAB_TITLE] if isinstance(title, str) and title.strip() else tid
+        out.append({"id": tid, "title": words, "hook": hook, "every": min(max(float(every), TAB_MIN_EVERY), TAB_MAX_EVERY)})
+        if len(out) == MAX_TABS:
+            break
+    return out
+
+
+def tab_hooks(plugin) -> list[str]:
+    """The hooks of the tabs a machine plugin declares (tabs_of), each once: reads the page asks while a tab is shown."""
+    return list(dict.fromkeys(t["hook"] for t in tabs_of(plugin)))
 
 
 class Setup:
@@ -659,7 +724,7 @@ class PlatformApp(App):
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
                 "icon": getattr(m, "ICON", "") or "chip", "section": section_of(m), "enabled": on, "valid": valid, "why": why, "state": state,
                 "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
-                "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
+                "tabs": tabs_of(m), "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
                 "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m), **self.api_card(m, on)}
 
     @staticmethod
@@ -688,11 +753,19 @@ class PlatformApp(App):
     @staticmethod
     def asks(m) -> list[str]:
         """What the page may ask a machine plugin by name: its hooks (Plugin.interface) but the setup, the
-        settings, the scan and a command, which have routes of their own or none."""
+        settings, the scan and a command, which have routes of their own or none; and the hook of each tab it declares
+        (tabs_of), which it answers once it lists it in its HOOKS (Plugin.ask refuses another, in its words)."""
         try:
-            return [h for h in m.interface()["hooks"] if h not in NOT_ASKED]
+            hooks = [h for h in m.interface()["hooks"] if h not in NOT_ASKED]
         except Exception:  # noqa: BLE001 - a plugin that cannot say: nothing to ask
             return []
+        return hooks + [h for h in tab_hooks(m) if h not in hooks]
+
+    @staticmethod
+    def reads_of(m) -> tuple[str, ...]:
+        """The hooks of a machine plugin that only read: READS, and its tabs' hooks (the page asks them every few seconds
+        while a tab is shown): noted as reads in who talks to whom, and not logged."""
+        return (*READS, *(h for h in tab_hooks(m) if h not in READS))
 
     def ask(self, name: str, hook: str, args: list):
         """One of a machine plugin's hooks by name (asks), its answer as JSON (a rule, a startup: described). Its refusal
@@ -701,10 +774,11 @@ class PlatformApp(App):
         self._refuse_disabled(name)
         if hook not in self.asks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} is not asked {hook!r} here: {', '.join(self.asks(m)) or 'nothing'}")
-        if hook not in READS:  # its name and how many arguments, never their values: a key pasted into a form (0.20.1)
+        reads = self.reads_of(m)
+        if hook not in reads:  # its name and how many arguments, never their values: a key pasted into a form (0.20.1)
             self.log(f"platform: {name} asked {hook}" + (f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""))
         try:
-            with self.traffic.timed(self.NAME, name, "read" if hook in READS else "ask", hook):
+            with self.traffic.timed(self.NAME, name, "read" if hook in reads else "ask", hook):
                 answer = m.ask(hook, *args)
         except (TypeError, ValueError, LookupError) as e:
             raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e), _accepting(e)) from None

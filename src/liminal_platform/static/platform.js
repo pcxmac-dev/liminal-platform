@@ -84,17 +84,38 @@
   // of like the firewall"): a plugin's page has tabs beside its title: Main (what it showed until now, but the APIs) and
   // API (what it attaches to, each API a line with a (+) that opens to its description: the library's folded cards,
   // liminal-libs 1.50.0). The tab is in the address after the plugin's name (#wsl-gentoo/api), so a reload or a link
-  // keeps it; another plugin picked opens on its Main. TABS is the list a later tab is added to.
+  // keeps it; another plugin picked opens on its Main. A plugin's own tabs come after these two (tabsOf, 0.27.0).
   const hashParts = () => decodeURIComponent(location.hash.slice(1)).split('/');
   const selected = () => hashParts()[0] || 'machine';
   // 0.24.3 (the user, 2026-11-11, after the tabs were tried as bordered buttons, as labels on a line with a rising
   // stroke and as an address: "lets go back to the original tab layout"; asked which: the first): Main and API (APIs for
   // several) beside the title, as in 0.22.0
-  const TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];
+  const OWN_TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];
+  // 0.27.0, a plugin's own tabs after them (the user, 2026-11-14: "so for the firewall's both are going to get a 'world
+  // wide web view' that shows the globe and the routes incoming all traffic, as well as monitoring port traffic stats"; "on
+  // top of the monitoring there needs to be a way to 'filter' (another tab)"): those its status declares (`tabs`,
+  // liminal-libs apps/tabs.py's Tab: {id, title, hook, every}), each at its own address (#name/<id>); while one is shown
+  // its hook is asked every `every` seconds and the page it answers is drawn (below, "a plugin's own tabs"). A server that
+  // sends no tabs (before 0.27.0): Main and API, as before.
+  const TAB_ID = /^[A-Za-z0-9_-]{1,40}$/;  // url-safe, as the address carries it (apps/tabs.py's)
+  const MAX_TABS = 8;
+  function declaredTabs(p) {
+    const seen = new Set(OWN_TABS.map((o) => o.id)), out = [];
+    (Array.isArray(p && p.tabs) ? p.tabs : []).forEach((t) => {
+      if (out.length >= MAX_TABS || !t || typeof t.id !== 'string' || !TAB_ID.test(t.id) || seen.has(t.id.toLowerCase())) return;
+      if (typeof t.hook !== 'string' || !t.hook) return;
+      seen.add(t.id.toLowerCase());
+      const every = Math.min(3600, Math.max(1, Number(t.every) || 5)), words = String(t.title || t.id);
+      out.push({ id: t.id, title: () => words, hook: t.hook, every });
+    });
+    return out;
+  }
+  const tabsOf = (p) => [...OWN_TABS, ...declaredTabs(p)];
   const hasTabs = (p) => !!p && !pending(p) && !!window.LiminalApis && Array.isArray(p.apis);  // a server from before 0.20.0 sends no apis: no tabs
-  const tabOf = (p) => { const t = hashParts()[1]; return hasTabs(p) && TABS.some((x) => x.id === t) ? t : 'main'; };
+  const tabOf = (p) => { const t = hashParts()[1]; return hasTabs(p) && tabsOf(p).some((x) => x.id === t) ? t : 'main'; };
+  const ownTabOf = (p) => { const id = tabOf(p); return OWN_TABS.some((o) => o.id === id) ? null : declaredTabs(p).find((t) => t.id === id) || null; };
   const tabsRow = (p) => (!hasTabs(p) ? '' : `<nav class="tabs" role="tablist" aria-label="${esc(p.title)}: its pages">`
-    + TABS.map((t) => `<button type="button" role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`).join('')
+    + tabsOf(p).map((t) => `<button type="button" role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`).join('')
     + '</nav>');
   let tabPicked = false;  // a tab was just picked: the one now shown takes the focus once the page is drawn
   const label = (k) => k.replace(/([A-Z])/g, ' $1').toLowerCase();
@@ -194,6 +215,7 @@
     if (view) view.hidden = !on;
     $('main').hidden = on;
     drawRail();
+    syncTab();  // 0.27.0: a plugin's own tab under your account is not asked meanwhile
   }
 
   // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants
@@ -331,7 +353,12 @@
   const tableKey = (name, title) => `${name}|${title}`;
   const chosenOf = (name, title) => chosenRows[tableKey(name, title)] || (chosenRows[tableKey(name, title)] = new Set());
   const textOf = (c) => String(c && typeof c === 'object' ? c.text ?? c.title ?? '' : c ?? '');
-  const tableOf = (name, title) => { const p = pluginOf(name); return ((p && p.status && p.status.tables) || []).find((t) => t && t.title === title); };
+  const tablesOf = (name) => {  // the tables drawn now: the plugin's status's, or the page one of its own tabs answered (0.27.0)
+    const p = pluginOf(name), on = tabOn(name);
+    return on ? pageTables(pageOf(on.v) || {}) : (p && p.status && p.status.tables) || [];
+  };
+  const tableOf = (name, title) => tablesOf(name).find((t) => t && t.title === title);
+  const tablesBox = (name) => (tabOn(name) ? $(`tab-tables-${name}`) : $(`tables-${name}`));
   const rowsOf = (t) => (Array.isArray(t.rows) ? t.rows.filter((r) => r && typeof r === 'object' && Array.isArray(r.cells)) : []);
   function groupedTable(m, t, forms, can) {
     const rows = rowsOf(t), chosen = chosenOf(m.name, t.title), listed = new Set(rows.map((r) => r.key));
@@ -440,15 +467,17 @@
     });
     try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args: [key] }); say(name, ''); }
     catch (err) { say(name, err.message); }
+    askTabNow(name);  // 0.27.0: the row of one of its own tabs: that tab's page asked again too
     await refresh(name);
     const again = data.querySelector(`button.row-pick[data-machine="${CSS.escape(name)}"][data-key="${CSS.escape(key)}"]`);
     if (again && el.matches('button')) again.focus({ preventScroll: true });
   }
 
   function redrawTables(name, focus) {  // a plugin's tables drawn again (a group opened or closed, rules chosen), the focus kept
-    const m = pluginOf(name), box = $(`tables-${name}`);
+    const m = pluginOf(name), box = tablesBox(name), on = tabOn(name);
     if (!m || !box) return;
-    box.innerHTML = tables(m) + statTables(m);
+    if (on) { const html = partOf(on.m, on.t, on.v, 'tables'); box.innerHTML = html; on.v.drawn.tables = html; }  // 0.27.0: a tab's own
+    else box.innerHTML = tables(m) + statTables(m);
     const again = focus ? box.querySelector(focus) : null;
     if (again) again.focus({ preventScroll: true });
   }
@@ -466,7 +495,7 @@
   }
   async function moveChosen(el) {
     const name = el.dataset.machine, t = tableOf(name, el.dataset.table), chosen = chosenOf(name, el.dataset.table);
-    const box = $(`tables-${name}`), pick = box && box.querySelector(pickSel('select.move-to', el));
+    const box = tablesBox(name), pick = box && box.querySelector(pickSel('select.move-to', el));
     if (!t || !t.move || !chosen.size || !pick) return;
     const keys = [...chosen], to = pick.value;
     moveTargets[tableKey(name, t.title)] = to;
@@ -481,6 +510,7 @@
       return;
     }
     if (to !== 'own') went[tableKey(name, t.title)] = { keys: new Set(keys), to };  // and the headings they go under, once drawn there
+    askTabNow(name);  // 0.27.0: moved on one of its own tabs: that tab's page asked again too
     await refresh(name);  // this plugin alone asked again: the rules where they went at once
     delete went[tableKey(name, t.title)];
   }
@@ -546,6 +576,7 @@
     }
     searching[key] = false;
     if (selected() !== name) return;  // moved on meanwhile: that page's refresh is left alone; this one's comes on return
+    askTabNow(name);  // 0.27.0: a search on one of its own tabs: that tab's page asked again too
     await refresh(name);
     const box = $(`ts-${name}-${id}`);
     if (box && had && mayFocus()) box.focus({ preventScroll: true });  // a keyboard's: back in the box (a finger's: no keyboard called up)
@@ -716,9 +747,11 @@
   const pluginOf = (name) => st && (st.machines[name] || (st.assistants || []).find((a) => a.name === name));
   let dlg = null;  // the form open: {name, plugin, form, values, step, busy, accepted, accept, answer, words, opener, key}
 
-  function formsOf(m) {  // a plugin's forms by id: those whose hook the platform may ask of it now
+  function formsOf(m) {  // a plugin's forms by id: those whose hook the platform may ask of it now; while one of its own
+    // tabs is shown (0.27.0), the forms of the page it answered too
     const can = new Set(m.asks || []), out = {};
-    ((m.status && m.status.forms) || []).forEach((f) => {
+    const on = m && typeof m.name === 'string' ? tabOn(m.name) : null, page = on ? pageOf(on.v) : null;
+    [...listOf(m.status && m.status.forms), ...(page ? listOf(page.forms) : [])].forEach((f) => {
       if (f && typeof f.id === 'string' && typeof f.hook === 'string' && can.has(f.hook) && Array.isArray(f.fields)) out[f.id] = f;
     });
     return out;
@@ -1005,7 +1038,10 @@
     }
     drawDialog();
     focusStep();
-    if (d.step === 'done' || d.step === 'failed') render();  // what the plugin holds now: its tables drawn again
+    if (d.step === 'done' || d.step === 'failed') {  // what the plugin holds now: its tables drawn again
+      askTabNow(d.name);  // 0.27.0: a form of one of its own tabs: that tab's page asked again at once
+      render();
+    }
   }
 
   function closed() {  // the focus back on the button that opened it, or the same one drawn again
@@ -1143,6 +1179,8 @@
     if (pending(m)) return pendingData(m);
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${tabsRow(m)}${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
     if (tabOf(m) === 'api') return head + apiCard(m);  // 0.22.0: its API tab, whatever its state (its card is drawn disabled too)
+    const own = ownTabOf(m);  // 0.27.0: one of its own tabs, the page its hook answers (asked while it is shown)
+    if (own) return head + tabFrame(m, own);
     if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
     const logged = (m.steps || []).length || m.setup;
     if (notHere(m)) {
@@ -1171,6 +1209,503 @@
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
     return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>`;
   }
+
+  // -- a plugin's own tabs (0.27.0; the user, 2026-11-14: "so for the firewall's both are going to get a 'world wide web
+  // view' that shows the globe and the routes incoming all traffic, as well as monitoring port traffic stats"; "on top of
+  // the monitoring there needs to be a way to 'filter' (another tab) that allows you to monitor send and receive traffic,
+  // especially traffic that is out of the ordinary"). While one is shown its hook is asked every `every` seconds (POST
+  // api/machines/NAME/ask with no arguments: a read, which the platform notes as one and never logs), one ask at a time,
+  // and none while the page is hidden, another view is shown or your account covers the page. What it answers is a page
+  // (liminal-libs apps/tabs.py): its title and note, its actions, its globe (the library's liminal-globe.js), its charts
+  // (charts.js, their ids the tab's own), its connections with their filters, its tables and its forms, drawn as the Main
+  // tab draws them; each part drawn again only when it changed, the globe made once and given each answer. Left (another
+  // tab, another plugin, this machine), its timer is cleared, its globe destroyed and what it answered dropped: only the
+  // filters chosen are kept while the page lives. --------------------------------------------------------------------------
+  const TAB_PARTS = ['head', 'actions', 'globe', 'charts', 'flows', 'tables'];
+  const SHOWN_PARTS = ['title', 'note', 'globe', 'flows', 'charts', 'tables', 'actions'];  // a page with none: nothing to show yet
+  let tabView = null;  // the tab shown: {key, name, id, hook, every, timer, asking, again, page, error, at (its last answer's
+  // time), late (an ask unanswered for long), slow (the timer saying so), drawn, globe, globeEl, globeSpec}
+  let tabFramed = '';  // what framed the tab drawn last (frameKey): a status that changes it draws the pane anew
+  const viewKey = (m, t) => `${m.name}/${t.id}`;
+  const viewOf = (m, t) => (tabView && tabView.key === viewKey(m, t) ? tabView : null);
+  const tabAsked = (m, t) => !off(m) && (m.asks || []).includes(t.hook);  // the platform may ask its hook now
+  const pageOf = (v) => (v && v.page && typeof v.page === 'object' && !Array.isArray(v.page) ? v.page : null);
+  const listOf = (x) => (Array.isArray(x) ? x.filter((y) => y && typeof y === 'object') : []);
+  const themeNow = () => (document.body && document.body.dataset.theme) || '';
+  // Shown only where it is drawn. In the charts app this page is framed (its bound view, ?embedded=1), and a frame hidden
+  // there (display:none, once another view is picked) keeps its page "visible", since a framed page's visibility is its top
+  // page's: no visibilitychange comes, and a tab's asks would go on unseen, keeping a plugin's watching (a capture) alive. So a
+  // tab is asked only while the page is visible and has a size, its frame has boxes in the page round it (read through the
+  // same origin the charts front gives it) and its pane is in sight (what an IntersectionObserver last said of it). That is
+  // looked at before every ask, again as the page resizes or the observer speaks, and every second while a tab waits for its
+  // frame to be drawn again (asking nothing meanwhile)
+  let paneSeen = true;  // what the IntersectionObserver last said of the pane (#data): true until it says, and without one
+  let unseen = 0;  // the timer looking again while a tab waits for its frame
+  const SEEN_AGAIN_MS = 1000;
+  function frameShown() {
+    if (!(window.innerWidth > 0 && window.innerHeight > 0) || !paneSeen) return false;  // a frame of no size, a pane out of sight
+    let f = null;
+    try { f = window.frameElement; } catch (e) { f = null; }
+    if (!f) return true;  // the page itself, or framed by another origin: its own size and the observer are all it can read
+    try {
+      if (!f.isConnected || !f.getClientRects().length) return false;  // display:none, on the frame or on what holds it
+      const r = f.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    } catch (e) { return true; }
+  }
+  const pageShown = () => !document.hidden && frameShown();
+  const askable = () => pageShown() && !loginOpen;
+  function waitShown() {  // a tab paused while the page is visible but not drawn: looked at again every second, asking nothing
+    clearTimeout(unseen);
+    unseen = 0;
+    if (!tabView || document.hidden || loginOpen || frameShown()) return;  // hidden or covered: the page's own events bring it back
+    unseen = setTimeout(() => { unseen = 0; if (frameShown()) syncTab(); else waitShown(); }, SEEN_AGAIN_MS);
+  }
+  const seenAgain = () => { if (tabView) syncTab(); };  // drawn or hidden since: the tab shown paused, or asked again at once
+  window.addEventListener('resize', seenAgain);
+  if (window.IntersectionObserver) {
+    try { new IntersectionObserver((entries) => { paneSeen = entries[entries.length - 1].isIntersecting; seenAgain(); }).observe(data); }
+    catch (e) { paneSeen = true; }
+  }
+  function tabOn(name) {  // a plugin's own tab shown now, with what it holds: {m, t, v}; null when none is
+    const m = st && st.machines[name], t = m && selected() === name ? ownTabOf(m) : null, v = t ? viewOf(m, t) : null;
+    return v ? { m, t, v } : null;
+  }
+  const frameKey = (m, t) => JSON.stringify([m.name, m.title, m.about, m.enabled, m.hidden, m.state, m.valid, whyOf(m), notHere(m),
+    tabsOf(m).map((x) => [x.id, x.title(m)]), t.id, t.hook, tabAsked(m, t)]);
+  // the tab's state in words: asked for the first time; an answer late (an ask is never given up: its hook would be asked again
+  // while the platform still runs it, in a thread of its own each time); what is shown, when an ask failed, from its last answer
+  const lateAfter = (v) => Math.max(10, 3 * v.every) * 1000;  // an ask unanswered this long is said to be late
+  const clockAt = (ms) => new Date(ms).toLocaleTimeString();  // a time in ms (Connections' clockOf takes seconds)
+  function saidOf(m, t, v) {
+    const what = `${m.title} for its ${t.title(m)}`;
+    if (v && v.late) {
+      return `Still asking ${what}: no answer in over ${lasted(lateAfter(v) / 1000)}`
+        + `${pageOf(v) && v.at ? `; what is shown is from ${clockAt(v.at)}` : ''}. It is asked again once it answers.`;
+    }
+    if (!v || (!pageOf(v) && !v.error)) return `Asking ${what}…`;
+    return v.error && pageOf(v) && v.at ? `What is shown is from ${clockAt(v.at)}, its last answer.` : '';
+  }
+
+  function tabFrame(m, t) {  // the tab's place on the plugin's page: why it is not asked, or its parts (empty until it answers)
+    const n = esc(m.name), title = esc(t.title(m));
+    tabFramed = frameKey(m, t);
+    if (userOff(m)) return `<p class="muted">Disabled: the platform asks it nothing, so its ${title} is not asked either. The switch enables it again.</p>`;
+    if (notHere(m)) return `<p class="muted">Not for this machine: ${esc(whyOf(m))}. Its ${title} is not asked here.</p>`;
+    if (invalid(m)) return `<p class="muted">Disabled while it is not valid: ${esc(whyOf(m))}. Its ${title} is asked once it is valid; its Main tab says what makes it so.</p>`;
+    if (!tabAsked(m, t)) return `<p class="muted">The platform may not ask ${esc(m.title)} for ${esc(t.hook)}, the hook of its ${title}: nothing to show.</p>`;
+    const v = viewOf(m, t), page = pageOf(v);
+    if (v) v.drawn = {};
+    // its parts move with every answer: out of the polite announcements of the page's main area (index.html), as Connections'
+    // moving parts are; the line saying the tab's state, its error and the connections' count are what speak
+    const parts = TAB_PARTS.map((part) => {
+      const html = page ? partOf(m, t, v, part) : '';
+      if (v) v.drawn[part] = html;
+      return `<div class="tab-part" id="tab-${part}-${n}" aria-live="off">${html}</div>`;
+    }).join('');
+    return `<section class="tab-page" id="tab-page-${n}" data-tab="${esc(t.id)}" aria-label="${title}">`
+      + `<p class="muted small tab-said" id="tab-said-${n}" role="status">${esc(saidOf(m, t, v))}</p>`
+      + `<p class="error" id="tab-error-${n}">${esc((v && v.error) || '')}</p>${parts}</section>`
+      + (jobs[m.name] && jobs[m.name].open ? setupLog(m) : '');  // a job one of its forms started: its lines as they come
+  }
+
+  function partOf(m, t, v, part) {  // one part of the page the tab's hook answered, as HTML (the globe: its slot)
+    const p = pageOf(v) || {};
+    try {
+      return part === 'head' ? tabHead(m, t, p) : part === 'actions' ? actionsHtml(pagePlugin(m, p)) : part === 'globe' ? globeSlot(m, p)
+        : part === 'charts' ? tabChartsHtml(m, t, p) : part === 'flows' ? flowsHtml(m, t, v) : part === 'tables' ? statTables(pagePlugin(m, p)) : '';
+    } catch (e) {  // a part it cannot draw: said in its place, the rest drawn
+      return `<p class="error">Its ${esc(part)} could not be drawn: ${esc(e.message)}</p>`;
+    }
+  }
+  function tabHead(m, t, p) {
+    const empty = !SHOWN_PARTS.some((k) => p[k] !== undefined && p[k] !== null && p[k] !== '' && !(Array.isArray(p[k]) && !p[k].length));
+    return (p.title ? `<h3 class="tab-title">${esc(p.title)}</h3>` : '') + (p.note ? `<p class="muted small note">${esc(p.note)}</p>` : '')
+      + (empty ? `<p class="muted">${esc(m.title)} has nothing to show in its ${esc(t.title(m))} yet.</p>` : '');
+  }
+  // the page's tables (their own choices, buttons and search boxes with them), forms and actions, in a status's shapes:
+  // drawn by the Main tab's drawers (statTables, actionsHtml, formsOf), given the plugin with them as its status. A table
+  // they cannot draw (one without columns) is left out, and so is a plain table's row that is not a list of cells
+  function pageTables(p) {
+    return listOf(p.tables).filter((t) => Array.isArray(t.columns)).map((t) => (Array.isArray(t.groups) || t.select ? t
+      : { ...t, rows: (Array.isArray(t.rows) ? t.rows : []).filter(Array.isArray) }));
+  }
+  const pagePlugin = (m, p) => ({ ...m, status: { tables: pageTables(p), forms: listOf(p.forms), actions: listOf(p.actions) } });
+
+  // its globe (page.globe: what liminal-globe.js draws): made once, into an element of its own kept across the pane's
+  // redraws (a slot drawn where it goes, as a terminal's), given each answer; destroyed when the tab is left
+  const globeSlot = (m, p) => (!p.globe || typeof p.globe !== 'object' ? ''
+    : window.LiminalGlobe ? `<div class="tab-globe-slot" data-globe-slot="${esc(m.name)}"></div>`
+      : '<p class="muted small">The globe is drawn by the library\'s liminal-globe.js, which this page could not load.</p>');
+  function placeGlobe(on) {
+    const { m, v } = on, p = pageOf(v) || {}, box = $(`tab-globe-${m.name}`);
+    const spec = p.globe && typeof p.globe === 'object' && window.LiminalGlobe ? p.globe : null;
+    if (!spec) {
+      dropGlobe(v);
+      const html = globeSlot(m, p);
+      if (box && v.drawn.globe !== html) box.innerHTML = html;
+      v.drawn.globe = html;
+      return;
+    }
+    if (!box) return;  // its place not drawn: never drawn into an element off the page
+    if (!v.globeEl) { v.globeEl = document.createElement('div'); v.globeEl.className = 'tab-globe'; }
+    const slot = box && box.querySelector('[data-globe-slot]');
+    if (slot) slot.replaceWith(v.globeEl);
+    else if (box && v.globeEl.parentNode !== box) { box.textContent = ''; box.appendChild(v.globeEl); }
+    if (!v.globe) v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow() });
+    else if (v.globeSpec !== spec) v.globe.update(spec);
+    v.globeSpec = spec;
+    v.drawn.globe = 'drawn';
+  }
+  function dropGlobe(v) {
+    if (v.globe) { try { v.globe.destroy(); } catch (e) { /* gone with its element */ } }
+    if (v.globeEl) v.globeEl.remove();
+    v.globe = null;
+    v.globeEl = null;
+    v.globeSpec = null;
+  }
+
+  // its charts (page.charts: a LiminalCharts spec, {span, t, charts}, as a status's, or a list of them): each apart from
+  // the Main tab's (charts.js keys a chart by its id: here the tab's), in place when they are the same charts
+  const specsOf = (p) => (Array.isArray(p.charts) ? p.charts : p.charts ? [p.charts] : [])
+    .filter((s) => s && typeof s === 'object' && Array.isArray(s.charts) && s.charts.length).slice(0, 12);
+  const chartsId = (m, t, i) => `${t.id}-${m.name}-${i}`;
+  // charts.js keeps every chart it is given (its samples, for its redraws, its tooltip and its keys) until it is told to forget
+  // it, and a tab's charts may be keyed by what changes from answer to answer (a port, a peer): they would pile up while the
+  // page lives. So the tab's charts drawn before are let go whenever they are drawn whole, and when the tab is left (by a
+  // library without forget: kept, as before)
+  const forgetTabCharts = (name, id) => { if (Charts && typeof Charts.forget === 'function') Charts.forget(`${id}-${name}-`); };
+  const tabChartsHtml = (m, t, p) => {
+    forgetTabCharts(m.name, t.id);
+    return specsOf(p).map((s, i) => `<div class="charts" data-spec="${i}">${Charts.cards(s, { id: chartsId(m, t, i) })}</div>`).join('');
+  };
+  function drawTabCharts(on, box) {
+    const { m, t } = on, p = pageOf(on.v) || {}, specs = specsOf(p), groups = [...box.children].filter((c) => c.matches('.charts[data-spec]'));
+    if (specs.length && specs.length === groups.length && specs.every((s, i) => Charts.update(groups[i], s, { id: chartsId(m, t, i) }))) return;
+    if (!specs.length && !groups.length) return;
+    box.innerHTML = tabChartsHtml(m, t, p);
+    Charts.draw(data);
+  }
+
+  // its connections (page.flows: {title, columns, rows, filters, note, empty}; the user, 2026-11-14: "the filter allows
+  // (uses ebpf) tracking one off connections"; "classifying traffic as potential advert/monitoring sites that track users,
+  // etc"): a table with its filters (the direction, flagged only, the labels' kinds, a search), the flagged rows first,
+  // each flag and each label a chip with its words (a flag's are the plugin's: unusual for this machine while Liminal was
+  // watching, never a verdict). The filters start as the page says (filters: the directions and the kinds offered, flagged
+  // only, the search) and are kept per tab while the page lives; the rows are drawn again with each answer and each
+  // choice, the filters only when what they offer changes, so a search being typed goes on
+  const FLOW_COLUMNS = { time: 'Time', dir: 'Direction', proto: 'Protocol', local: 'Local', remote: 'Remote', name: 'Name',
+    program: 'Program', labels: 'Labels', flags: 'Flags', bytes: 'Bytes', packets: 'Packets', duration: 'Duration' };
+  const FLOW_NUM = new Set(['bytes', 'packets', 'duration']);
+  const FLOW_SHOWN = ['time', 'dir', 'remote', 'name', 'program', 'labels', 'flags', 'bytes'];  // when the page names no columns
+  // a direction's word, from the page's own three alone (a Map: a row's "constructor" or "__proto__" is no direction), and a
+  // row's or a column's own value alone, never one an object inherits
+  const DIRS = new Map([['in', 'In'], ['out', 'Out'], ['local', 'Local']]);
+  const dirWord = (d) => (typeof d === 'string' ? DIRS.get(d) : undefined);
+  const ownOf = (o, k) => (o && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined);
+  const MAX_FLOWS = 400;  // rows drawn at once: the count says how many more match
+  const MAX_FLOWS_READ = 5000;  // rows of one answer looked at
+  const flowFilters = {};  // `${plugin}/${tab}` -> {dir, flagged, kinds: Set, search}: what is chosen, while the page lives
+  const flowsOf = (p) => (p && p.flows && typeof p.flows === 'object' && !Array.isArray(p.flows) ? p.flows : null);
+  const flowRows = (f) => listOf(Array.isArray(f.rows) ? f.rows.slice(0, MAX_FLOWS_READ) : []);
+  const flagsOf = (r) => listOf(r.flags);
+  const labelsOf = (r) => listOf(r.labels).filter((l) => typeof l.kind === 'string' && l.kind);
+  function flowColumns(f) {  // {key, title, num}: the page's own (a key, or {key, title, num}), else the usual ones
+    const given = (Array.isArray(f.columns) ? f.columns : []).map((c) => (typeof c === 'string' ? { key: c } : c && typeof c.key === 'string' ? c : null)).filter(Boolean);
+    return (given.length ? given : FLOW_SHOWN.map((key) => ({ key }))).slice(0, 16)
+      .map((c) => ({ key: c.key, title: String(c.title || ownOf(FLOW_COLUMNS, c.key) || c.key), num: c.num !== undefined ? !!c.num : FLOW_NUM.has(c.key) }));
+  }
+  function filterOf(key, f) {  // what is chosen for a tab's connections: the page's first word, until the user's
+    if (!flowFilters[key]) {
+      const given = f.filters && typeof f.filters === 'object' ? f.filters : {};
+      flowFilters[key] = { dir: '', flagged: given.flagged === true, kinds: new Set(), search: typeof given.search === 'string' ? given.search : '' };
+    }
+    return flowFilters[key];
+  }
+  function dirsOf(f, x) {  // the directions offered: the page's, else in and out; the one chosen stays offered
+    const given = f.filters && Array.isArray(f.filters.dir) ? f.filters.dir.filter((d) => dirWord(d)) : [];
+    return [...new Set([...(given.length ? given : ['in', 'out']), ...(x.dir ? [x.dir] : [])])];
+  }
+  function kindsOf(f, rows, x) {  // the labels' kinds offered: the page's, else those its rows carry (the most first); those chosen stay offered
+    const given = f.filters && Array.isArray(f.filters.labels) ? f.filters.labels.filter((k) => typeof k === 'string' && k) : [];
+    let kinds = given;
+    if (!given.length) {
+      const n = new Map();
+      rows.forEach((r) => labelsOf(r).forEach((l) => n.set(l.kind, (n.get(l.kind) || 0) + 1)));
+      kinds = [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k]) => k);
+    }
+    return [...new Set([...kinds.slice(0, 16), ...x.kinds])];
+  }
+  const flowText = (r) => [r.remote, r.local, r.name, r.program, r.proto, r.dir, ...labelsOf(r).flatMap((l) => [l.kind, l.company, l.source]),
+    ...flagsOf(r).flatMap((g) => [g.id, g.words])].filter((s) => s !== undefined && s !== null && s !== '').join(' ').toLowerCase();
+  function flowsMatching(rows, x) {  // the rows the filters let through, the flagged first (each in the plugin's order)
+    const words = x.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const kept = rows.filter((r) => (!x.dir || r.dir === x.dir) && (!x.flagged || flagsOf(r).length > 0)
+      && (!x.kinds.size || labelsOf(r).some((l) => x.kinds.has(l.kind))) && (!words.length || words.every((w) => flowText(r).includes(w))));
+    return [...kept.filter((r) => flagsOf(r).length), ...kept.filter((r) => !flagsOf(r).length)];
+  }
+  const wordsOf = (id) => String(id ?? '').replace(/[-_]+/g, ' ').trim();
+  function flowTime(v) {  // a time as this browser's clock says it, the whole of it in its tooltip
+    const ms = typeof v === 'number' ? (v > 1e12 ? v : v * 1000) : typeof v === 'string' && v ? Date.parse(v) : NaN;
+    const d = new Date(Number.isFinite(ms) ? ms : NaN);
+    if (Number.isNaN(d.getTime())) return esc(v ?? '');  // not a time this browser can say: as it came
+    return `<time datetime="${esc(d.toISOString())}" title="${esc(d.toLocaleString())}">${esc(d.toLocaleTimeString())}</time>`;
+  }
+  function lasted(v) {  // a duration in words
+    const s = Number(v);
+    if (v === null || v === undefined || v === '' || !Number.isFinite(s) || s < 0) return '–';
+    return s < 1 ? 'under 1 s' : s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+  }
+  // a flag: its id in words on the chip, the plugin's words in its tooltip, to a screen reader and, on a touch screen, under it
+  const flagChip = (g) => `<span class="chip flow-flag" title="${esc(g.words || '')}">${esc(wordsOf(g.id) || 'flagged')}</span>`
+    + (g.words ? `<span class="sr-only">: ${esc(g.words)}.</span>` : '');
+  // a label: its kind and the company the list names on the chip, the list it is from in its tooltip and to a screen reader
+  const labelChip = (l) => {
+    const from = l.source ? `listed in ${l.source}` : '';
+    return `<span class="chip flow-label" title="${esc(from)}">${esc(l.kind)}${l.company ? ` · ${esc(l.company)}` : ''}</span>`
+      + (from ? `<span class="sr-only"> (${esc(from)})</span>` : '');
+  };
+  function flowCell(r, c) {
+    const v = ownOf(r, c.key), none = v === undefined || v === null || v === '';
+    if (c.key === 'time') return flowTime(v);
+    if (c.key === 'dir') {
+      const w = dirWord(v);
+      return w ? `<span class="flow-arrow" aria-hidden="true">${v === 'in' ? '↓' : v === 'out' ? '↑' : '↔'}</span> ${w.toLowerCase()}` : esc(v ?? '');
+    }
+    if (c.key === 'labels') return labelsOf(r).map(labelChip).join('') || '<span class="muted">–</span>';
+    if (c.key === 'flags') {
+      const flags = flagsOf(r), said = flags.map((g) => g.words).filter(Boolean).join('; ');
+      return flags.map(flagChip).join('') + (said ? `<div class="sub flow-words touch-only" aria-hidden="true">${esc(said)}</div>` : '');
+    }
+    if (c.key === 'bytes') return none ? '–' : esc(Charts.bytes(Number(v)));
+    if (c.key === 'duration') return esc(lasted(v));
+    if (typeof v === 'number') return esc(v.toLocaleString());
+    return esc(v && typeof v === 'object' ? (v.text ?? '') : (v ?? ''));
+  }
+  function flowParts(m, t, f, x) {  // the connections' parts: their head, the directions, the kinds, the rows and their count
+    const rows = flowRows(f), cols = flowColumns(f), kept = flowsMatching(rows, x), shown = kept.slice(0, MAX_FLOWS);
+    const at = `data-machine="${esc(m.name)}" data-tab="${esc(t.id)}"`, hidden = !cols.some((c) => c.key === 'flags');
+    const flagged = rows.filter((r) => flagsOf(r).length).length, n = (k) => k.toLocaleString();
+    const head = `<h4>${esc(f.title || 'Connections')}</h4>${f.note ? `<p class="muted small note">${esc(f.note)}</p>` : ''}`;
+    const dirs = `<option value=""${x.dir ? '' : ' selected'}>All</option>`
+      + dirsOf(f, x).map((d) => `<option value="${d}"${x.dir === d ? ' selected' : ''}>${dirWord(d)}</option>`).join('');
+    const kinds = kindsOf(f, rows, x).map((k) => `<button type="button" class="flow-kind" ${at} data-key="${esc(k)}" aria-pressed="${x.kinds.has(k)}">${esc(k)}</button>`).join('');
+    const count = !rows.length ? '' : (kept.length === rows.length ? `${n(rows.length)} connection${rows.length === 1 ? '' : 's'}` : `${n(kept.length)} of ${n(rows.length)} connections`)
+      + (kept.length > shown.length ? `, the first ${n(shown.length)} shown` : '') + (flagged ? ` · ${n(flagged)} flagged` : '');
+    const table = shown.length ? `<table class="list stats flows" aria-label="${esc(f.title || 'Connections')}"><thead><tr>`
+      + cols.map((c) => `<th scope="col"${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('') + '</tr></thead><tbody>'
+      + shown.map((r) => {
+        const marked = flagsOf(r).length > 0;
+        return `<tr${marked ? ' class="flagged"' : ''}>` + cols.map((c, i) => `<td${c.num ? ' class="num"' : c.key === 'remote' || c.key === 'local' ? ' class="mono long"' : ''}>`
+          + `${i === 0 && marked && hidden ? '<span class="sr-only">Flagged: </span>' : ''}${flowCell(r, c)}</td>`).join('') + '</tr>';
+      }).join('') + '</tbody></table>'
+      : `<p class="muted small">${esc(rows.length ? 'None of them matches the filters.' : f.empty || 'No connections yet.')}</p>`;
+    return { head, dirs, kinds, rows: table, count };
+  }
+  function flowsHtml(m, t, v) {
+    const f = flowsOf(pageOf(v));
+    if (!f) return '';
+    const x = filterOf(v.key, f), p = flowParts(m, t, f, x), at = `data-machine="${esc(m.name)}" data-tab="${esc(t.id)}"`;
+    const id = `flow-search-${m.name}-${t.id}`;
+    Object.assign(v.drawn, { flowHead: p.head, flowDirs: p.dirs, flowKinds: p.kinds, flowRows: p.rows });
+    return `<section class="flows-box" aria-label="${esc(f.title || 'Connections')}"><div class="flow-head">${p.head}</div>`
+      + `<div class="flow-bar" role="group" aria-label="Filter the ${esc(String(f.title || 'connections').toLowerCase())}">`
+      + `<label>Direction <select class="flow-dir" ${at}>${p.dirs}</select></label>`
+      + `<label><input type="checkbox" class="flow-flagged" ${at}${x.flagged ? ' checked' : ''}> Flagged only</label>`
+      + `<span class="flow-kinds" role="group" aria-label="Only these labels"${p.kinds ? '' : ' hidden'}>${p.kinds}</span>`
+      + `<label class="sr-only" for="${esc(id)}">Search the ${esc(String(f.title || 'connections').toLowerCase())}</label>`
+      + `<input type="search" id="${esc(id)}" class="flow-search" ${at} value="${esc(x.search)}" placeholder="Search: an address, a name, a program, a label" ${kb('search')}>`
+      + `<span class="muted small flow-count" role="status">${esc(p.count)}</span></div><div class="flow-rows">${p.rows}</div></section>`;
+  }
+  function drawFlows(on, box) {  // in place: the bar made once (a search being typed goes on), its parts and the rows when they changed
+    const { m, t, v } = on, f = flowsOf(pageOf(v));
+    if (!f || !box.querySelector('.flow-bar')) {  // none, or none drawn yet: drawn whole
+      const html = flowsHtml(m, t, v);
+      if (f || v.drawn.flows !== html) box.innerHTML = html;
+      v.drawn.flows = html;
+      return;
+    }
+    const p = flowParts(m, t, f, filterOf(v.key, f));
+    const put = (sel, what, html) => { const el = box.querySelector(sel); if (el && v.drawn[what] !== html) el.innerHTML = html; v.drawn[what] = html; };
+    put('.flow-head', 'flowHead', p.head);
+    put('select.flow-dir', 'flowDirs', p.dirs);
+    put('.flow-kinds', 'flowKinds', p.kinds);
+    put('.flow-rows', 'flowRows', p.rows);
+    const kinds = box.querySelector('.flow-kinds'), count = box.querySelector('.flow-count');
+    if (kinds) kinds.hidden = !p.kinds;
+    if (count && count.textContent !== p.count) count.textContent = p.count;
+  }
+  function refilter(el) {  // a filter chosen: the rows drawn again from what the tab last answered, nothing asked
+    const on = tabOn(el.dataset.machine), box = on && $(`tab-flows-${on.m.name}`), f = on && flowsOf(pageOf(on.v));
+    if (!on || on.t.id !== el.dataset.tab || !box || !f) return;
+    const x = filterOf(on.v.key, f);
+    if (el.matches('select.flow-dir')) x.dir = dirWord(el.value) ? el.value : '';
+    else if (el.matches('input.flow-flagged')) x.flagged = el.checked;
+    else if (el.matches('input.flow-search')) x.search = el.value;
+    else if (el.matches('button.flow-kind')) { const k = el.dataset.key; if (x.kinds.has(k)) x.kinds.delete(k); else x.kinds.add(k); }
+    keepFocus(() => drawFlows(on, box));
+  }
+  data.addEventListener('input', (e) => { const el = e.target.closest && e.target.closest('input.flow-search[data-tab]'); if (el) refilter(el); });
+  data.addEventListener('change', (e) => { const el = e.target.closest && e.target.closest('select.flow-dir[data-tab], input.flow-flagged[data-tab]'); if (el) refilter(el); });
+
+  // what the tab's hook answered, drawn in place: each part again only when it changed, what had the focus keeping it
+  function drawTab(name) {
+    const on = tabOn(name);
+    if (!on || !$(`tab-page-${name}`)) return;
+    const { m, t, v } = on, said = $(`tab-said-${name}`), err = $(`tab-error-${name}`), words = saidOf(m, t, v);
+    if (said && said.textContent !== words) said.textContent = words;
+    if (err && err.textContent !== (v.error || '')) err.textContent = v.error || '';
+    if (!pageOf(v)) return;
+    keepFocus(() => TAB_PARTS.forEach((part) => {
+      const box = $(`tab-${part}-${name}`);
+      if (!box) return;
+      try {
+        if (part === 'globe') placeGlobe(on);
+        else if (part === 'charts') drawTabCharts(on, box);
+        else if (part === 'flows') drawFlows(on, box);
+        else {
+          const html = partOf(m, t, v, part);
+          if (v.drawn[part] !== html) box.innerHTML = html;
+          v.drawn[part] = html;
+        }
+      } catch (e) { box.innerHTML = `<p class="error">Its ${esc(part)} could not be drawn: ${esc(e.message)}</p>`; v.drawn[part] = ''; }
+    }));
+  }
+
+  // the tab shown asked, the one left let go: after every draw of the pane, as the page is shown or hidden again (its frame
+  // too), and as your account opens or closes
+  function syncTab() {
+    const sel = selected(), m = st && st.machines[sel], t = m && !pending(m) ? ownTabOf(m) : null;
+    const want = t && tabAsked(m, t) ? viewKey(m, t) : null;
+    if (tabView && tabView.key !== want) leaveTab();
+    if (!want) return;
+    if (!tabView) {
+      tabView = { key: want, name: m.name, id: t.id, hook: t.hook, every: t.every, timer: 0, asking: false, again: false, page: null,
+        error: '', at: 0, late: false, slow: 0, drawn: {}, globe: null, globeEl: null, globeSpec: null };
+    }
+    tabView.hook = t.hook;  // as its status says them now
+    tabView.every = t.every;
+    const on = tabOn(m.name);
+    if (on && $(`tab-page-${m.name}`)) {  // drawn anew: its globe back in its slot
+      try { placeGlobe(on); } catch (e) { tabView.error = `Its globe could not be drawn: ${e.message}`; }
+    }
+    if (!askable()) { pauseTab(); waitShown(); return; }
+    clearTimeout(unseen);  // drawn again: no more looking
+    unseen = 0;
+    if (!tabView.asking && !tabView.timer) askTab();
+  }
+  function pauseTab() {  // nothing asked while the page is hidden or covered: asked again at once once it is shown
+    if (tabView) { clearTimeout(tabView.timer); tabView.timer = 0; }
+  }
+  function leaveTab() {  // the tab left: its timers cleared, its globe destroyed, its charts let go, what it answered dropped
+    const v = tabView;
+    if (!v) return;
+    tabView = null;
+    clearTimeout(v.timer);
+    v.timer = 0;
+    clearTimeout(v.slow);
+    v.slow = 0;
+    clearTimeout(unseen);
+    unseen = 0;
+    dropGlobe(v);
+    forgetTabCharts(v.name, v.id);
+    v.page = null;
+    v.drawn = {};
+  }
+  // a tab's ask under way, by its key: {at, answer}, the answer settling to {page, error}. One at a time for each tab, also
+  // across leaving it and coming back while one is under way: that one's answer is awaited then, nothing asked again
+  const tabAsks = new Map();
+  function askOf(v) {
+    const was = tabAsks.get(v.key);
+    if (was) return was;
+    const under = { at: Date.now(), answer: null };
+    under.answer = api('POST', `api/machines/${enc(v.name)}/ask`, { hook: v.hook, args: [] })
+      .then((out) => ({ page: out ? out.answer : null, error: '' }),
+        (e) => ({ page: null, error: String((e.answer && e.answer.words) || e.message || 'it did not answer') }))  // its own words
+      .finally(() => { if (tabAsks.get(v.key) === under) tabAsks.delete(v.key); });
+    tabAsks.set(v.key, under);
+    return under;
+  }
+  async function askTab() {  // its hook asked (one ask at a time), its page drawn, the next ask in `every` seconds
+    const v = tabView;
+    if (!v || v.asking) return;
+    clearTimeout(v.timer);
+    v.timer = 0;
+    const under = tabAsks.get(v.key);  // asked before it was left and come back to: that answer awaited, nothing asked again
+    if (!under && !askable()) { waitShown(); return; }
+    v.asking = true;
+    v.again = false;
+    const ask = under || askOf(v);
+    clearTimeout(v.slow);  // unanswered for long: said to be late, what is shown said to be from its last answer
+    v.slow = setTimeout(() => {
+      if (tabView !== v || !v.asking) return;
+      v.late = true;
+      try { drawTab(v.name); } catch (e) { /* said once it answers */ }
+    }, Math.max(0, lateAfter(v) - (Date.now() - ask.at)));
+    const { page, error } = await ask.answer;  // a refusal or a failure: the page it drew last stays
+    clearTimeout(v.slow);
+    v.slow = 0;
+    v.late = false;
+    v.asking = false;
+    if (tabView !== v) return;  // left meanwhile: what it answered is dropped
+    v.error = error ? cap(error) : '';
+    if (!error) {
+      v.page = page && typeof page === 'object' && !Array.isArray(page) ? page
+        : { note: page === null || page === undefined ? '' : String(page).slice(0, 2000) };
+      v.at = Date.now();
+    }
+    try { drawTab(v.name); } catch (e) { v.error = `Its page could not be drawn: ${e.message}`; }
+    if (tabView !== v) return;
+    if (askable()) v.timer = setTimeout(askTab, v.again ? 0 : (error ? Math.max(v.every, 5) : v.every) * 1000);
+    else waitShown();  // hidden meanwhile (its frame too): asked again once it is drawn
+  }
+  function askTabNow(name) {  // after a change asked through the page: the tab shown asked again at once (after one under way)
+    const v = tabView;
+    if (!v || v.name !== name) return;
+    if (v.asking) { v.again = true; return; }
+    askTab();
+  }
+  function redrawTabFrame(m) {  // its status asked again while one of its own tabs is shown: the tab's page as it is, unless
+    // what frames it changed (its state, its switches, its tabs): then the pane drawn anew round what the tab holds
+    const t = ownTabOf(m);
+    if (!t || frameKey(m, t) !== tabFramed) drawData();
+    else drawTab(m.name);
+    drawSide();
+    const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
+    if (sub) sub.textContent = stateLine(m);
+  }
+
+  // the tabs' own styles (0.27.0), on the themes' variables: one <style> added once (a mouse's hover alone where it hovers)
+  const TAB_STYLE = `
+.tab-page .tab-title{margin:12px 0 2px;font-size:14px;font-weight:600}
+.tab-page .tab-said:empty{display:none}
+.tab-page .tab-part:empty{display:none}
+.tab-globe{margin:10px 0 4px;min-width:0}
+.flow-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:4px 0 8px}
+.flow-bar label{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+.flow-kinds{display:inline-flex;flex-wrap:wrap;gap:4px}
+.flow-kinds[hidden]{display:none}
+.flow-kind{padding:2px 9px;border-radius:10px;font-size:11px}
+.flow-kind[aria-pressed="true"]{color:var(--accent);border-color:var(--accent);background:var(--hover)}
+.flow-search{flex:1 1 240px;min-width:0}
+.flow-count{flex-basis:100%}
+.flow-count:empty{display:none}
+table.flows td{vertical-align:top}
+table.flows tr.flagged td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+table.flows .chip{margin:0 4px 2px 0}
+.chip.flow-flag{color:var(--accent);border-color:var(--accent)}
+table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.flow-arrow{color:var(--muted)}
+@media (any-pointer: coarse){.flow-kind{min-height:36px;padding:4px 12px}}
+@media (max-width: 700px){.flow-search{flex-basis:100%}}
+`;
+  (() => {
+    if (document.getElementById('platform-tabs-style')) return;
+    const s = document.createElement('style');
+    s.id = 'platform-tabs-style';
+    s.textContent = TAB_STYLE;
+    (document.head || document.documentElement).appendChild(s);
+  })();
 
   // -- Connections (0.10.0; the user, 2026-11-08: "the root plugin (platform) will need to visually illustrate how
   // plugins are connected to each other or to the main app/plugin/icon via IPC, all requests and interactions should be
@@ -1767,7 +2302,8 @@
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
-    if (m && hasHook(m, 'check') && !userOff(m)) {  // its check of this PC: asked when shown, again after a minute
+    const own = m && !pending(m) ? ownTabOf(m) : null;  // 0.27.0: one of its own tabs shown
+    if (m && hasHook(m, 'check') && !userOff(m) && !own) {  // its check of this PC: asked when shown, again after a minute
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
     }
@@ -1776,15 +2312,19 @@
     // a terminal's panel shown stays where it is, the pane drawn anew around it (0.17.0): its box keeps the focus, the
     // on-screen keyboard stays up and a word being composed goes on; else the pane drawn anew and the panel put in its slot
     const panel = m && shells[m.name] ? shells[m.name].panel : null;
-    if (!(panel && panel.parentNode === data && drawAround(panel, html, m.name))) {
-      const typing = !!panel && panel.contains(document.activeElement);
-      data.innerHTML = html;
-      placeShells(typing);
-    }
+    const put = () => {
+      if (!(panel && panel.parentNode === data && drawAround(panel, html, m.name))) {
+        const typing = !!panel && panel.contains(document.activeElement);
+        data.innerHTML = html;
+        placeShells(typing);
+      }
+    };
+    if (own) keepFocus(put); else put();  // on one of its own tabs, a filter or a search being typed keeps the focus
     if (sel === CONNECTIONS) updateConnections(true);
     Charts.draw(data);
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
     Object.values(shells).forEach((sh) => { if (sh.panel && !sh.panel.isConnected) sh.term.attach(null); });  // not shown: not drawn
+    syncTab();  // 0.27.0: the tab shown asked (its globe back in its place), one left let go
     data.scrollTop = scrolled;
     if (tabPicked) {  // 0.22.0: the tab now shown keeps the focus a click or a key gave its button
       tabPicked = false;
@@ -2014,7 +2554,8 @@
     clearTimeout(live);
     const m = shown();
     if (!m || document.hidden) return;
-    const every = pathRunning(m) ? 1 : !m.status.charts ? TABLES_EVERY : span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
+    // on one of its own tabs (0.27.0) the tab's page is asked on its own: the status only now and then, for its state
+    const every = ownTabOf(m) ? TABLES_EVERY : pathRunning(m) ? 1 : !m.status.charts ? TABLES_EVERY : span === 'day' ? 30 : Math.max(1, Number(m.status.charts.interval) || 2);
     live = setTimeout(() => refresh(m.name), every * 1000);
   }
   async function refresh(name) {
@@ -2023,8 +2564,8 @@
     const g = gen;
     try {
       const was = st.machines[name], charted = !!(was && was.status && was.status.charts);  // the day's figures: a charted plugin's
-      const [m, d] = await Promise.all([api('GET', `api/machines/${encodeURIComponent(name)}`),
-        span === 'day' && charted ? api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: 'charts', args: ['day'] }) : null]);
+      const [m, d] = await Promise.all([api('GET', `api/machines/${encodeURIComponent(name)}`),  // (not drawn on one of its own tabs)
+        span === 'day' && charted && !ownTabOf(was) ? api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook: 'charts', args: ['day'] }) : null]);
       if (g === gen) {  // nothing changed meanwhile (a plugin disabled or enabled, the page asked again)
         if (d) day[name] = d.answer;
         st.machines[name] = m;
@@ -2049,6 +2590,7 @@
     if (again && caret && again.setSelectionRange) again.setSelectionRange(caret[0], caret[1]);  // typing goes on where it was
   }
   function redrawShown(m) {
+    if (ownTabOf(m)) { redrawTabFrame(m); return; }  // 0.27.0: one of its own tabs shown, its page asked on its own
     const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`), pz = $(`paths-${m.name}`);
     const onApi = tabOf(m) === 'api' && !!$(`api-${m.name}`);  // 0.22.0: its API tab is shown: its cards alone, below
     if (pz && !off(m)) {  // its paths drawn again only when they changed: the moving traffic goes on
@@ -2093,6 +2635,7 @@
   async function ask(name, hook, args) {
     try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args }); }
     catch (e) { say(name, e.message); return false; }
+    askTabNow(name);  // 0.27.0: asked from one of its own tabs: that tab's page asked again at once
     await render();
     return true;
   }
@@ -2110,6 +2653,7 @@
     try { await api('POST', `api/machines/${encodeURIComponent(name)}/ask`, { hook, args: [value] }); }
     catch (e) { say(name, e.message); return; }
     say(name, '');
+    askTabNow(name);  // 0.27.0: chosen on one of its own tabs: that tab's page asked again at once
     if (window.LiminalTheme) { await window.LiminalTheme.load(); retheme(); }
     await render();
     const again = data.querySelector(`button.choice[data-hook="${CSS.escape(hook)}"][data-value="${CSS.escape(value)}"]`);
@@ -2261,6 +2805,7 @@
     }
     j.reading = false;
     if (jobs[name] !== j) return;
+    askTabNow(name);  // 0.27.0: a job asked from one of its own tabs: that tab's page asked again once it ends
     if (!['setup', 'update'].includes(j.action) && selected() === name) { await refresh(name); return; }  // a hook's: its tables, the focus kept (0.19.0)
     delete checks[name];  // installed now, perhaps: asked again
     await render();
@@ -2391,6 +2936,8 @@
     if (mg) { if (!mg.disabled) moveChosen(mg); return; }
     const mc = e.target.closest('button.move-clear[data-table]');
     if (mc) { chosenOf(mc.dataset.machine, mc.dataset.table).clear(); redrawTables(mc.dataset.machine, pickSel('select.move-to', mc)); return; }
+    const fk = e.target.closest('button.flow-kind[data-tab]');  // 0.27.0: a label's kind on a tab's connections, chosen or not
+    if (fk) { refilter(fk); return; }
     const tb = e.target.closest('button.tab[data-tab]');  // 0.22.0: a plugin's tab: Main is the plugin's own address
     if (tb) {
       if (tb.getAttribute('aria-selected') === 'true') return;
@@ -2617,6 +3164,17 @@
     sh.saidTimer = setTimeout(() => { el.textContent = ''; }, 6000);
   }
 
+  // a plugin's tabs (0.27.0: Main, API and its own): the arrow keys, Home and End move to the tab beside, the first or the
+  // last and show it, as a tab list's do (Enter and Space as a button's)
+  data.addEventListener('keydown', (e) => {
+    const tb = e.target.closest && e.target.closest('button.tab[data-tab]');
+    if (!tb || e.altKey || e.ctrlKey || e.metaKey || !['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+    const all = [...tb.parentElement.querySelectorAll('button.tab[data-tab]')], at = all.indexOf(tb);
+    const next = all[e.key === 'Home' ? 0 : e.key === 'End' ? all.length - 1 : (at + (e.key === 'ArrowRight' ? 1 : -1) + all.length) % all.length];
+    e.preventDefault();
+    if (next && next !== tb) next.click();
+  });
+
   // the radio group's arrow keys move the choice, as a radio group's do
   data.addEventListener('keydown', (e) => {
     const c = e.target.closest && e.target.closest('button.choice[data-hook]');
@@ -2706,7 +3264,8 @@
 
   window.addEventListener('hashchange', draw);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { clearTimeout(live); clearTimeout(trafficTimer); return; }
+    if (document.hidden) { clearTimeout(live); clearTimeout(trafficTimer); pauseTab(); return; }
+    syncTab();  // 0.27.0: one of its own tabs shown: asked again at once
     const m = shown();
     if (m) refresh(m.name);
     if (selected() === CONNECTIONS) loadTraffic();

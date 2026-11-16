@@ -10,8 +10,9 @@ from test_app import _call
 def test_a_plugins_page_has_tabs_and_its_apis_a_tab_of_their_own(served):
     app, port, lines, box = served
     js, css = _call(port, "GET", "/platform.js")[1], _call(port, "GET", "/platform.css")[1]
-    # the tabs, a list the next one is added to; "APIs" when a plugin attaches to several
-    assert b"const TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];" in js
+    # the tabs: Main and API ("APIs" when a plugin attaches to several), then the plugin's own (0.27.0: test_plugin_tabs.py)
+    assert b"const OWN_TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];" in js
+    assert b"const tabsOf = (p) => [...OWN_TABS, ...declaredTabs(p)];" in js and b"const TABS = " not in js
     assert b'<nav class="tabs" role="tablist"' in js and b'role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}"' in js
     # beside the title, before the switches, on a machine plugin's page and an AI assistant's
     assert b"<h2>${esc(m.title)}</h2>${tabsRow(m)}${switchRow(m)}</div>" in js and b"<h2>${esc(a.title)}</h2>${tabsRow(a)}${switchRow(a)}</div>" in js

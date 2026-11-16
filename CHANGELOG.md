@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.27.0 (2026-11-15)
+
+A plugin's own tabs. The user, 2026-11-14: "so for the firewall's both are going to get a 'world wide web view'"; "there
+needs to be a way to 'filter' (another tab)".
+
+The tabs a plugin declares (liminal-libs 1.54.0's `MachinePlugin.TABS`) come after Main and API, each at #name/<id>.
+
+**When a tab is asked.** The page asks a tab's hook every `every` seconds: a POST to api/machines/NAME/ask, with no
+arguments. It asks only while all of these hold:
+- the tab is shown;
+- the page is visible;
+- when the charts app shows the platform in its bound frame, that frame is drawn.
+So a capture behind a tab stops when nobody looks: the user's decision, "only while you look".
+
+There is one ask at a time per tab, kept across leaving and coming back, and a late one is said.
+
+**What the page draws.** Whatever the hook answers:
+- a globe (liminal-globe.js);
+- charts, forgotten once no longer drawn;
+- connections with their filters (direction, flagged, labels, search), flagged rows first, read by own keys only;
+- tables, forms and actions.
+The parts are not announced again on every redraw.
+
+**The server.**
+- It sends each plugin's `tabs`: at most 8, and never Main or API, setup, settings, scan, run or a job hook.
+- A tab's hook is a read: noted as such in Connections, and kept out of the log.
+- A server before 0.27.0 sends no tabs, and the page then shows Main and API as before.
+
+Needs liminal-libs 1.54.0.
+
 ## 0.26.0 (2026-11-15)
 
 Two more sections in the list on the left, built the way Cloud plugins is (the user: "platform needs a virtualization
