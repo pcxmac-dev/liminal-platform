@@ -253,6 +253,7 @@
     list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>${loadingLine()}`
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
       + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
+      + (window.LiminalCodebase ? item(CODEBASE, 'branch', 'Codebase', 'its repositories, its code, by language') : '')
       + (all.length ? SECTIONS.map(([s, title]) => { const mine = inSection(all, s); return mine.length ? `<h4>${title}</h4>` + mine.map(drawn).join('') : ''; }).join('')
         : '<h4>Machine plugins</h4><div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
       + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, a.icon || 'analysis', a.title, pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a))).join('') : '');
@@ -1718,6 +1719,25 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   // its width how often, moving while it carried something in the last seconds, a dot running along it for each new
   // interaction. A box picked shows its own links and rows; a class switched off leaves the picture and the table.
   const CONNECTIONS = 'connections';
+  // -- Codebase (0.30.0; the user, 2026-11-16: "i want to add another functional class called codebase, which has the
+  // associated repositories (git/svn/,,,) if there are, also the code base, and stats like how much is rust %,
+  // javascript %, etc..."; "this class will be added to all the 'apps' just like connections"; "it will also say how far
+  // it is behind the remote"): the library's own object in every app (apps/codebase.py, GET api/codebase) and the
+  // library's drawing of it (codebase.js). While it is the one selected the two panes are its own: asked once, again
+  // only while a reading or an asking of the remotes is under way; the page's other redraws leave them alone. A library
+  // from before 1.59.0 has no codebase.js: no entry in the list.
+  const CODEBASE = 'codebase';
+  let codebaseShown = false;
+  function showCodebase() {
+    if (codebaseShown) return;
+    codebaseShown = true;
+    window.LiminalCodebase.mount(data, side, { get: (path) => api('GET', path), send: (path, body) => api('POST', path, body) });
+  }
+  function leaveCodebase() {
+    if (!codebaseShown) return;
+    codebaseShown = false;
+    window.LiminalCodebase.unmount();
+  }
   const CLASS_ORDER = ['read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'];
   const COLS = { caller: [64, 112], app: [236, 150], plugin: [478, 180], outside: [704, 176] };  // x and width, of 800
   let traffic = null;  // the last GET api/traffic
@@ -2303,6 +2323,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
 
   function drawData() {
     const sel = selected();
+    if (sel === CODEBASE && window.LiminalCodebase) { showCodebase(); return; }  // its panes are the library's while shown
+    leaveCodebase();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
     const own = m && !pending(m) ? ownTabOf(m) : null;  // 0.27.0: one of its own tabs shown
@@ -2410,6 +2432,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     if (sel === CONNECTIONS) { drawConnectionsSide(); return; }
+    if (sel === CODEBASE && window.LiminalCodebase) return;  // drawn with its data (codebase.js)
     side.innerHTML = sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : '';
   }
 

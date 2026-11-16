@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.30.0 (2026-11-16)
+
+Codebase, under This machine beside Connections (the user: "i want to add another functional class called codebase,
+which has the associated repositories (git/svn/,,,) if there are, also the code base, and stats like how much is rust
+%, javascript %, etc..."; "this class will be added to all the 'apps' just like connections"; "it will also say how
+far it is behind the remote"). The class and its drawing are the library's (liminal-libs 1.59.0: `apps/codebase.py`,
+answered by every app at `GET /api/codebase`; `ui/static/codebase.js`), so the platform's part is small.
+
+- The list has **Codebase** under This machine. Its page shows the workspace's code by language as one bar (the share
+  of each of the bytes of code and markup), the same for what the platform itself runs from, every repository (its
+  kind, branch, commit, how far it is behind and ahead of its remote and when that remote was last asked, what is not
+  committed, its lines) with filters for the ones behind, the ones with changes and the platform's own, and every
+  language with its lines and files. A repository picked shows its details beside.
+- **Read again** reads everything anew. **Ask the remotes** runs `git fetch` in every repository that has a remote,
+  after a confirmation, and counts what is behind anew; nothing reaches a remote without that click.
+- With a library from before 1.59.0 the entry is not listed.
+
 ## 0.29.0 (2026-11-16)
 
 A plugin not valid yet shows what it needs. The user: "still need linux firewall". Inside WSL's Ubuntu the Linux firewall

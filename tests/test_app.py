@@ -6,6 +6,8 @@ import json
 import time
 from http.client import HTTPConnection
 
+import pytest
+
 from liminal_libs.web import WRITE_HEADER
 
 from liminal_libs.sources.plugin import PlatformPlugin
@@ -739,6 +741,35 @@ def test_the_page_draws_the_connections(served):
     assert b"'read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'" in page
     css = _call(port, "GET", "/platform.css")[1]
     assert b".k-network { --k: var(--series-6); }" in css and b"prefers-reduced-motion" in css
+
+
+def test_the_page_lists_codebase_and_the_platform_answers_it(served):
+    """Codebase (0.30.0; the user, 2026-11-16: "another functional class called codebase ... added to all the 'apps' just
+    like connections"): the library's object in the platform as in every app, its entry under This machine, its two
+    panes handed to the library's codebase.js while it is shown."""
+    app, port = served[0], served[1]
+    page = _call(port, "GET", "/platform.js")[1]
+    assert b"const CODEBASE = 'codebase'" in page and b"window.LiminalCodebase.mount(data, side" in page
+    assert b"item(CODEBASE, 'branch', 'Codebase'" in page and b"leaveCodebase();" in page
+    index = _call(port, "GET", "/")[1]
+    assert index.index(b'src="apis.js"') < index.index(b'src="codebase.js"') < index.index(b'src="platform.js"')
+    if not hasattr(app, "codebase"):
+        pytest.skip("liminal-libs before 1.59.0: no Codebase in the frame (the page lists none then)")
+    status, drawing = _call(port, "GET", "/codebase.js")
+    assert status == 200 and b"window.LiminalCodebase = {" in drawing  # the library's file, served beside the page's own
+    asked: list[str] = []
+
+    def no_tool(args, cwd, timeout):  # (no process in a test: every tool "not installed")
+        asked.append(" ".join(args[:2]))
+        return 127, b"", b"not installed here"
+
+    app.codebase.runner, app.codebase._roots = no_tool, []
+    status, first = _call(port, "GET", "/api/codebase")
+    assert status == 200 and first["state"] in ("reading", "ready")
+    got = app.codebase.wait()
+    assert got["state"] == "ready" and got["app"] == "platform" and not [a for a in asked if "fetch" in a]
+    used = {what for r in got["repositories"] for what in r["used"]}
+    assert "the platform app" in used and "the library" in used  # what it runs from, in a repository or not
 
 
 def test_a_plugin_hidden_from_the_dock_stays_as_it_was_and_comes_back(served):
