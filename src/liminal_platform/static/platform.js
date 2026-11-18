@@ -3,7 +3,8 @@
 // described as a list of details w/ the specifics in the right hand column, just like the charts had a right hand
 // column"; "active plugins, will be part of the tray on the very right side"; "use the black boundary (around the
 // icon) to serve as the tray border, it can stretch vertically to include more icons or plugins"):
-//   the list (this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI assistants) | the selected one's data | its specifics | the tray
+//   the list (this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI plugins) | the
+//   selected one's data | its specifics | the tray
 // The tray is the platform's chip, a divider, then an icon per active plugin, all in the one dark box. A right click
 // on a plugin's icon offers to disable it ("allow me to right click on the icons to disable them on the right icon
 // menu"); the switch at the head of a plugin's page enables or disables it ("enable disable switch (left to right) on
@@ -75,6 +76,7 @@
   let gen = 0;  // bumped by every change of what the page holds: an answer asked before it is dropped
   const checks = {};  // a plugin's check of this PC, by name: {at, data} | {at, loading} | {at, error}
   const jobs = {};  // a plugin's job panel (an install, an update), by name: {term, offset, open, action, running, ok, timer}
+  // (0.31.0: and cancels, cancelling, cancelled as the platform says them; asked: its Cancel was clicked on this page)
   const shells = {};  // a plugin's login terminal, by name: {term, offset, alive, title, queue, timer, sending}
   const PREPARING = ['wsl', 'update', 'version'];  // setup steps that prepare this PC: never locked by its check
   const enc = encodeURIComponent;
@@ -158,7 +160,9 @@
   }
 
   // -- the tray: the chip, a divider, an icon per active plugin, in the one dark box ------------------------
-  function drawRail() {  // the active plugins, none hidden (0.10.2: the machine plugins, then the AI assistants)
+  // the active plugins, none hidden, in the platform's order (0.10.2: the machine plugins, then the AI assistants;
+  // 0.31.0: then the machine plugins of the AI section, the inference plugins before the harnesses)
+  function drawRail() {
     const sel = selected();
     const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden)); });
     // a plugin's icon: its name and the right click in its tooltip; a long press (menu.js, 0.17.0) opens the same menu,
@@ -218,11 +222,14 @@
     syncTab();  // 0.27.0: a plugin's own tab under your account is not asked meanwhile
   }
 
-  // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants
+  // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants, then
+  // (0.31.0) the machine plugins of the AI section, inference before harnesses: the AI plugins' icons sit together
   function trayFollows(name, present) {
     if (!tray || !st) return;
     const p = pluginOf(name);
-    const order = [...Object.keys(st.machines), ...(st.assistants || []).map((a) => a.name)];
+    const names = Object.keys(st.machines), ofAi = (n) => isAi(st.machines[n]);
+    const order = [...names.filter((n) => !ofAi(n)), ...(st.assistants || []).map((a) => a.name),
+      ...AI_GROUPS.flatMap(([g]) => names.filter((n) => ofAi(n) && st.machines[n].group === g))];
     const own = tray.items.filter((i) => i.kind !== 'plugin');
     const plugins = tray.items.filter((i) => i.kind === 'plugin' && i.id !== name);
     if (present && p && !p.hidden) plugins.push({ id: name, icon: p.icon || 'chip', title: p.title, kind: 'plugin', app: tray.app });
@@ -230,7 +237,7 @@
     tray = { ...tray, items: [...own, ...plugins] };
   }
 
-  // -- the list: this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI assistants ---------
+  // -- the list: this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI plugins ----------
   // A machine plugin's section (0.25.0; the user, 2026-11-14: "classify the cloud plugins under the 'cloud plugins' section
   // which should be on the far left"; 0.26.0, 2026-11-15: "platform needs a virtualization plugins section"; "just like
   // cloud plugins"; "then OS plugins"): "virtualization" for a hypervisor's or a container engine's, "os" for an operating
@@ -238,7 +245,15 @@
   // section is drawn when it has plugins, in this order. A server older than 0.25.0 sends no section, and one older than
   // 0.26.0 says "machine" for the virtualization and OS plugins: they stay under Machine plugins there, as before.
   const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins']];
-  const sectionOf = (m) => (SECTIONS.some(([s]) => s === m.section) ? m.section : 'machine');
+  // 0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform"; "i also need 3
+  // harness plugins for the platform"; "they will be classified as AI plugins"; "the other plugins are strictly
+  // proprietary service plugins"): a machine plugin whose section is "ai" and whose group is one of these two is drawn
+  // under AI plugins, in its group, after the assistants (the proprietary services). A server older than 0.31.0 sends
+  // no group (and "machine" for such a plugin's section): it stays under Machine plugins there, as an unknown section
+  // does.
+  const AI_GROUPS = [['inference', 'Inference'], ['harness', 'Harnesses']];
+  const isAi = (m) => m.section === 'ai' && AI_GROUPS.some(([g]) => g === m.group);
+  const sectionOf = (m) => (isAi(m) ? 'ai' : SECTIONS.some(([s]) => s === m.section) ? m.section : 'machine');
   const inSection = (all, s) => all.filter((m) => sectionOf(m) === s);
   function drawList() {
     const sel = selected();
@@ -250,13 +265,27 @@
     const cls = (p) => (pending(p) ? ' pending' : off(p) ? ' off' : '') + (popOf(p.name) || { cls: '' }).cls;
     const more = (p) => (popOf(p.name) || { style: '' }).style;
     const drawn = (m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m));
+    // 0.31.0: every AI plugin under the one heading, each in its group: the assistants (a vendor's service each), then
+    // the machine plugins that serve local models, then the harnesses. A group is drawn when it has plugins
+    const assistants = st.assistants || [], ai = all.filter(isAi);
+    const assistant = (a) => item(a.name, a.icon || 'analysis', a.title,
+      pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a));
     list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>${loadingLine()}`
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
       + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
       + (window.LiminalCodebase ? item(CODEBASE, 'branch', 'Codebase', 'its repositories, its code, by language') : '')
-      + (all.length ? SECTIONS.map(([s, title]) => { const mine = inSection(all, s); return mine.length ? `<h4>${title}</h4>` + mine.map(drawn).join('') : ''; }).join('')
+      // the four sections' plugins; none but AI plugins (0.31.0: drawn below), the line saying that none is installed
+      + (all.some((m) => !isAi(m)) ? SECTIONS.map(([s, title]) => {
+        const mine = inSection(all, s);
+        return mine.length ? `<h4>${title}</h4>` + mine.map(drawn).join('') : '';
+      }).join('')
         : '<h4>Machine plugins</h4><div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
-      + ((st.assistants || []).length ? `<h4>AI assistants</h4>` + st.assistants.map((a) => item(a.name, a.icon || 'analysis', a.title, pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a))).join('') : '');
+      + (assistants.length || ai.length ? '<h4>AI plugins</h4>'
+        + (assistants.length ? '<h5 class="group">Proprietary services</h5>' + assistants.map(assistant).join('') : '')
+        + AI_GROUPS.map(([g, title]) => {
+          const mine = ai.filter((m) => m.group === g);
+          return mine.length ? `<h5 class="group">${title}</h5>` + mine.map(drawn).join('') : '';
+        }).join('') : '');
   }
 
   // -- the middle: the selected one's data ------------------------------------------------------------
@@ -769,8 +798,14 @@
   const whenMet = (values, x) => !x.when || typeof x.when !== 'object'
     || Object.entries(x.when).every(([k, vs]) => (Array.isArray(vs) ? vs : [vs]).map(String).includes(String(values[k] ?? '')));
   const choiceOf = (x, v) => (Array.isArray(x.choices) ? x.choices.find((c) => c && String(c.value) === String(v)) : null) || null;
+  // a password typed (a field of type password: sudo's, for a Linux plugin's Root access and changes; the user,
+  // 2026-11-17: used for that one action, "never kept, logged, written, shown"): never shown, "(given)" where the
+  // dialog says what is sent; never put back in its field when the dialog is drawn again (Back, Change it); let go of
+  // once it is asked or the dialog closes (forgetSecrets), so a second confirmation has it typed again
+  const GIVEN = '(given)';
   function shownValue(x, v) {  // a field's value in words: a choice by its title, nothing by the field's `empty`
     if (!given(v)) return x.empty || '–';
+    if (x.type === 'password') return GIVEN;
     const c = choiceOf(x, v);
     return String(c && c.title !== undefined ? c.title : v);
   }
@@ -798,6 +833,7 @@
       const v = values && Object.prototype.hasOwnProperty.call(values, x.name) ? values[x.name] : x.value;
       start[x.name] = v !== undefined ? v : x.type === 'choice' && Array.isArray(x.choices) && x.choices[0] ? x.choices[0].value : null;
     });
+    forgetSecrets(dlg);  // a form opened over another: what was typed in that one let go of
     dlg = { name, plugin: m.title, form: f, values: start, step: editableOf(f) ? 'fill' : 'confirm', busy: false, accepted: [],
       accept: null, answer: null, words: '', opener, key: opener ? `${opener.dataset.form}|${opener.dataset.values}` : '' };
     const el = dialogEl();
@@ -850,7 +886,7 @@
       if (what === 'close') el.close();
       else if (what === 'back') { dlg.step = 'fill'; dlg.accepted = []; drawDialog(); focusStep(); }  // a changed change: accepted again
       else if (what === 'yes') send();
-      else if (what === 'accept') { dlg.accepted.push(dlg.accept); send(); }
+      else if (what === 'accept') { if (typedAgain()) { dlg.accepted.push(dlg.accept); send(); } }  // a password again
     });
     document.body.appendChild(el);
     return el;
@@ -877,19 +913,48 @@
       ? `<select ${attrs}>${(x.choices || []).filter(Boolean).map((o) => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.title !== undefined ? o.title : o.value)}</option>`).join('')}</select>`
       : x.type === 'number'
         ? `<input type="number" step="1" ${keys} ${attrs}${x.min !== undefined ? ` min="${esc(x.min)}"` : ''}${x.max !== undefined ? ` max="${esc(x.max)}"` : ''} value="${given(v) ? esc(v) : ''}"${hint}>`
-        : x.type === 'password'
-          ? `<input type="password" ${keys} ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`
+        : x.type === 'password'  // drawn empty, whatever was typed: never its value in the page
+          ? `<input type="password" ${keys} ${attrs}${hint}>`
           : `<input type="text" ${keys} ${attrs} value="${given(v) ? esc(v) : ''}"${hint}>`;
     const optional = !x.required && x.type !== 'choice' ? ' <span class="muted">(optional)</span>' : '';
     return `<div class="field" data-field="${esc(x.name)}"><label for="${id}">${esc(x.label || x.name)}${optional}</label>${control}`
       + `<span class="sub" id="${id}-note">${esc((c && c.note) || x.note || '')}</span><span class="bad" id="${id}-bad"></span></div>`;
   }
-  function valuesList(f, values) {  // the change asked: each field shown or fixed, by its label (a choice with its note)
-    const rows = f.fields.filter((x) => x && (x.type === 'fixed' || EDITABLE.includes(x.type)) && whenMet(values, x)).map((x) => {
+  // the change asked: each field shown or fixed, by its label (a choice with its note, a password "(given)"); `again`:
+  // the second confirmation's, where a password is not listed but typed again under the list (secretFields)
+  function valuesList(f, values, again) {
+    const rows = f.fields.filter((x) => x && (x.type === 'fixed' || EDITABLE.includes(x.type)) && whenMet(values, x)
+      && !(again && x.type === 'password')).map((x) => {
       const c = choiceOf(x, values[x.name]);
       return `<dt>${esc(x.label || x.name)}</dt><dd>${esc(shownValue(x, values[x.name]))}${c && c.note ? `<span class="sub">${esc(c.note)}</span>` : ''}</dd>`;
     });
     return rows.length ? `<dl class="facts change">${rows.join('')}</dl>` : '';
+  }
+  // the second confirmation's password fields, empty: the first ask let go of what was typed, so it is typed again for
+  // this one, as sudo asks again for a command run again (typedAgain reads them at its click)
+  const secretFields = (f, values) => f.fields.map((x, i) => (x && x.type === 'password' && whenMet(values, x)
+    ? fieldHtml(x, i, values) : '')).join('');
+  function typedAgain() {  // checked as review() checks a fill; false, its complaint said, when one is left empty
+    let ok = true, first = null;
+    dlg.form.fields.forEach((x, i) => {
+      if (!x || x.type !== 'password' || !whenMet(dlg.values, x)) return;
+      const c = $(`fd-${i}`);
+      if (checkField(x, i, c, String((c && c.value) || ''), null)) { ok = false; first = first || c; }
+    });
+    showFirst(first);
+    return ok;
+  }
+  // a password typed, let go of: the dialog's values hold it no longer. The names of the fields that held one (never
+  // a value), for the dialog to say "(given)" while what was sent is answered (send)
+  function forgetSecrets(d) {
+    if (!d || !d.values || !d.form) return [];
+    const gone = [];
+    d.form.fields.forEach((x) => {
+      if (!x || x.type !== 'password' || typeof x.name !== 'string') return;
+      if (given(d.values[x.name])) gone.push(x.name);
+      d.values[x.name] = null;
+    });
+    return gone;
   }
   const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
   function answerHtml(a) {  // a hook's answer in words: its `said` and `lines` (a fault when `ok` is false), else what it holds
@@ -905,7 +970,11 @@
   function drawDialog() {
     const el = $('formDialog');
     if (!el || !dlg) return;
-    const { form: f, values, step } = dlg, c = f.confirm || {};
+    const { form: f, step } = dlg, c = f.confirm || {};
+    // the values as the dialog says them: while what was sent is answered (0.31.0), a password it carried is said
+    // "(given)", though the dialog holds it no more (forgetSecrets)
+    const values = dlg.busy && (dlg.sent || []).length
+      ? { ...dlg.values, ...Object.fromEntries(dlg.sent.map((n) => [n, GIVEN])) } : dlg.values;
     const head = (title) => `<h3 id="formDialogTitle" tabindex="-1">${esc(title)}</h3><div class="muted small">${esc(dlg.plugin)}</div>`;
     const btn = (what, text, cls = '') => `<button type="button" data-do="${what}"${cls ? ` class="${cls}"` : ''}>${esc(text)}</button>`;
     const back = editableOf(f) ? btn('back', 'Back') : '';
@@ -921,8 +990,12 @@
         + asking + `<div class="row end buttons">${btn('close', 'Cancel')}${back}${btn('yes', c.yes || 'Yes', c.danger ? 'danger' : 'accent')}</div>`;
     } else if (step === 'accept') {  // the second confirmation: the plugin's refusal, then what accepting it means
       const x = f.fields.find((y) => y && y.name === dlg.accept) || {};
-      html = head(x.title || 'Go on anyway?') + refusal + (x.words ? `<p class="words">${esc(filled(x.words, f, values))}</p>` : '') + valuesList(f, values)
-        + asking + `<div class="row end buttons">${btn('close', 'Cancel')}${back}${btn('accept', x.yes || 'Go on anyway', 'danger')}</div>`;
+      html = head(x.title || 'Go on anyway?') + refusal
+        + (x.words ? `<p class="words">${esc(filled(x.words, f, values))}</p>` : '')
+        // what is sent, a password typed again under it; while that is asked, the password said "(given)" in it
+        + (dlg.busy ? valuesList(f, values) : valuesList(f, values, true) + secretFields(f, values)) + asking
+        + `<div class="row end buttons">${btn('close', 'Cancel')}${back}`
+        + `${btn('accept', x.yes || 'Go on anyway', 'danger')}</div>`;
     } else if (step === 'done') {
       const fault = !!(dlg.answer && typeof dlg.answer === 'object' && dlg.answer.ok === false);
       html = head(fault ? 'Done, with a fault' : 'Done') + answerHtml(dlg.answer) + `<div class="row end buttons">${btn('close', 'Done', 'accent')}</div>`;
@@ -969,30 +1042,41 @@
     });
   }
 
+  // field i (`typed`: what it holds) checked as its type says (the plugin checks again), its complaint said at `c`, and
+  // kept: trimmed, a password as typed (0.31.0: sudo's, its spaces its own; a key in one is trimmed where it is kept),
+  // `empty` when nothing is typed (spaces alone are none). Its complaint's words, '' for none
+  function checkField(x, i, c, typed, empty) {
+    const v = typed.trim(), bad = $(`fd-${i}-bad`);
+    const range = `a whole number${x.min !== undefined && x.max !== undefined ? `, ${x.min} to ${x.max}` : ''}`;
+    let why = '';
+    if (x.type === 'number' && c && c.validity && c.validity.badInput) why = range;
+    else if (!v) why = x.required ? `${x.label || x.name} is needed` : '';
+    else if (x.type === 'number') {
+      const n = Number(v);
+      if (!Number.isInteger(n) || (x.min !== undefined && n < x.min) || (x.max !== undefined && n > x.max)) why = range;
+    } else if (x.type === 'choice' && !choiceOf(x, v)) why = 'one of its choices';
+    dlg.values[x.name] = !v ? empty : x.type === 'password' ? typed : v;
+    if (c) { if (why) c.setAttribute('aria-invalid', 'true'); else c.removeAttribute('aria-invalid'); }
+    if (bad) bad.textContent = why;
+    return why;
+  }
+  // the first field to change: focused, or after a finger's tap brought into view with its complaint (0.17.0: no
+  // keyboard called up before it is tapped)
+  function showFirst(first) {
+    if (!first) return;
+    if (!autofocus(first)) (first.closest('.field') || first).scrollIntoView({ block: 'nearest' });
+  }
+
   function review() {  // the fill checked as its fields say (the plugin checks again), then the confirmation
     if (!dlg || dlg.step !== 'fill') return;
     syncFill();
     let first = null;
     dlg.form.fields.forEach((x, i) => {
-      const c = $(`fd-${i}`), bad = $(`fd-${i}-bad`);
+      const c = $(`fd-${i}`);
       if (!x || !c || !EDITABLE.includes(x.type) || !whenMet(dlg.values, x)) return;
-      const v = String(dlg.values[x.name] ?? '').trim();
-      const range = x.min !== undefined && x.max !== undefined ? `a whole number, ${x.min} to ${x.max}` : 'a whole number';
-      let why = '';
-      if (x.type === 'number' && c.validity && c.validity.badInput) why = range;
-      else if (!v) why = x.required ? `${x.label || x.name} is needed` : '';
-      else if (x.type === 'number') {
-        const n = Number(v);
-        if (!Number.isInteger(n) || (x.min !== undefined && n < x.min) || (x.max !== undefined && n > x.max)) why = range;
-      } else if (x.type === 'choice' && !choiceOf(x, v)) why = 'one of its choices';
-      dlg.values[x.name] = v;
-      if (why) c.setAttribute('aria-invalid', 'true'); else c.removeAttribute('aria-invalid');
-      if (bad) bad.textContent = why;
-      if (why && !first) first = c;
+      if (checkField(x, i, c, String(dlg.values[x.name] ?? ''), '') && !first) first = c;
     });
-    // the first field to change: focused, or after a finger's tap brought into view with its complaint (0.17.0: no keyboard
-    // called up before it is tapped)
-    if (first) { if (!autofocus(first)) (first.closest('.field') || first).scrollIntoView({ block: 'nearest' }); return; }
+    if (first) { showFirst(first); return; }
     if (dlg.form.confirm === false) { send(); return; }  // a choice changing nothing on the machine (0.7.0): asked at once
     dlg.step = 'confirm';
     drawDialog();
@@ -1003,26 +1087,38 @@
     const d = dlg;
     if (!d || d.busy) return;
     d.busy = true;
-    drawDialog();
-    focusStep();
-    let out = null, err = null;
-    try {
-      out = d.form.route === 'settings'  // a plugin's settings: kept by the platform, the values typed only
-        ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: Object.fromEntries(Object.entries(d.values).filter(([, v]) => given(v))) }) }
+    let out = null, err = null, asked = null;
+    try {  // the request made from the values typed before the dialog is drawn again (its fields are drawn empty)
+      const settings = `api/plugins/${enc(d.name)}/settings`, machine = `api/machines/${enc(d.name)}`;
+      asked = d.form.route === 'settings'  // a plugin's settings: kept by the platform, the values typed only
+        ? api('POST', settings, { values: Object.fromEntries(Object.entries(d.values).filter(([, v]) => given(v))) })
+          .then((answer) => ({ answer }))
         : d.form.route === 'settings-forget'  // one setting forgotten (0.15.0)
-          ? { answer: await api('POST', `api/plugins/${enc(d.name)}/settings`, { values: {}, forget: [d.values.variable] }) }
+          ? api('POST', settings, { values: {}, forget: [d.values.variable] }).then((answer) => ({ answer }))
           : d.form.job  // 0.19.0: a hook asked as a job (a pull: minutes), its lines followed in the job's panel
-            ? { job: await api('POST', `api/machines/${enc(d.name)}/job`, { action: 'hook', hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) }) }
-            : await api('POST', `api/machines/${enc(d.name)}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
+            ? api('POST', `${machine}/job`,
+              { action: 'hook', hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) })
+              .then((job) => ({ job }))
+            : api('POST', `${machine}/ask`, { hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) });
     }
     catch (e) { err = e; }
+    // asked: a password typed is in the request alone from here, not kept while it is answered; the names of the
+    // fields that held one are, so the dialog drawn meanwhile says it was given (drawDialog)
+    d.sent = forgetSecrets(d);
+    drawDialog();
+    focusStep();
+    if (!err) {
+      try { out = await asked; }
+      catch (e) { err = e; }
+    }
     d.busy = false;
+    d.sent = [];
     if (dlg !== d) return;
     if (!err && out && out.job) {  // the job runs: the dialog closes, its panel follows it (its end said there)
       const what = filled((d.form.confirm && d.form.confirm.title) || d.form.title || d.form.hook, d.form, d.values).replace(/\?$/, '');
       const el = $('formDialog');
       if (el && el.open) el.close();
-      follow(d.name, 'hook', [], what);
+      follow(d.name, 'hook', [], what, out.job.startedAt);  // 0.31.0: the job it began, which its Cancel names
       return;
     }
     if (!err) {
@@ -1048,6 +1144,7 @@
   function closed() {  // the focus back on the button that opened it, or the same one drawn again
     const d = dlg;
     dlg = null;
+    forgetSecrets(d);  // a password typed and never asked: let go of with the dialog
     const el = $('formDialog');
     if (el) el.innerHTML = '';
     if (!d) return;
@@ -1078,7 +1175,29 @@
   // a job's terminal panel: what an install or an update prints, as it comes (the user: "after the install is run a
   // terminal pops up in the plugin and shows the install progress")
   function jobState(j) {
-    return j.running ? 'running…' : j.ok ? 'done' : j.ok === false ? 'ended with a failure' : '';
+    if (j.running) return j.cancelling ? 'cancelling…' : 'running…';  // 0.31.0: asked to stop, said until it has ended
+    if (j.cancelled && !j.ok) return 'cancelled';  // ended by it (one that ended well all the same is done)
+    return j.ok ? 'done' : j.ok === false ? 'ended with a failure' : '';
+  }
+  // 0.31.0, a job's Cancel (a model's download runs for a long time, and until now a job ran to its end whatever the
+  // page did): a button in the panel's head, shown only while a job runs that the platform says can be cancelled
+  // (`cancels`: one of the hooks its plugin names in CANCEL_HOOKS), disabled once it is asked to stop. One click, no
+  // dialog: what the job had done is its plugin's to keep for the next try. A platform before 0.31.0 has no route for
+  // it and never says `cancels`: no button shows there
+  const cancelButton = (m, j) => `<button type="button" class="job-cancel" data-machine="${esc(m.name)}"`
+    + `${j.cancels && j.running ? '' : ' hidden'}${j.cancelling ? ' disabled' : ''}>Cancel</button>`;
+  function syncJob(name) {  // the panel's head as the job is now, set in place: its state's words and its Cancel
+    const j = jobs[name], head = document.querySelector(`[data-panel="job-${CSS.escape(name)}"] .term-head`);
+    if (!j || !head) return;
+    const state = head.querySelector('.state'), b = head.querySelector('button.job-cancel');
+    if (state) state.textContent = jobState(j);
+    if (!b) return;
+    const had = document.activeElement === b;
+    b.hidden = !(j.cancels && j.running);
+    b.disabled = !!j.cancelling;
+    // the focus it had goes to the job's lines, where its end is said: never lost with a button that is gone
+    const lines = had && (b.hidden || b.disabled) ? $(`job-term-${name}`) : null;
+    if (lines) lines.focus({ preventScroll: true });
   }
   function jobTitle(m, j) {
     // a hook asked as a job (0.19.0): its confirmation's words; picked up after a reload, by the hook's name
@@ -1091,7 +1210,8 @@
     const j = jobs[m.name];
     if (j && j.open) {
       return `<div class="term-panel" data-panel="job-${esc(m.name)}"><div class="term-head"><span>${esc(jobTitle(m, j))}</span>`
-        + `<span class="muted small state">${esc(jobState(j))}</span><button type="button" class="term-hide" data-machine="${esc(m.name)}" `
+        + `<span class="muted small state">${esc(jobState(j))}</span>${cancelButton(m, j)}`
+        + `<button type="button" class="term-hide" data-machine="${esc(m.name)}" `
         + `aria-label="Hide the panel (the job goes on)">×</button></div><pre class="term" id="job-term-${esc(m.name)}" tabindex="0"></pre></div>`;
     }
     return (m.steps || []).length ? '<h4>Setup log</h4><div class="muted small">Nothing run here yet: a step\'s output shows in a terminal panel as it runs.</div>' : '';
@@ -2473,7 +2593,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   // flickers when everything is asked again); one it does not is known by its name alone, pending
   function held(ov) {
     const was = st || { machines: {}, assistants: [] };
-    const blank = (p) => ({ name: p.name, title: p.title, about: p.about, version: p.version, icon: p.icon, section: p.section, enabled: p.enabled, hidden: p.hidden,
+    const blank = (p) => ({ name: p.name, title: p.title, about: p.about, version: p.version, icon: p.icon,
+      section: p.section, group: p.group, enabled: p.enabled, hidden: p.hidden,  // 0.31.0: its group under AI plugins
       state: p.enabled ? 'loading' : 'disabled', valid: null, why: '', pending: true, status: {}, hooks: [], asks: [], steps: [], settings: [], setup: null });
     const machines = {};
     ov.plugins.filter((p) => p.kind === 'machine').forEach((p) => { machines[p.name] = was.machines[p.name] || blank(p); });
@@ -2785,10 +2906,13 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     follow(name, action === 'update' ? 'update' : 'setup', [], what);
   }
 
-  function follow(name, action, steps, what) {  // the panel pops up and follows the job from its start
+  // the panel pops up and follows the job from its start; `startedAt` (0.31.0): the job's own, as its answer said it
+  // (else its first read says it): the job this panel follows, which its Cancel names
+  function follow(name, action, steps, what, startedAt) {
     const was = jobs[name];
     if (was) { clearTimeout(was.timer); was.term.attach(null); }  // the last job's lines no longer followed (0.17.0)
-    jobs[name] = { term: LiminalTerminal.create(null), offset: 0, open: true, action, steps: steps || [], running: true, ok: null, timer: null, what: what || '' };
+    jobs[name] = { term: LiminalTerminal.create(null), offset: 0, open: true, action, steps: steps || [], running: true,
+      ok: null, timer: null, what: what || '', startedAt: typeof startedAt === 'number' ? startedAt : null };
     say(name, '');
     if (st.machines[name]) st.machines[name].setup = { running: true, action };
     if (selected() === name) { drawData(); drawSide(); }
@@ -2813,19 +2937,30 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     while (jobs[name] === j) {
       try {
         const got = await api('GET', `api/machines/${enc(name)}/job?since=${j.offset}&wait=2`);
+        // 0.31.0: the platform answers with the job its plugin runs now: one begun at another time is not this
+        // panel's (this one ended, then another began: from another page, a quick second form) and is followed in a
+        // panel of its own, none of its lines in this one, its Cancel naming it
+        if (typeof got.startedAt === 'number' && typeof j.startedAt === 'number' && got.startedAt !== j.startedAt) {
+          follow(name, got.action || j.action, got.steps, '', got.startedAt);
+          break;
+        }
+        if (typeof got.startedAt === 'number') j.startedAt = got.startedAt;
         const [text, offset] = fresh(j.offset, got);
         j.term.write(text);
         j.offset = offset;
         j.running = !!got.running;
         j.ok = got.ok;
+        // 0.31.0: whether it can be cancelled, was asked to stop, has ended so (a platform before it says none of them)
+        j.cancels = !!got.cancels;
+        j.cancelling = !!got.cancelling || !!j.asked;  // asked on this page: said at once, the platform's word after it
+        j.cancelled = !!got.cancelled;
         if (!j.running && got.error) j.term.write(`\n${got.error}\n`);
         else if (!j.running && got.hook && got.answer && got.answer.said) j.term.write(`\n${String(got.answer.said)}\n`);  // 0.19.0: as said (an image's name keeps its case)
       } catch (e) {
         j.term.write(`\n${e.message}\n`);
         j.running = false;
       }
-      const state = document.querySelector(`[data-panel="job-${CSS.escape(name)}"] .state`);
-      if (state) state.textContent = jobState(j);
+      syncJob(name);  // its state's words and (0.31.0) its Cancel, in place
       if (!j.running) break;
       if (document.hidden) await pause(1000);
     }
@@ -2835,6 +2970,27 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     if (!['setup', 'update'].includes(j.action) && selected() === name) { await refresh(name); return; }  // a hook's: its tables, the focus kept (0.19.0)
     delete checks[name];  // installed now, perhaps: asked again
     await render();
+  }
+
+  // 0.31.0: the job asked to stop by its panel's Cancel (POST api/machines/NAME/job/cancel), named by when it began
+  // (its startedAt), so a Cancel from a page not told yet that its job has ended never stops the next one. The panel
+  // says "cancelling…" at once; the job's lines go on until its hook has seen it and ended, and its end is said there
+  // as every job's is. Refused (no job any more, the one named ended and another runs, one that runs to its end, a
+  // liminal-libs that cannot cancel): said at the head of its page
+  async function cancelJob(name) {
+    const j = jobs[name];
+    if (!j || !j.running || !j.cancels || j.asked) return;
+    j.asked = true;
+    j.cancelling = true;
+    say(name, '');
+    syncJob(name);
+    const meant = typeof j.startedAt === 'number' ? { startedAt: j.startedAt } : {};  // none said: the one under way
+    try { await api('POST', `api/machines/${enc(name)}/job/cancel`, meant); }
+    catch (e) {
+      j.asked = false;
+      j.cancelling = false;
+      if (jobs[name] === j) { syncJob(name); say(name, e.message); }
+    }
   }
 
   async function loadCheck(name, fresh) {
@@ -2986,6 +3142,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     if (rc) { loadCheck(rc.dataset.machine, true); return; }
     const hide = e.target.closest('button.term-hide[data-machine]');
     if (hide) { const j = jobs[hide.dataset.machine]; if (j) j.open = false; drawData(); return; }
+    const jc = e.target.closest('button.job-cancel[data-machine]');  // 0.31.0: the job asked to stop, by the one click
+    if (jc) { cancelJob(jc.dataset.machine); return; }
     const so = e.target.closest('button.shell-open[data-machine]');
     if (so) { openShell(so.dataset.machine); return; }
     const sc = e.target.closest('button.shell-close[data-machine]');

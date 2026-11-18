@@ -3,12 +3,14 @@ plugins (their status, a setup run in a thread with its lines kept, a command, d
 instances and the plugins attached."""
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
 import math
 import os
 import platform as py_platform
 import re
+import sys
 import threading
 import time
 from http import HTTPStatus
@@ -26,8 +28,11 @@ except ImportError:  # a library from before its tabs: no plugin of it declares 
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
-READS = ("present", "status", "view", "charts", "instances", "wanted", "services", "startups", "processes")  # asks not logged
-# (and a plugin's tab hooks: PlatformApp.reads_of)
+READS = ("present", "status", "view", "charts", "instances", "wanted", "services", "startups", "processes",
+         "serving")  # asks not logged
+# (and a plugin's tab hooks: PlatformApp.reads_of). `serving` (0.31.0): what a model server offers the other AI plugins
+# (liminal-libs 1.62.0's ModelServer.serving: its instances as it holds them, no network and no process), asked through
+# the platform by a harness for its page and by a model server looking for another's hold on a port
 DIR_VAR = "LIMINAL_PLATFORM_DIR"  # the platform's own folder: its log, which plugins are disabled
 LOGIN_VAR = "LIMINAL_PLATFORM_LOGIN"  # memory: a scratch preview's login, nothing it saves leaving the process
 PLUGINS_FILE = "plugins.json"
@@ -40,6 +45,10 @@ KEPT_SHOWN = 4000  # characters of a terminal open already a page is shown when 
 # a hook asked as a job that refuses before its first line, naming the argument that accepts the refusal (a licence to
 # accept: liminal-libs 1.55.0's GeoIP install), is waited for this long at most, and refused as an ask's refusal is
 JOB_REFUSAL_S = 1.0
+# 0.31.0: as the platform stops, the asks of its plugins still under way (a Start clicked as it stops) and the jobs it
+# asked to stop are waited for this long at most in all, before each plugin is told that it stops
+STOP_WAIT_S = 5.0
+STOPPING = "the platform is stopping: its plugins are asked nothing new"  # an ask or a job refused meanwhile (503)
 
 
 def _wait(query: dict) -> float:
@@ -126,6 +135,23 @@ def _accepting(e: Exception) -> str | None:
 
 
 SECTIONS = ("machine", "virtualization", "os", "cloud")  # the list's sections for machine plugins, in its order (0.25.0, 0.26.0)
+# 0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform, :: lama.cpp,
+# ollama and vLLM, i also need 3 harness plugins for the platform :: OpenCode, Aider, and Continue"; "they will be
+# classified as AI plugins"; "the other plugins are strictly proprietary service plugins"): the list's AI section. The
+# AI assistants (a vendor's service each) are its proprietary services; after them come the machine plugins whose
+# SECTION is "ai", each in the group it names. SECTIONS stays the four a machine plugin is otherwise drawn under
+AI_SECTION = "ai"
+AI_GROUPS = ("inference", "harness")  # a machine plugin's groups under AI, in the list's order and the tray's
+
+
+def group_of(plugin) -> str:
+    """The group of the AI section a machine plugin is drawn in (0.31.0): its own word, liminal-libs 1.62.0's
+    `AiPlugin.GROUP`, when its SECTION is "ai": "inference" for a model server's (llama.cpp, Ollama, vLLM), "harness"
+    for a coding harness's (OpenCode, Aider, Continue). "" for every other plugin: one of another section, one naming a
+    group the platform does not draw, one from an older library with no GROUP at all."""
+    group = getattr(plugin, "GROUP", "")
+    ai = getattr(plugin, "SECTION", "") == AI_SECTION
+    return group if ai and isinstance(group, str) and group in AI_GROUPS else ""
 
 
 def section_of(plugin) -> str:
@@ -134,8 +160,11 @@ def section_of(plugin) -> str:
     virtualization plugins section"; "just like cloud plugins"; "then OS plugins"). The plugin's own word, liminal-libs
     1.51.0's `MachinePlugin.SECTION`: "virtualization" for a hypervisor's or a container engine's (Hyper-V, libvirt, LXD,
     Docker, Kubernetes, Windows containers), "os" for an operating system's (WSL's distributions, the Windows and Linux
-    administration and firewalls), "cloud" for a cloud provider's account. Anything else, or none from an older library
-    or plugin, is "machine"."""
+    administration and firewalls), "cloud" for a cloud provider's account. 0.31.0 (2026-11-16: "they will be classified
+    as AI plugins"): "ai" for a model server's or a harness's, which says its group beside it (group_of). Anything else
+    ("ai" with no group the platform draws too), or none from an older library or plugin, is "machine"."""
+    if group_of(plugin):
+        return AI_SECTION
     section = getattr(plugin, "SECTION", "")
     return section if section in SECTIONS else "machine"
 
@@ -196,16 +225,30 @@ def tab_hooks(plugin) -> list[str]:
     return list(dict.fromkeys(t["hook"] for t in tabs_of(plugin)))
 
 
+def cancel_hooks(plugin) -> tuple[str, ...]:
+    """The hooks of a machine plugin whose job can be asked to stop (0.31.0): those it names in its `CANCEL_HOOKS`
+    (liminal-libs 1.62.0's AiPlugin: its install; a model server's download of a model). Such a hook looks at the job's
+    output between its steps (`log.cancelled`) and ends by itself. None from an older library or plugin, or from a
+    declaration that cannot be read."""
+    try:
+        return tuple(h for h in (getattr(plugin, "CANCEL_HOOKS", ()) or ()) if isinstance(h, str))
+    except Exception:  # noqa: BLE001 - a declaration that cannot be read: none of its jobs is cancelled
+        return ()
+
+
 class Setup:
     """A machine plugin's job under way, in a thread: its setup, its packages' update, or one of its hooks (`action`:
     the hook's name; 0.19.0, `call`: the hook asked with the job's output as its `log`); what it prints as it comes
-    (`output`, read from an offset by the page's terminal panel), its steps (a hook's answer) when done."""
+    (`output`, read from an offset by the page's terminal panel), its steps (a hook's answer) when done. 0.31.0 (a
+    model's download runs for a long time): a hook's job can be asked to stop when the plugin names that hook in its
+    CANCEL_HOOKS (`cancels`, `cancel`); a setup, a packages' update and every other hook run to their end."""
 
     def __init__(self, machine, steps, action: str = "setup", traffic=None, by: str = "platform", call=None):
         self.machine = machine
         self.action = action
         self.steps = tuple(steps) if steps else None
-        self.call = call  # (log) -> the hook's answer, for a hook asked as a job
+        self.call = call  # (log) -> the hook's answer, for a hook asked as a job; let go once it has run (below)
+        self.hooked = call is not None  # a hook asked as a job, said after its call is let go
         self.answer = None  # that answer, once it is in
         self.refused: HookRefused | None = None  # its refusal before its first line, naming what accepts it (an ask's)
         self.output = Output()
@@ -214,6 +257,11 @@ class Setup:
         self.started = time.time()
         self.traffic, self.by = traffic, by  # who asked it, noted when it ends (apps.traffic)
         self.thread = threading.Thread(target=self._run, name=f"setup-{machine.name}", daemon=True)
+        # 0.31.0: its work's end and a cancel, taken one after the other, so a cancel that comes as the work ends is
+        # either seen by it or refused, and whether it was cancelled is decided once, as the work ended
+        self._ending = threading.Lock()
+        self.ended = False  # its work has returned or raised: a cancel from then on changes nothing
+        self.stopped = False  # a cancel had been asked when its work ended: it was cancelled
 
     def _run(self) -> None:
         began = time.perf_counter()
@@ -233,10 +281,17 @@ class Setup:
             accept = _accepting(e) if self.call is not None and isinstance(e, (TypeError, ValueError, LookupError)) else None
             if accept and not self.output.end:  # before its first line: the page offers it as a second confirmation
                 self.refused = HookRefused(HTTPStatus.BAD_REQUEST, self.error, str(e), accept)
+        # The call holds the hook's arguments, a sudo password typed into its form among them: let go of it as soon as
+        # it has run, so the job kept for its panel keeps nothing the form was given.
+        self.call = None
+        with self._ending:  # from here on a cancel is refused (cancel): it was cancelled when one had been asked
+            self.ended = True
+            self.stopped = self.cancelling
         if self.traffic is not None:
             ok = self.error is None and all(d.get("ok") is not False for d in self.done or [] if isinstance(d, dict))
-            self.traffic.record(self.by, self.machine.name, "change", f"{self.action} ended" + ("" if ok else ": it failed"),
-                                (time.perf_counter() - began) * 1000, ok)
+            how = "" if ok else ": cancelled" if self.stopped else ": it failed"
+            self.traffic.record(self.by, self.machine.name, "change", f"{self.action} ended{how}",
+                                (time.perf_counter() - began) * 1000, ok or self.stopped)  # asked to stop: no failure
         self.output.finish()  # its end told to whoever waits on its lines (start_hook_job, the panel's next read)
 
     @property
@@ -247,12 +302,43 @@ class Setup:
     def lines(self) -> list[str]:
         return self.output.text.splitlines()
 
+    @property
+    def cancels(self) -> bool:
+        """Whether it can be asked to stop (0.31.0): a hook's job, the hook one the plugin names in its CANCEL_HOOKS,
+        its output one that takes a cancel (liminal-libs 1.62.0's Output; an older library's takes none)."""
+        can = callable(getattr(self.output, "cancel", None))
+        return can and self.hooked and self.action in cancel_hooks(self.machine)
+
+    @property
+    def cancelling(self) -> bool:
+        """Whether it was asked to stop: its output's flag (never set with a library before 1.62.0)."""
+        return bool(getattr(self.output, "cancelled", False))
+
+    def cancel(self) -> bool:
+        """Its work asked to stop: the flag of its output set (liminal-libs 1.62.0's Output.cancel) for the hook to see
+        between its steps, and whoever waits on it told; asked twice, nothing changes. False when nothing was asked: an
+        older library's output takes no cancel, or its work has ended already (a cancel that comes as it ends is too
+        late, and the job is said as it ended, never as cancelled)."""
+        cancel = getattr(self.output, "cancel", None)
+        if not callable(cancel):
+            return False
+        with self._ending:
+            if self.ended or getattr(self.output, "finished", False):
+                return False
+            cancel()
+        return True
+
     def describe(self, since: int | None = None, last: int | None = None) -> dict:
-        """Its state; with `since`, the text printed after that offset (the panel's next part); `last`: only so many lines."""
-        out = {"machine": self.machine.name, "action": self.action, "steps": list(self.steps or ()), "running": self.running,
-               "lines": self.lines[-last:] if last else self.lines, "done": self.done, "error": self.error, "startedAt": self.started,
-               "ok": None if self.done is None else (self.error is None and all(d["ok"] is not False for d in self.done))}
-        if self.call is not None:
+        """Its state; with `since`, the text printed after that offset (the panel's next part); `last`: only so many
+        lines. 0.31.0: `cancels` (it can be asked to stop: the page offers Cancel while it runs), `cancelling` (it was
+        asked) and `cancelled` (it had been asked when its work ended, and it has ended)."""
+        running, cancelling = self.running, self.cancelling
+        ok = None if self.done is None else (self.error is None and all(d["ok"] is not False for d in self.done))
+        out = {"machine": self.machine.name, "action": self.action, "steps": list(self.steps or ()), "running": running,
+               "lines": self.lines[-last:] if last else self.lines, "done": self.done, "error": self.error,
+               "startedAt": self.started, "ok": ok,
+               "cancels": self.cancels, "cancelling": cancelling, "cancelled": self.stopped and not running}
+        if self.hooked:
             out["hook"], out["answer"] = True, self.answer
         if since is not None:
             out["text"], out["from"], out["offset"] = self.output.read(since)
@@ -312,6 +398,10 @@ class PlatformApp(App):
         self._lock = threading.Lock()
         self._active: tuple[float, list[str]] | None = None
         self._states: dict[str, str] = {}  # each plugin's state when last asked: active | disabled | invalid (Connections)
+        # 0.31.0: set while it stops (_refuse_stopping), and the asks under way counted for the stop (_under_way)
+        self._stopping = False
+        self._asking = 0
+        self._asked = threading.Condition(self._lock)  # told as each ask ends
 
     # -- who talks to whom (apps.traffic; the page's Connections) -------------------------------------------------
     def classify(self, method: str, path: str) -> str:
@@ -496,10 +586,17 @@ class PlatformApp(App):
 
     def items(self) -> tuple[TrayItem, ...]:
         """An icon per active plugin, the machine plugins then the AI assistants, after the platform's own (the frame's
-        tray puts the chip first); none the user hid from the dock."""
+        tray puts the chip first); none the user hid from the dock. 0.31.0: the machine plugins of the AI section (the
+        model servers, then the harnesses: AI_GROUPS' order, the registry's within a group) come after the assistants,
+        so the AI plugins' icons sit together."""
         machines, hidden = self.machines(), self.hidden()
-        out = [TrayItem(name, getattr(machines[name], "ICON", "") or "chip", machines[name].title, "plugin", self.NAME)
-               for name in self.active() if name in machines and name not in hidden]
+        shown = [name for name in self.active() if name in machines and name not in hidden]
+
+        def icon(name: str) -> TrayItem:
+            m = machines[name]
+            return TrayItem(name, getattr(m, "ICON", "") or "chip", m.title, "plugin", self.NAME)
+
+        out = [icon(name) for name in shown if not group_of(machines[name])]
         off = self.disabled()
         for name, p in self.assistant_plugins().items():
             if name in hidden or name in off:
@@ -509,6 +606,8 @@ class PlatformApp(App):
                 state = "active" if self.assistant_validity(p)[0] else "invalid"
             if state == "active":
                 out.append(TrayItem(name, getattr(p, "ICON", "") or "analysis", p.title, "plugin", self.NAME))
+        for group in AI_GROUPS:
+            out += [icon(name) for name in shown if group_of(machines[name]) == group]
         return tuple(out)
 
     def assistant_plugins(self) -> dict:
@@ -685,9 +784,11 @@ class PlatformApp(App):
             states = dict(self._states)
 
         def row(name: str, p, kind: str, icon: str) -> dict:
-            return {"name": name, "title": p.title, "about": p.about, "version": p.version, "icon": getattr(p, "ICON", "") or icon,
-                    "kind": kind, "section": section_of(p) if kind == "machine" else kind, "enabled": name not in off,
-                    "hidden": name in hidden, "state": "disabled" if name in off else states.get(name)}
+            machine = kind == "machine"  # an assistant's section is its kind, and it names no group under AI (0.31.0)
+            return {"name": name, "title": p.title, "about": p.about, "version": p.version,
+                    "icon": getattr(p, "ICON", "") or icon, "kind": kind, "section": section_of(p) if machine else kind,
+                    "group": group_of(p) if machine else "", "enabled": name not in off, "hidden": name in hidden,
+                    "state": "disabled" if name in off else states.get(name)}
 
         return {"app": self.describe(), "machine": facts(), "disabled": sorted(off),
                 "plugins": [*(row(n, m, "machine", "chip") for n, m in self.machines().items()),
@@ -730,7 +831,9 @@ class PlatformApp(App):
         with self._lock:
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
-                "icon": getattr(m, "ICON", "") or "chip", "section": section_of(m), "enabled": on, "valid": valid, "why": why, "state": state,
+                "icon": getattr(m, "ICON", "") or "chip", "section": section_of(m),
+                "group": group_of(m),  # 0.31.0: its group under AI ("inference", "harness"), "" in every other section
+                "enabled": on, "valid": valid, "why": why, "state": state,
                 "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "tabs": tabs_of(m), "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
                 "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m), **self.api_card(m, on)}
@@ -775,23 +878,49 @@ class PlatformApp(App):
         while a tab is shown): noted as reads in who talks to whom, and not logged."""
         return (*READS, *(h for h in tab_hooks(m) if h not in READS))
 
+    def _refuse_stopping(self) -> None:
+        """Nothing new begun once the platform stops, until it starts again (0.31.0): refused (503). With _lock held."""
+        if self._stopping:
+            raise Refused(HTTPStatus.SERVICE_UNAVAILABLE, STOPPING)
+
+    @contextlib.contextmanager
+    def _under_way(self):
+        """What a request asks of a plugin while it waits (0.31.0): one of its hooks (ask), a login terminal being
+        opened, a command run. Refused (503) once the platform stops; else counted while it is under way, so the stop
+        waits for it (STOP_WAIT_S at most) before it tells the plugins: what it starts is there to be stopped."""
+        with self._lock:
+            self._refuse_stopping()
+            self._asking += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._asking -= 1
+                self._asked.notify_all()
+
     def ask(self, name: str, hook: str, args: list):
         """One of a machine plugin's hooks by name (asks), its answer as JSON (a rule, a startup: described). Its refusal
-        (400) or failure (502) is a HookRefused: the plugin's own words, and the argument accepting a refusal that names one."""
+        (400) or failure (502) is a HookRefused: the plugin's own words, and the argument accepting a refusal that names
+        one. Noted in who talks to whom as asked by whoever calls (0.31.0, as the frame's own ask notes it): a plugin
+        asking another through the platform is the one asking (a harness asking a model server what it serves:
+        Connections draws the harness to the server), anything else the platform. Under way as _under_way says."""
+        caller = self.traffic.actor(sys._getframe(1)) or self.NAME
         m = self.machine(name)
         self._refuse_disabled(name)
         if hook not in self.asks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} is not asked {hook!r} here: {', '.join(self.asks(m)) or 'nothing'}")
         reads = self.reads_of(m)
-        if hook not in reads:  # its name and how many arguments, never their values: a key pasted into a form (0.20.1)
-            self.log(f"platform: {name} asked {hook}" + (f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""))
-        try:
-            with self.traffic.timed(self.NAME, name, "read" if hook in reads else "ask", hook):
-                answer = m.ask(hook, *args)
-        except (TypeError, ValueError, LookupError) as e:
-            raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e), _accepting(e)) from None
-        except Exception as e:  # noqa: BLE001 - the plugin's own words
-            raise HookRefused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}", str(e)) from None
+        with self._under_way():
+            if hook not in reads:  # its name and how many arguments, never their values: a key put in a form (0.20.1)
+                many = f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""
+                self.log(f"platform: {name} asked {hook}{many}")
+            try:
+                with self.traffic.timed(caller, name, "read" if hook in reads else "ask", hook):
+                    answer = m.ask(hook, *args)
+            except (TypeError, ValueError, LookupError) as e:
+                raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e), _accepting(e)) from None
+            except Exception as e:  # noqa: BLE001 - the plugin's own words
+                raise HookRefused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}", str(e)) from None
         return _json_of(answer)
 
     def check(self, name: str) -> dict:
@@ -825,6 +954,7 @@ class PlatformApp(App):
             if not (c.get("ready") or c.get("installed")):
                 raise Refused(HTTPStatus.CONFLICT, f"the install is locked: {c.get('why') or 'this PC does not meet what it needs'}")
         with self._lock:
+            self._refuse_stopping()
             current = self._setups.get(name)
             if current is not None and current.running:
                 raise Refused(HTTPStatus.CONFLICT, f"{name} is busy already ({current.action})")
@@ -853,6 +983,7 @@ class PlatformApp(App):
         if not isinstance(args, list) or len(args) > 16:
             raise Refused(HTTPStatus.BAD_REQUEST, "args is a list of the hook's arguments")
         with self._lock:
+            self._refuse_stopping()
             current = self._setups.get(name)
             if current is not None and current.running:
                 raise Refused(HTTPStatus.CONFLICT, f"{name} is busy already ({current.action})")
@@ -875,6 +1006,35 @@ class PlatformApp(App):
             raise job.refused
         return job
 
+    def cancel_job(self, name: str, started_at: float | None = None) -> dict:
+        """A plugin's job under way asked to stop (0.31.0; a model's download runs for a long time, and until now a job
+        ran to its end whatever the page did): only a hook's job, the hook one the plugin names in its CANCEL_HOOKS
+        (liminal-libs 1.62.0's AiPlugin: its install; a model server's download). Nothing is ended from here: the job's
+        output is told (Output.cancel), the hook sees it between its steps and ends by itself, saying what it kept. The
+        answer is the job as it is now (`cancelling`; `cancelled` once it has ended). `started_at`: the job meant, by
+        its `startedAt` as the page was told it (none: the one under way). Refused: no job running (409); the job meant
+        has ended and another runs (409: a Cancel from a page not told yet never stops the next job); a setup, a
+        packages' update or a hook that runs to its end (400); a liminal-libs before 1.62.0, whose output takes no
+        cancel (400); its work ending as it was asked (409: it is said as it ended). The plugin itself is asked
+        nothing, so a job of one disabled meanwhile can still be stopped."""
+        self.machine(name)
+        with self._lock:
+            job = self._setups.get(name)
+        if job is None or not job.running:
+            raise Refused(HTTPStatus.CONFLICT, f"{name} runs no job now")
+        if started_at is not None and started_at != job.started:
+            raise Refused(HTTPStatus.CONFLICT,
+                          f"the job asked to stop has ended: {name} runs another now ({job.action})")
+        if not job.hooked or job.action not in cancel_hooks(job.machine):
+            raise Refused(HTTPStatus.BAD_REQUEST, f"{name}'s {job.action} cannot be cancelled: it runs to its end")
+        if not callable(getattr(job.output, "cancel", None)):
+            raise Refused(HTTPStatus.BAD_REQUEST, "this liminal-libs cannot cancel a job (1.62.0 can)")
+        if not job.cancel():
+            raise Refused(HTTPStatus.CONFLICT, f"{name}'s {job.action} has ended: there is nothing left to cancel")
+        self.log(f"platform: {name} asked to cancel {job.action}")
+        self.traffic.record(self.NAME, name, "change", f"{job.action} asked to stop")
+        return job.describe()
+
     # -- login terminals (the user: "the plugin also allows for a user to login through a terminal in to the environment")
     def terminal_of(self, name: str) -> Terminal | None:
         with self._lock:
@@ -891,26 +1051,36 @@ class PlatformApp(App):
             t.close()
 
     def open_terminal(self, name: str) -> dict:
+        """A login terminal into the plugin's system, or the one open already where it was. 0.31.0: under way as
+        _under_way says; one made after the stop closed the terminals is closed at once and refused, so none outlives
+        the platform."""
         m = self.machine(name)
         self._refuse_disabled(name)
         if "terminal" not in self.hooks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} offers no terminal")
         self._close_idle()
-        try:
-            with self.traffic.timed(self.NAME, name, "ask", "terminal"):
-                argv = m.terminal()
-        except Exception as e:  # noqa: BLE001 - not installed: its words
-            raise Refused(HTTPStatus.CONFLICT, str(e)) from None
-        current = self.terminal_of(name)
-        if current is not None and current.alive:
-            if list(getattr(current, "argv", None) or argv) == list(argv):
-                return current.read(max(0, current.output.end - KEPT_SHOWN))  # where it was: its last lines
-            self.close_terminal(name)  # another install chosen meanwhile (0.12.0): that one's terminal instead
-        made = getattr(m, "terminal_title", None)
-        title = made() if callable(made) else f"{getattr(m, 'user', '') or 'you'} in {getattr(m, 'distribution_name', '') or m.title}"
-        term = (self._terminal_of or (lambda a, t: Terminal(a, title=t)))(argv, title)
-        with self._lock:
-            self._terminals[name] = term
+        with self._under_way():
+            try:
+                with self.traffic.timed(self.NAME, name, "ask", "terminal"):
+                    argv = m.terminal()
+            except Exception as e:  # noqa: BLE001 - not installed: its words
+                raise Refused(HTTPStatus.CONFLICT, str(e)) from None
+            current = self.terminal_of(name)
+            if current is not None and current.alive:
+                if list(getattr(current, "argv", None) or argv) == list(argv):
+                    return current.read(max(0, current.output.end - KEPT_SHOWN))  # where it was: its last lines
+                self.close_terminal(name)  # another install chosen meanwhile (0.12.0): that one's terminal instead
+            made = getattr(m, "terminal_title", None)
+            title = (made() if callable(made)
+                     else f"{getattr(m, 'user', '') or 'you'} in {getattr(m, 'distribution_name', '') or m.title}")
+            term = (self._terminal_of or (lambda a, t: Terminal(a, title=t)))(argv, title)
+            with self._lock:
+                stopping = self._stopping  # the stop began meanwhile: it has closed the terminals it held already
+                if not stopping:
+                    self._terminals[name] = term
+            if stopping:
+                term.close()
+                raise Refused(HTTPStatus.SERVICE_UNAVAILABLE, STOPPING)
         self.log(f"platform: a terminal opened into {name}")
         return term.read(0)
 
@@ -929,12 +1099,80 @@ class PlatformApp(App):
         """The program a login terminal runs, as a link's end (process:wsl)."""
         return f"process:{program_name(None, list(getattr(term, 'argv', None) or [])) or 'terminal'}"
 
-    def stop(self) -> None:
+    def start(self, *args, **kwargs) -> str:
+        """The frame's start (its page served at its port); the asks and jobs a stop refused are taken again."""
         with self._lock:
+            self._stopping = False
+        return super().start(*args, **kwargs)
+
+    def stop(self) -> None:
+        """The terminals closed and the page ended (the frame's stop), then each machine plugin told that the platform
+        stops (0.31.0; the user, 2026-11-16: "the plugins manage the services"; a server a plugin started by a click
+        stops when the platform stops, unless it starts at boot): its `app_stopping()` when it has one (liminal-libs
+        1.62.0's AiPlugin), one plugin after another, enabled or not, attached or not. One that raises is logged and
+        the rest are still told; they are told when the frame's stop raises, too. An ordinary end stops twice
+        (cli.cmd_serve: serve's own stop, then the command's), so the hook bears a second call. Before they are told,
+        nothing new is begun (_refuse_stopping) and what is under way is wound down (_wind_down)."""
+        with self._lock:
+            self._stopping = True  # nothing new is begun from now on, until it starts again
             terms, self._terminals = list(self._terminals.values()), {}
         for t in terms:
             t.close()
-        super().stop()
+        try:
+            super().stop()
+        finally:
+            try:
+                self._wind_down()
+            finally:
+                self._tell_stopping()
+
+    def _wind_down(self) -> None:
+        """What is under way as the platform stops (0.31.0), before each plugin is told: each job that takes a cancel
+        asked to stop (an install's or a model's download, whose child would otherwise outlive the platform), then the
+        asks under way (_under_way) and those jobs waited for, STOP_WAIT_S at the most in all. What is still under way
+        then is logged, and the plugins are told all the same; a second stop finds nothing to wait for. A setup, a
+        packages' update and a job that runs to its end are not waited for: they end with the platform's process, as
+        before."""
+        deadline = time.monotonic() + STOP_WAIT_S
+        with self._lock:
+            jobs = [(name, job) for name, job in self._setups.items() if job.running]
+        asked = []
+        for name, job in jobs:
+            if not job.cancels:
+                continue
+            if not job.cancelling:  # one its page asked to stop already is waited for, not asked again
+                if not job.cancel():
+                    continue  # its work has just ended
+                self.log(f"platform: {name}'s {job.action} asked to stop: the platform stops")
+                self.traffic.record(self.NAME, name, "change", f"{job.action} asked to stop")
+            asked.append((name, job))
+        with self._lock:
+            while self._asking and deadline - time.monotonic() > 0:
+                self._asked.wait(deadline - time.monotonic())
+            asking = self._asking
+        if asking:
+            self.log(f"platform: {asking} ask{'' if asking == 1 else 's'} of its plugins still under way after "
+                     f"{STOP_WAIT_S:g} s: the plugins are told that it stops all the same")
+        for name, job in asked:
+            if job.thread is not threading.current_thread():  # (a job's own hook stopping the platform: not waited for)
+                job.thread.join(max(0.0, deadline - time.monotonic()))
+            if job.running:
+                self.log(f"platform: {name}'s {job.action} has not ended {STOP_WAIT_S:g} s after it was asked to stop")
+
+    def _tell_stopping(self) -> None:
+        """Each machine plugin that has an `app_stopping` told that the platform stops, in the registry's order."""
+        try:
+            machines = self.machines()
+        except Exception as e:  # noqa: BLE001 - a registry that cannot say: the platform ends all the same
+            self.log(f"platform: its plugins could not be told that it stops: {type(e).__name__}: {e}")
+            return
+        for name, m in machines.items():
+            try:
+                stopping = getattr(m, "app_stopping", None)
+                if callable(stopping):
+                    stopping()
+            except Exception as e:  # noqa: BLE001 - the rest are still told
+                self.log(f"platform: {name} did not stop cleanly: {type(e).__name__}: {e}")
 
     def api(self, handler, method: str, path: str, query: dict, body: dict | None):
         body = body or {}
@@ -978,6 +1216,11 @@ class PlatformApp(App):
                                                                        "text": "", "from": 0, "offset": 0})
             if method == "GET" and action == "check":
                 return 200, self.check(name)
+            if method == "POST" and action == "job/cancel":  # 0.31.0: the job under way asked to stop (its Cancel)
+                started = body.get("startedAt")  # the job meant, as the page was told it (none: the one under way)
+                if started is not None and (isinstance(started, bool) or not isinstance(started, (int, float))):
+                    raise Refused(HTTPStatus.BAD_REQUEST, "startedAt is the job's own, a number as its state says it")
+                return 202, self.cancel_job(name, started)
             if method == "POST" and action == "job":
                 what = body.get("action")
                 if what == "hook":  # one of its hooks as a job (0.19.0)
@@ -1035,9 +1278,11 @@ class PlatformApp(App):
                 command = body.get("command")
                 if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
                     raise Refused(HTTPStatus.BAD_REQUEST, "command is a list of words")
-                try:
-                    with self.traffic.timed(self.NAME, name, "ask", f"run {program_name(None, command) or 'a command'}"):
-                        return 200, {"output": m.run(*command)}
-                except Exception as e:  # noqa: BLE001 - the plugin's words
-                    raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
+                what = f"run {program_name(None, command) or 'a command'}"
+                with self._under_way():
+                    try:
+                        with self.traffic.timed(self.NAME, name, "ask", what):
+                            return 200, {"output": m.run(*command)}
+                    except Exception as e:  # noqa: BLE001 - the plugin's words
+                        raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
         return super().api(handler, method, path, query, body)

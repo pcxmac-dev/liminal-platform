@@ -75,17 +75,18 @@ def test_the_overview_and_each_status_carry_the_section():
         app.stop()
 
 
-def test_the_page_draws_each_section_in_order_and_falls_back_without_one(served):
-    app, port, lines, box = served
-    js = _call(port, "GET", "/platform.js")[1]
-    # the sections, in the list's order: the machine's own, virtualization, OS, cloud (then the AI assistants)
+def test_the_page_draws_each_section_in_order_and_falls_back_without_one():
+    # the page's script as the platform serves it, read from its folder: no port is opened for its text (0.31.0)
+    js = (PlatformApp.STATIC / "platform.js").read_bytes()
+    # the sections, in the list's order: the machine's own, virtualization, OS, cloud (then the AI plugins)
     assert (b"const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], "
             b"['os', 'OS plugins'], ['cloud', 'Cloud plugins']];") in js
     # a section the page does not know, or none from an older server: Machine plugins
-    assert b"const sectionOf = (m) => (SECTIONS.some(([s]) => s === m.section) ? m.section : 'machine');" in js
+    assert (b"const sectionOf = (m) => (isAi(m) ? 'ai' : SECTIONS.some(([s]) => s === m.section) ? m.section "
+            b": 'machine');") in js
     assert b"section: p.section" in js  # a plugin not answered yet keeps its section
     draw = js[js.index(b"function drawList()"):js.index(b"function instancesTable()")]
-    assert draw.index(b"SECTIONS.map(") < draw.index(b"<h4>AI assistants</h4>")
+    assert draw.index(b"SECTIONS.map(") < draw.index(b"<h4>AI plugins</h4>")
     assert b"None installed: WSL, firewall and admin plugins set this machine up." in draw  # no plugin at all
     page = js[js.index(b"function machineData()"):js.index(b"function tables(m)")]
     assert b"SECTIONS.map(" in page and b"None installed." in page and page.index(b"SECTIONS.map(") < page.index(b"instancesTable()")

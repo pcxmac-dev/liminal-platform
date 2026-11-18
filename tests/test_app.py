@@ -1304,7 +1304,7 @@ def test_the_page_runs_a_job_form_draws_a_tables_search_box_and_asks_a_details_f
     nothing to fill and nothing to confirm (a row's Details) is asked as it opens."""
     js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
     assert "d.form.job  // 0.19.0" in js and "{ action: 'hook', hook: d.form.hook, args: argsOf(d.form, d.values, d.accepted) }" in js
-    assert "follow(d.name, 'hook', [], what);" in js
+    assert "follow(d.name, 'hook', [], what, out.job.startedAt);" in js  # (0.31.0: the job it began, by its start)
     # a hook's job keeps its title after a reload (picked up by the hook's name, never "Installing ...")
     assert "if (!['setup', 'update'].includes(j.action)) return j.what || `${m.title}: ${j.action === 'hook' ? 'a job' : j.action}`;" in js
     assert "else if (!j.running && got.hook && got.answer && got.answer.said) j.term.write(`\\n${String(got.answer.said)}\\n`);" in js
@@ -1356,3 +1356,98 @@ def test_a_plugin_not_valid_yet_shows_what_it_needs_in_its_tables():
     assert "a && can.has(a.hook)" in js[js.index("function askButton(m, a, can) {"):]  # an ask's button: only what it may be asked
     assert "can.has(f.hook)" in js[js.index("function formsOf(m) {"):js.index("function formButton(m, b, forms) {")]
     assert '"asks": self.asks(m) if state == "active" else []' in inspect.getsource(app_module)  # none while not active
+
+
+class Server(MachinePlugin):
+    """A stand-in model server: what it serves, as it holds it (a read), and its models, asked of the server itself."""
+
+    name, title, about, api, order = "server", "A model server", "a stand-in model server", "2.2", 915
+    HOOKS = (*MachinePlugin.HOOKS, "serving", "models_of")
+
+    def __init__(self):
+        self.asked: list = []
+
+    def present(self):
+        return True
+
+    def status(self):
+        return {"present": True, "valid": True, "summary": "one instance", "why": ""}
+
+    def serving(self, name=""):
+        self.asked.append(("serving", name))
+        return {"plugin": self.name, "title": self.title, "native": "",
+                "instances": [{"name": "default", "state": "running"}]}
+
+    def models_of(self, name):
+        self.asked.append(("models_of", name))
+        return {"said": "1 model", "ok": True, "models": [{"id": "tiny"}], "asked": "just now"}
+
+
+class Coder(MachinePlugin):
+    """A stand-in harness: it asks each attached plugin that serves models what it serves, through the platform."""
+
+    name, title, about, api, order = "coder", "A coding harness", "a stand-in harness", "2.2", 916
+    HOOKS = (*MachinePlugin.HOOKS, "servers")
+
+    def present(self):
+        return True
+
+    def status(self):
+        return {"present": True, "valid": True, "summary": "nothing chosen yet", "why": ""}
+
+    def servers(self):
+        out = []
+        for name, face in self.app.plugins().items():
+            if "serving" in face["hooks"]:
+                out.append(self.app.ask(name, "serving", []))  # the platform's form: the arguments as one list
+        return out
+
+
+def test_what_a_model_server_serves_is_asked_as_a_read_and_leaves_no_line_in_the_log():
+    """0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform ... i also
+    need 3 harness plugins for the platform"): a harness asks each model server what it serves through the platform
+    for its own page, so `serving` is one of the platform's reads (liminal-libs 1.62.0's ModelServer.serving: its
+    instances as it holds them, no network and no process): noted as a read in who talks to whom, never logged.
+    `models_of`, which asks the server itself, stays an ask as any other hook: logged by its name. Asked of the app
+    directly: nothing is served, no port is opened."""
+    from liminal_platform.app import READS
+
+    server, lines = Server(), []
+    app = PlatformApp(log=lines.append, machines={"server": server}, assistants={})
+    try:
+        assert "serving" in READS and "serving" in PlatformApp.reads_of(server)
+        assert "models_of" not in PlatformApp.reads_of(server)
+        status, out = app.api(None, "POST", "/api/machines/server/ask", {}, {"hook": "serving", "args": []})
+        assert status == 200 and out["answer"]["instances"] == [{"name": "default", "state": "running"}]
+        assert app.ask("server", "serving", ["default"])["plugin"] == "server"  # one instance, as a plugin asks it
+        assert server.asked == [("serving", ""), ("serving", "default")] and lines == []  # a read: never in the log
+        status, out = app.api(None, "POST", "/api/machines/server/ask", {}, {"hook": "models_of", "args": ["default"]})
+        assert status == 200 and out["answer"]["models"] == [{"id": "tiny"}]
+        assert lines == ["platform: server asked models_of (1 argument)"]  # it asks the server itself: logged, as ever
+        said = {(r["from"], r["what"], r["kind"]) for r in app.traffic.recent() if r["to"] == "server"}
+        assert said == {("platform", "serving", "read"), ("platform", "models_of", "ask")}
+    finally:
+        app.stop()
+
+
+def test_a_plugin_asking_another_through_the_platform_is_noted_as_the_one_asking():
+    """0.31.0: until now a hook asked through the platform was noted as asked by the platform, whoever called. A plugin
+    asking another (a harness asking a model server what it serves) is the one asking, as the frame's own ask notes
+    it, so Connections draws the harness to the server; the page's ask of the harness stays the platform's. Asked of
+    the app directly: nothing is served, no port is opened."""
+    server, coder, lines = Server(), Coder(), []
+    app = PlatformApp(log=lines.append, machines={"server": server, "coder": coder}, assistants={})
+    try:
+        assert app.attach_plugins([server, coder]) == ["server", "coder"] and coder.app is app
+        status, out = app.api(None, "POST", "/api/machines/coder/ask", {}, {"hook": "servers", "args": []})
+        assert status == 200 and [s["plugin"] for s in out["answer"]] == ["server"]
+        assert server.asked == [("serving", "")]
+        said = {(r["from"], r["to"], r["kind"], r["what"]) for r in app.traffic.recent()}
+        assert ("platform", "coder", "ask", "servers") in said  # the page's ask of the harness: the platform's
+        assert ("coder", "server", "read", "serving") in said  # the harness's ask of the server: its own
+        assert not [r for r in said if r[:2] == ("platform", "server") and r[3] == "serving"]
+        links = {(k["from"], k["to"], k["kind"]) for k in app.connections()["links"]}
+        assert ("coder", "server", "read") in links and ("platform", "server", "read") not in links
+        assert "platform: coder asked servers" in lines and not any("asked serving" in x for x in lines)
+    finally:
+        app.stop()

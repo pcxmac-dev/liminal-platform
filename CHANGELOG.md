@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.31.0 (2026-11-18)
+
+The AI plugins' section, a job's Cancel, and a stop that ends what the plugins started. The user, 2026-11-16, asking
+for llama.cpp, Ollama, vLLM, OpenCode, Aider and Continue: "they will be classified as AI plugins"; "the other
+plugins are strictly proprietary service plugins".
+
+- The list has one **AI plugins** heading with three groups: Proprietary services (the AI assistants, as before),
+  Inference and Harnesses. A machine plugin goes there when its `SECTION` is "ai" and its `GROUP` "inference" or
+  "harness"; another group falls under Machine plugins. The tray follows the same order. A server before 0.31.0 sends
+  no group: its plugins are drawn as before.
+- **Cancel**: `POST /api/machines/NAME/job/cancel` answers 202 with the job's state, for a hook the plugin names in
+  its `CANCEL_HOOKS`, with liminal-libs 1.62.0's `Output.cancel`. An optional `{"startedAt"}` names the job meant, so a
+  stale page never stops the next one. 409 when no job runs or the named one has ended; 400 for a hook that runs to
+  its end, or a library that cannot cancel. A job's state says `cancels`, `cancelling` and `cancelled`; its panel has
+  a Cancel button (one click). A cancel is counted as no failure.
+- **Stopping**: once the platform stops, asks, jobs, login terminals and commands answer 503 ("the platform is
+  stopping"); each plugin is told `app_stopping()` once per stop (a second stop is safe), jobs that cancel are asked
+  to, and what was under way is waited for a few seconds. `serve` ends on SIGTERM and SIGHUP on POSIX as on Ctrl+C,
+  so a closed terminal tab no longer leaves the servers a plugin started running.
+- `serving` counts as a read and is not logged; a plugin asking another through the platform is noted in
+  Connections as the one asking.
+- **Passwords**: a password field's value is never shown ("(given)" in a confirmation), never put back in its field,
+  let go of as soon as it is sent, and typed again at a second confirmation. A job lets go of its hook's arguments, a
+  sudo password among them, as soon as it has run.
+- The floor stays liminal-libs>=1.54.0: Cancel says what an older library lacks.
+
 ## 0.30.0 (2026-11-16)
 
 Codebase, under This machine beside Connections (the user: "i want to add another functional class called codebase,

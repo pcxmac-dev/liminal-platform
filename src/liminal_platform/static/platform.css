@@ -383,3 +383,13 @@ html.touch .conn-picture .node circle.hit { pointer-events: all; }
 .conn-zoom-tools { display: inline-flex; align-items: center; gap: 2px; }
 .conn-zoom { min-width: 28px; padding: 3px 8px; }
 .conn-zoom.level { min-width: 54px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 0.31.0: the AI plugins (the user, 2026-11-16: "they will be classified as AI plugins"; "the other plugins are
+   strictly proprietary service plugins"): one heading in the list, a group's name under it for the proprietary
+   services, the inference plugins and the harnesses (the heading's own rule is the library's, liminal.css). And a
+   job's Cancel in its panel's head, beside the x that only hides the panel: a word, not a mark, dimmed once the job
+   is asked to stop. */
+.app-list h5.group { margin: 8px 0 2px 8px; font-size: 10px; font-weight: 600; color: var(--muted);
+  letter-spacing: .04em; }
+.term-head button.job-cancel { font-size: 12px; }
+.term-head button.job-cancel:disabled { opacity: .4; cursor: default; background: transparent; }
