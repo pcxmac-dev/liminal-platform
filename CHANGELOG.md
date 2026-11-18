@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.32.0 (2026-11-18)
+
+External API and Internal API on every plugin's page, and the platform's own two views. The user, 2026-11-16: "for all
+apps, and all plugins, there should be an external api tab, and an internal api tab, the internal api is for
+interfaces the plugin shares with the rest of the app, the external should be all the SDKs/APIs the plugin associates
+with"; 2026-11-17: "all plugins are middleware". The Internal API is made and drawn by liminal-libs 1.63.0
+(`internal.py`, `internal.js`, the frame's `GET /api/app/apis`). The platform is the first app to show both; the
+charts, the integrator and the login follow.
+
+- Every machine plugin's and AI assistant's page has **Main**, **External API** and **Internal API** beside its title,
+  then its own tabs. External API is the old API tab's cards: `#name/api` opens it and is written again as
+  `#name/external`. No plugin's own tab takes the ids main, api, external or internal.
+- **Internal API** is made by the library from the plugin itself, asking it nothing: the base it is built on, and so
+  the standard interface it implements; the standard hooks it answers, layer by layer, and those it leaves to the
+  contract; then its own hooks, each with its call, its line, its whole docstring, read or change, and who uses it
+  (the platform's code: `CALLS`; other plugins: `SERVICE_HOOKS`, with the plugins whose `ASKS` name it; its page: the
+  hooks its status names, `pageAsks`; or anything asking it by name); how it is called (`self.app.ask(NAME, hook,
+  [arguments])`, `POST /api/machines/NAME/ask` with the header `X-Liminal-Charts: 1` from this machine, or as a job);
+  its settings through the login, and what it asks of other plugins.
+- Every status carries `internal`. When the library cannot read a plugin, the status carries `internal: null` and
+  `internalError` in words: its tab says so, not to restart the platform, and why is logged once.
+- A hook a plugin lists in `READ_HOOKS` is asked as a read: noted as one in Connections and not logged, as a tab's hook
+  is.
+- **The platform's own entry**, under This machine after Codebase, has two views, both from `GET /api/app/apis` and
+  asked only while shown. External API (`#app`): what its own code calls that Liminal does not make (Docker's and
+  WSL's command lines, git, svn and hg, Python's platform and os modules, GlobalMemoryStatusEx), declared in `apis.py`
+  as links for people, never fetched. Internal API (`#app/internal`): what it calls and reads on its plugins of each
+  kind (`CALLS` and `ATTRIBUTES`, 0.31.0's `app_stopping`, `GROUP` and `CANCEL_HOOKS` among them), what it offers its
+  plugins, its routes beside the frame's, the login it includes, and its plugins (those it knows, and how many are
+  attached).
+- `routes.py` lists the 23 routes of `api()`, 0.31.0's job/cancel among them, each with what it is, its class and who
+  asks it; `GET /api/status` is a client's.
+- On a phone's width the tabs wrap.
+- With a liminal-libs before 1.63.0 the page shows Main and External API, and no entry of its own; with a platform
+  process from before, the Internal API tab and the entry say to restart it. The floor stays liminal-libs>=1.54.0.
+
+Tests: test_internal_tab.py (`CALLS` and `ATTRIBUTES` held to the platform's source by ast, calls told from reads),
+test_internal_page.py, test_own_apis.py (no other `.py` of the platform names an outside host), test_routes.py (the
+table held to the code) and test_no_outside.py (the shared guard in tests/conftest.py); test_tabs.py reads the page's
+files from the package and no longer serves.
+
 ## 0.31.0 (2026-11-18)
 
 The AI plugins' section, a job's Cancel, and a stop that ends what the plugins started. The user, 2026-11-16, asking

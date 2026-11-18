@@ -289,6 +289,7 @@ html.keyboard .term-panel.shell:focus-within .term { height: max(96px, min(340px
    a size its words can be read */
 @media (max-width: 700px) {
   .data-head { flex-wrap: wrap; }
+  .data-head .tabs { flex-wrap: wrap; row-gap: 2px; }  /* 0.32.0: Main, External API, Internal API and its own */
   .data-head .switches { justify-content: flex-start; }
   .conn-picture { overflow-x: auto; }
   .conn-picture svg { min-width: 600px; }

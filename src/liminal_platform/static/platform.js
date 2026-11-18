@@ -42,6 +42,42 @@
     drawnApis[p.name] = apiInner(p);
     return `<div class="plugin-apis" id="api-${esc(p.name)}">${drawnApis[p.name]}</div>`;
   }
+  // -- what a plugin shares with the rest of the app (0.32.0, liminal-libs 1.63.0; the user, 2026-11-16: "for all
+  // apps, and all plugins, there should be an external api tab, and an internal api tab, the internal api is for
+  // interfaces the plugin shares with the rest of the app, the external should be all the SDKs/APIs the plugin
+  // associates with"; 2026-11-17: "all plugins are middleware", "even for other plugins", "and then the app object
+  // code"): its status's `internal`, made by the library from the plugin itself (internal.py) and drawn by the
+  // library's internal.js on its Internal API tab, in a box of its own that a refresh draws again only when it
+  // changed, as the cards' box is. A library without internal.js has no such tab (OWN_TABS, below); a platform started
+  // before it could say (or one on an older liminal-libs) sends no `internal`: the page says so in its own words, and
+  // never hands the drawing nothing. One that has the library but could not read this plugin sends `internalError`
+  // (its words; why is in its log), which no restart mends: said in their place -------------------------------------
+  const drawnInternal = {};
+  const pickOf = (n) => `data-select="${esc(n)}"`;  // a plugin's name drawn as a button: its page
+  function internalInner(p) {
+    if (!window.LiminalInternal) return '';
+    const hooks = Array.isArray(p.hooks) ? p.hooks.map(String) : [];  // a machine plugin's (an assistant has none)
+    const named = hooks.length ? ` Its hooks, by name: ${hooks.join(', ')}.` : '';
+    if (typeof p.internalError === 'string' && p.internalError) {
+      return `<p class="error">${esc(p.internalError.slice(0, 400) + named)}</p>`;
+    }
+    if (!p.internal || typeof p.internal !== 'object') {
+      const older = `This platform was started before it could say what ${p.title} shares with it, or runs on an older `
+        + 'liminal-libs: restart the platform to see it.';
+      return `<p class="muted">${esc(older + named)}</p>`;
+    }
+    const app = (st && st.app && st.app.title) || 'the platform';
+    const opts = { owner: p.name, title: p.title, app, seen: '#connections', pick: pickOf };
+    try {
+      return window.LiminalInternal.html(p.internal, opts);
+    } catch (e) {  // a shape it cannot draw: said in its place, the rest of the page drawn
+      return `<p class="error">${esc(`Its Internal API could not be drawn: ${e.message}`)}</p>`;
+    }
+  }
+  function internalCard(p) {
+    drawnInternal[p.name] = internalInner(p);
+    return `<div class="plugin-internal" id="internal-${esc(p.name)}">${drawnInternal[p.name]}</div>`;
+  }
   const icon = window.LiminalIcons.icon;
   const Charts = window.LiminalCharts;
   const list = $('list'), data = $('data'), side = $('side'), rail = $('rail');
@@ -92,7 +128,15 @@
   // 0.24.3 (the user, 2026-11-11, after the tabs were tried as bordered buttons, as labels on a line with a rising
   // stroke and as an address: "lets go back to the original tab layout"; asked which: the first): Main and API (APIs for
   // several) beside the title, as in 0.22.0
-  const OWN_TABS = [{ id: 'main', title: () => 'Main' }, { id: 'api', title: (p) => ((p.apis || []).length > 1 ? 'APIs' : 'API') }];
+  // 0.32.0 (the user, 2026-11-16: "for all apps, and all plugins, there should be an external api tab, and an internal
+  // api tab"; 2026-11-17: "i asked for a second tab for all plugins which describe the internal API like structure that
+  // the app code can work with", "all plugins all apps"): Main, External API (the API tab's cards: what it sits on) and
+  // Internal API (what it shares with the platform and its other plugins: internalCard). A library without internal.js
+  // (before 1.63.0): Main and External API. An address that names the API tab (#name/api) opens External API (tabOf),
+  // and is written again as #name/external (oldAddress, in draw)
+  const OWN_TABS = [{ id: 'main', title: () => 'Main' }, { id: 'external', title: () => 'External API' },
+    { id: 'internal', title: () => 'Internal API' }];
+  if (!window.LiminalInternal) OWN_TABS.pop();  // a liminal-libs without internal.js: Main and External API
   // 0.27.0, a plugin's own tabs after them (the user, 2026-11-14: "so for the firewall's both are going to get a 'world
   // wide web view' that shows the globe and the routes incoming all traffic, as well as monitoring port traffic stats"; "on
   // top of the monitoring there needs to be a way to 'filter' (another tab)"): those its status declares (`tabs`,
@@ -102,7 +146,8 @@
   const TAB_ID = /^[A-Za-z0-9_-]{1,40}$/;  // url-safe, as the address carries it (apps/tabs.py's)
   const MAX_TABS = 8;
   function declaredTabs(p) {
-    const seen = new Set(OWN_TABS.map((o) => o.id)), out = [];
+    // the page's own ids, in any case, and the old API tab's: never a plugin's (an older server's tabs_of lets them by)
+    const seen = new Set([...OWN_TABS.map((o) => o.id), 'api', 'external', 'internal']), out = [];
     (Array.isArray(p && p.tabs) ? p.tabs : []).forEach((t) => {
       if (out.length >= MAX_TABS || !t || typeof t.id !== 'string' || !TAB_ID.test(t.id) || seen.has(t.id.toLowerCase())) return;
       if (typeof t.hook !== 'string' || !t.hook) return;
@@ -114,7 +159,10 @@
   }
   const tabsOf = (p) => [...OWN_TABS, ...declaredTabs(p)];
   const hasTabs = (p) => !!p && !pending(p) && !!window.LiminalApis && Array.isArray(p.apis);  // a server from before 0.20.0 sends no apis: no tabs
-  const tabOf = (p) => { const t = hashParts()[1]; return hasTabs(p) && tabsOf(p).some((x) => x.id === t) ? t : 'main'; };
+  const tabOf = (p) => {  // the tab shown: the address's, when it is one of its tabs (the old API tab's: External API)
+    const h = hashParts()[1], t = h === 'api' ? 'external' : h;
+    return hasTabs(p) && tabsOf(p).some((x) => x.id === t) ? t : 'main';
+  };
   const ownTabOf = (p) => { const id = tabOf(p); return OWN_TABS.some((o) => o.id === id) ? null : declaredTabs(p).find((t) => t.id === id) || null; };
   const tabsRow = (p) => (!hasTabs(p) ? '' : `<nav class="tabs" role="tablist" aria-label="${esc(p.title)}: its pages">`
     + tabsOf(p).map((t) => `<button type="button" role="tab" class="tab" aria-selected="${tabOf(p) === t.id}" data-tab="${t.id}" data-machine="${esc(p.name)}">${esc(t.title(p))}</button>`).join('')
@@ -274,6 +322,8 @@
       + `<h4>This machine</h4>${item('machine', 'chip', f.host, `${f.system} ${f.release} · ${f.cpus} cpus`)}`
       + item(CONNECTIONS, 'plug', 'Connections', 'who talks to whom, as it happens')
       + (window.LiminalCodebase ? item(CODEBASE, 'branch', 'Codebase', 'its repositories, its code, by language') : '')
+      + (window.LiminalInternal ? item(OWN, 'sort', st.app.title || 'Platform', 'its own External and Internal API')
+        : '')
       // the four sections' plugins; none but AI plugins (0.31.0: drawn below), the line saying that none is installed
       + (all.some((m) => !isAi(m)) ? SECTIONS.map(([s, title]) => {
         const mine = inSection(all, s);
@@ -1299,7 +1349,8 @@
   function pluginData(m) {
     if (pending(m)) return pendingData(m);
     const head = `<div class="data-head"><h2>${esc(m.title)}</h2>${tabsRow(m)}${switchRow(m)}</div><div class="muted small">${esc(m.about)}</div><p class="error" id="err-${esc(m.name)}"></p>`;
-    if (tabOf(m) === 'api') return head + apiCard(m);  // 0.22.0: its API tab, whatever its state (its card is drawn disabled too)
+    if (tabOf(m) === 'external') return head + apiCard(m);  // its External API tab (0.22.0's API), whatever its state
+    if (tabOf(m) === 'internal') return head + internalCard(m);  // 0.32.0: its Internal API tab, whatever its state
     const own = ownTabOf(m);  // 0.27.0: one of its own tabs, the page its hook answers (asked while it is shown)
     if (own) return head + tabFrame(m, own);
     if (userOff(m)) return `${head}${settingsButton(m)}<p class="muted">Disabled: the platform asks it nothing, it runs nothing here, and its icon is out of the tray. The switch enables it again.</p>`;
@@ -1328,7 +1379,8 @@
   function assistantData(a) {
     if (pending(a)) return pendingData(a);
     const head = `<div class="data-head"><h2>${esc(a.title)}</h2>${tabsRow(a)}${switchRow(a)}</div><div class="muted small">${esc(a.about)}</div><p class="error" id="err-${esc(a.name)}"></p>`;
-    if (tabOf(a) === 'api') return head + apiCard(a);
+    if (tabOf(a) === 'external') return head + apiCard(a);
+    if (tabOf(a) === 'internal') return head + internalCard(a);
     const said = userOff(a) ? '<p class="muted">Disabled: the platform does not host it. The switch enables it again.</p>'
       : invalid(a) ? `<p class="muted">Disabled while it is not valid: ${esc(whyOf(a))}. It is enabled again by itself once it is valid.</p>` : '';
     return `${head}${settingsButton(a)}${said}<h4>Where it is set up</h4><div class="small">Its key and account are its settings, above; its plan and model are set on the charts app's Plugins view. The platform hosts it.</div>`;
@@ -1857,6 +1909,95 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     if (!codebaseShown) return;
     codebaseShown = false;
     window.LiminalCodebase.unmount();
+  }
+  // -- the platform's own two views (0.32.0; the user, 2026-11-16: "for all apps, and all plugins, there should be an
+  // external api tab, and an internal api tab"; 2026-11-17: "all plugins all apps"): an entry under This machine after
+  // Codebase, its two tabs beside its title. External API, at the entry's own address (#app): what the platform's own
+  // code calls that Liminal does not make, drawn by apis.js. Internal API (#app/internal): what its code calls on its
+  // plugins and what it offers them and other apps, its routes, the login it includes, its plugins, drawn by
+  // internal.js. Both from GET api/app/apis (liminal-libs 1.63.0's frame), asked when the entry is shown and its last
+  // answer is a minute old, never while it is not; a platform started before it could answer (or one on an older
+  // liminal-libs) is said so. A library without internal.js lists no entry. The entry is tested before a plugin of the
+  // same name, which it shadows, as Connections and Codebase shadow theirs.
+  const OWN = 'app';
+  const ownShown = () => selected() === OWN && !!window.LiminalInternal;
+  const OWN_LINE = 'the platform itself: what it attaches to, and what it offers its plugins and other apps';
+  const OWN_OLDER = 'This platform was started before it could show its own APIs, or runs on an older liminal-libs: '
+    + 'restart the platform to see them.';
+  const OWN_AGAIN_MS = 60000;
+  let ownApis = { at: 0, data: null, error: '', asking: false };  // GET api/app/apis' last answer, while the page lives
+  async function loadOwn() {
+    const was = ownApis;
+    if (was.asking || (was.at && Date.now() - was.at < OWN_AGAIN_MS)) return;
+    was.asking = true;
+    let data = null, error = '', older = false;
+    try {
+      data = await api('GET', 'api/app/apis');
+    } catch (e) {  // a 404: a process from before, until it is started again; else asked at the next draw
+      older = e.status === 404;
+      error = older ? OWN_OLDER : e.message;
+    }
+    const good = !!data && typeof data === 'object' && !Array.isArray(data);
+    ownApis = { at: good || older ? Date.now() : 0, data: good ? data : was.data, error: good ? '' : error || OWN_OLDER,
+      asking: false };
+    if (ownShown() && st) { drawData(); drawSide(); }
+  }
+  function ownData() {
+    const title = (st.app && st.app.title) || 'Platform', got = ownApis;
+    const tab = hashParts()[1] === 'internal' ? 'internal' : 'external';  // anything else: External API
+    // External's button is the entry's own address (#app: data-tab "main"), Internal's #app/internal (the click's)
+    const button = (id, words, on) => '<button type="button" role="tab" class="tab"'
+      + ` aria-selected="${on}" data-tab="${id}" data-machine="${OWN}">${words}</button>`;
+    const head = `<div class="data-head"><h2>${esc(title)}</h2>`
+      + `<nav class="tabs" role="tablist" aria-label="${esc(title)}: its own APIs">`
+      + button('main', 'External API', tab === 'external') + button('internal', 'Internal API', tab === 'internal')
+      + `</nav></div><div class="muted small">${OWN_LINE}</div>`
+      + `<p class="error" id="err-${OWN}">${esc(got.data ? got.error : '')}</p>`;
+    if (!got.data) return `${head}<p class="muted" role="status">${esc(got.error || 'Asking the platform…')}</p>`;
+    const d = got.data, inner = d.internal && typeof d.internal === 'object' ? d.internal : null;
+    const opts = { owner: 'app:platform', title, pick: pickOf, seen: '#connections' };
+    let body;
+    try {
+      body = tab === 'internal'
+        ? (inner ? window.LiminalInternal.html(inner, opts)
+          : '<p class="muted">Its answer says nothing of what it offers its plugins and other apps.</p>')
+        : window.LiminalApis.html(d.apis, d.apiFacts, { owner: 'app:platform', fold: true,
+          title: 'The APIs and SDKs it associates with', empty: 'It declares no outside API or SDK.' });
+    } catch (e) {  // a shape it cannot draw: said in its place
+      const which = tab === 'internal' ? 'Internal' : 'External';
+      body = `<p class="error">${esc(`Its ${which} API could not be drawn: ${e.message}`)}</p>`;
+    }
+    return `${head}<div class="platform-own" id="own-${tab}">${body}</div>`;
+  }
+  function ownSide() {
+    const app = st.app || {}, got = ownApis, d = got.data || {};
+    const i = d.internal && typeof d.internal === 'object' ? d.internal : {};
+    const routes = Array.isArray(i.routes) ? i.routes : [], mine = routes.filter((r) => r && r.own).length;
+    const login = i.login && typeof i.login === 'object' ? i.login : null, port = app.port || i.port;
+    let signed = '';
+    if (login && typeof login.signedIn === 'boolean') signed = login.signedIn ? ', signed in' : ', signed out';
+    const loginWords = login ? `${[login.kind, login.namespace].filter(Boolean).join(', ') || 'one'}${signed}`
+      : got.data && 'login' in i ? 'none' : '';
+    // its plugins as the library's drawing counts them: those it knows (a disabled or not valid one too), and how
+    // many of them are attached now
+    const known = Array.isArray(i.plugins) ? i.plugins.filter((p) => p && typeof p.name === 'string' && p.name) : null;
+    const attached = known ? known.filter((p) => p.attached !== false).length : 0;
+    const plugins = !known ? '' : !known.length ? 'none' : attached === known.length ? `${attached} attached`
+      : `${known.length}, ${attached} attached`;
+    const rows = [
+      ['API', app.api || i.api],
+      ['Address', app.url || i.url],
+      ['Port', port ? `${port}${i.portVar ? ` (${i.portVar})` : ''}` : ''],
+      ['Plugin API', i.pluginApi ? `${i.pluginApi}, offered to its plugins` : ''],
+      ['Login', loginWords],
+      ['Routes', routes.length ? `${routes.length} (${mine} its own)` : ''],
+      ['Plugins', plugins],
+      ['Outside APIs', Array.isArray(d.apis) ? String(d.apis.length) : ''],
+    ].filter(([, v]) => v !== undefined && v !== null && v !== '');
+    const dl = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+    return `<h3>${icon('sort', 20)} ${esc(app.title || 'Platform')}</h3><div class="muted small">its own APIs</div>`
+      + (dl ? `<dl class="facts">${dl}</dl>` : '')
+      + (got.data ? '' : `<p class="summary">${esc(got.error || 'Asking the platform…')}</p>`);
   }
   const CLASS_ORDER = ['read', 'change', 'ask', 'stream', 'attach', 'login', 'process', 'network'];
   const COLS = { caller: [64, 112], app: [236, 150], plugin: [478, 180], outside: [704, 176] };  // x and width, of 800
@@ -2445,15 +2586,16 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     const sel = selected();
     if (sel === CODEBASE && window.LiminalCodebase) { showCodebase(); return; }  // its panes are the library's while shown
     leaveCodebase();
-    const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
+    const mine = ownShown();  // 0.32.0: the platform's own two views, before a plugin (one named so is shadowed)
+    const m = mine ? null : st.machines[sel], a = mine ? null : (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
     const own = m && !pending(m) ? ownTabOf(m) : null;  // 0.27.0: one of its own tabs shown
     if (m && hasHook(m, 'check') && !userOff(m) && !own) {  // its check of this PC: asked when shown, again after a minute
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
     }
-    const html = sel === 'machine' ? machineData() : sel === CONNECTIONS ? connectionsData() : m ? pluginData(m) : a ? assistantData(a)
-      : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
+    const html = sel === 'machine' ? machineData() : sel === CONNECTIONS ? connectionsData() : mine ? ownData()
+      : m ? pluginData(m) : a ? assistantData(a) : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
     // a terminal's panel shown stays where it is, the pane drawn anew around it (0.17.0): its box keeps the focus, the
     // on-screen keyboard stays up and a word being composed goes on; else the pane drawn anew and the panel put in its slot
     const panel = m && shells[m.name] ? shells[m.name].panel : null;
@@ -2553,10 +2695,24 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     if (sel === CONNECTIONS) { drawConnectionsSide(); return; }
     if (sel === CODEBASE && window.LiminalCodebase) return;  // drawn with its data (codebase.js)
+    if (ownShown()) { side.innerHTML = ownSide(); return; }  // 0.32.0: before a plugin of its name, which it shadows
     side.innerHTML = sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : '';
   }
 
+  // 0.32.0: an address written before names the API tab (#name/api). It opens External API (tabOf) and is written
+  // again in place as #name/external, so the address says what is shown (decision C3); the platform's own entry has
+  // External API at its own address, so #app/api and #app/external are written again as #app
+  function oldAddress() {
+    const [name, tab] = hashParts(), mine = name === OWN && !!window.LiminalInternal;
+    const again = mine && (tab === 'api' || tab === 'external') ? `#${OWN}`
+      : name && tab === 'api' ? `#${enc(name)}/external` : '';
+    try {
+      if (again) history.replaceState(null, '', again);
+    } catch (e) { /* a page that may not: tabOf reads #name/api as External API all the same */ }
+  }
+
   function draw() {
+    oldAddress();
     if (!st) return;
     drawRail();
     drawList();
@@ -2565,6 +2721,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     schedule();
     if (selected() === CONNECTIONS) loadTraffic();
     else { clearTimeout(trafficTimer); trafficGen += 1; }
+    if (ownShown()) loadOwn();  // 0.32.0: the platform's own two views, asked while shown (again once a minute old)
   }
 
   // the platform not answering, said: a terminal on the page stays where it is, typed into still (0.17.0: a view never
@@ -2736,10 +2893,23 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     if (again) again.focus({ preventScroll: true });
     if (again && caret && again.setSelectionRange) again.setSelectionRange(caret[0], caret[1]);  // typing goes on where it was
   }
+  // a box of its own (the External API cards, 0.22.0; the Internal API, 0.32.0) drawn again only when its HTML changed
+  // (`drawn`, by the plugin's name): a line, a link or a box that had the focus in it has it again (what a plugin
+  // learned of its API moves with every answer while its tab is shown)
+  function redrawKept(box, html, drawn, name) {
+    if (html === drawn[name]) return;
+    const parts = () => [...box.querySelectorAll('summary, a[href], button')];
+    const at = box.contains(document.activeElement) ? parts().indexOf(document.activeElement) : -1;
+    box.innerHTML = html;
+    drawn[name] = html;
+    if (at >= 0 && parts()[at]) parts()[at].focus({ preventScroll: true });
+  }
   function redrawShown(m) {
     if (ownTabOf(m)) { redrawTabFrame(m); return; }  // 0.27.0: one of its own tabs shown, its page asked on its own
     const box = $(`charts-${m.name}`), t = $(`tables-${m.name}`), pz = $(`paths-${m.name}`);
-    const onApi = tabOf(m) === 'api' && !!$(`api-${m.name}`);  // 0.22.0: its API tab is shown: its cards alone, below
+    // its External API tab shown (0.22.0's API tab): its cards alone, below; its Internal API tab (0.32.0): its box
+    const onApi = (tabOf(m) === 'external' && !!$(`api-${m.name}`))
+      || (tabOf(m) === 'internal' && !!$(`internal-${m.name}`));
     if (pz && !off(m)) {  // its paths drawn again only when they changed: the moving traffic goes on
       const html = pathsHtml(m);
       if (html !== drawnPaths[m.name]) { pz.innerHTML = html; drawnPaths[m.name] = html; }
@@ -2753,19 +2923,9 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
         if (t) t.innerHTML = tables(m) + statTables(m);
       }
     });
-    const ac = $(`api-${m.name}`);
-    if (ac) {  // what it learned of its APIs, drawn again only when it changed
-      const html = apiInner(m);
-      if (html !== drawnApis[m.name]) {
-        // 0.22.0: a line, a link or a box that had the focus in the cards has it again (what a plugin learned of its API
-        // moves with every answer while its API tab is shown)
-        const parts = (el) => [...el.querySelectorAll('summary, a[href], button')];
-        const at = ac.contains(document.activeElement) ? parts(ac).indexOf(document.activeElement) : -1;
-        ac.innerHTML = html;
-        drawnApis[m.name] = html;
-        if (at >= 0 && parts(ac)[at]) parts(ac)[at].focus({ preventScroll: true });
-      }
-    }
+    const ac = $(`api-${m.name}`), ic = $(`internal-${m.name}`);
+    if (ac) redrawKept(ac, apiInner(m), drawnApis, m.name);  // what it learned of its APIs
+    if (ic) redrawKept(ic, internalInner(m), drawnInternal, m.name);  // 0.32.0: what it shares (its page's asks follow)
     drawSide();
     const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
     if (sub) sub.textContent = stateLine(m);

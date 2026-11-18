@@ -39,6 +39,40 @@ charts, tables and choices are drawn in the middle (the
 hardware stats' charts and tables; the Preferences plugin's themes), and every page is painted in the UI's
 theme (the library's `theme.js`, the data folder's `ui.json`).
 
+## A plugin's page and its tabs
+
+Beside a plugin's title, its tabs (the user, 2026-11-16: "for all apps, and all plugins, there should be an external
+api tab, and an internal api tab, the internal api is for interfaces the plugin shares with the rest of the app, the
+external should be all the SDKs/APIs the plugin associates with"):
+
+- **Main**: what it shows: its settings, actions, choices, charts, tables, forms and setup.
+- **External API**: the SDKs and APIs it associates with, what it sits on (its `apis`: the plugin API 2.2 cards), each
+  a line that opens to its description, drawn by the library's `apis.js`. It was the API tab.
+- **Internal API**: what it shares with the rest of the app, made by the library from the plugin itself
+  (`liminal_libs.internal`) and drawn by the library's `internal.js`: the kind of middleware it is (the library base it
+  is built on, and so the standard interface it implements), the standard hooks it answers and those it leaves to the
+  contract's defaults, then its own, each with its arguments, its line, whether it only reads and who uses it (the
+  platform's code, other plugins, its page); how the platform asks it; the settings it reads through the login; and
+  what it asks of other plugins. What it says to whom as it happens is Connections'.
+- Then its own tabs (its `TABS`: a firewall's World Wide Web, eBPF's Compare and Functions), each asked every few
+  seconds while it is shown.
+
+The tab is in the address after the plugin's name, so a reload or a link keeps it: `#name` (Main), `#name/external`,
+`#name/internal`, `#name/<id>`. An address that names the old API tab (`#name/api`) opens External API and is written
+again as `#name/external`; no plugin's own tab takes these ids, nor `api`.
+
+The platform's own two views are an entry under This machine, beside Connections and Codebase: External API (`#app`),
+what the platform's own code calls that Liminal does not make (the commands it runs and the system interfaces it reads,
+declared in `apis.py`), and Internal API (`#app/internal`), what its code calls on its plugins and what it offers them
+and other apps, its routes, the login it includes and its plugins. Both come from `GET /api/app/apis`, asked while the
+entry is shown.
+
+The page is read from the checkout at each request, so it draws with what a running platform has: with a liminal-libs
+that has no `internal.js`, Main and External API and no entry of its own; with a platform process started before these
+views (no `internal` in its statuses, no `GET /api/app/apis`), the Internal API tab and the entry say to restart it.
+A platform whose liminal-libs cannot read one plugin says so on that plugin's Internal API tab instead (its status's
+`internalError`; why is in the platform's log), since a restart would not mend it.
+
 ## Run
 
 ```
@@ -53,22 +87,38 @@ liminal-platform machine wsl-ubuntu run -- docker ps
 
 ## The API
 
-`GET /api/status`, `GET /api/overview` (what the page draws at once: no plugin asked), `GET /api/assistants`,
-`GET /api/docker`, `GET /api/machines`, `GET /api/machines/<name>` (a plugin's status; it and the plugin's row in
-the overview say its `section` and its `group`, the group empty outside AI plugins), `POST /api/machines/<name>/setup`
-(`{"steps": [...]}`, 202; `GET` the same path for the lines and the result), `POST /api/machines/<name>/run`
-(`{"command": [...]}`), `POST /api/machines/<name>/ask` (`{"hook": ..., "args": [...]}`: one of a plugin's hooks by
-name; a refusal answers 400 and a failure 502, with the plugin's own `words` and, for a refusal that names the argument
-accepting it, `accept`), `POST /api/machines/<name>/job` (`{"action": "hook", "hook": ..., "args": [...]}`: one of
-the hooks the plugin names in its `JOB_HOOKS`, run as a job, 202; `{"action": "install"}` or `"update"` for a plugin
-that installs a system; `GET` the same path with `since` and `wait` for the job's lines as they come and its end),
-`POST /api/machines/<name>/job/cancel` (the job under way asked to stop, 202 with its state: only a job whose hook
-the plugin names in its `CANCEL_HOOKS`, which looks at the request between its steps and ends by itself;
-`{"startedAt": ...}`, optional, names the job meant by its state's own `startedAt`, a number; 409 when the plugin runs
-no job, when the job named has ended and another runs, and when the job's work ends as it is asked; 400 for a job that
-runs to its end, with a liminal-libs older than 1.62.0, and for a `startedAt` that is no number), `GET /api/instances`,
-and the frame's `/api/tray`, `/api/app`, `/api/plugins`, `/api/interface`. Writes carry the write header, as in every
-Liminal app; only this machine's pages are answered.
+Its own routes, each listed with what it is in `routes.py` (`ROUTES`, held to the code by `tests/test_routes.py`) and
+shown on its own Internal API view:
+
+- `GET /api/status` (everything at once, for a client: every plugin asked, one after another), `GET /api/overview`
+  (what the page draws at once: no plugin asked), `GET /api/assistants`, `GET /api/docker`, `GET /api/machines`,
+  `GET /api/instances`.
+- `POST /api/plugins/<name>/settings` (its settings kept through the login), `/enabled` and `/hidden` (`{"on": ...}`).
+- `GET /api/machines/<name>` (its status; it and the plugin's row in the overview say its `section` and its `group`,
+  the group empty outside AI plugins), `GET /api/machines/<name>/check` (its check of this machine).
+- `POST /api/machines/<name>/setup` (`{"steps": [...]}`, 202; `GET` the same path for the lines and the result) and
+  `POST /api/machines/<name>/job` (`{"action": "hook", "hook": ..., "args": [...]}`: one of the hooks the plugin
+  names in its `JOB_HOOKS`, run as a job, 202; `{"action": "install"}` or `"update"` for a plugin that installs a
+  system; `GET` the same path with `?since=&wait=` for the job's lines as they come and its end).
+- `POST /api/machines/<name>/job/cancel` (the job under way asked to stop, 202 with its state: only a job whose hook
+  the plugin names in its `CANCEL_HOOKS`, which looks at the request between its steps and ends by itself;
+  `{"startedAt": ...}`, optional, names the job meant by its state's own `startedAt`, a number; 409 when the plugin
+  runs no job, when the job named has ended and another runs, and when the job's work ends as it is asked; 400 for a
+  job that runs to its end, with a liminal-libs older than 1.62.0, and for a `startedAt` that is no number).
+- `POST /api/machines/<name>/ask` (`{"hook": ..., "args": [...]}`: one of a plugin's hooks by name, its arguments by
+  position; a refusal answers 400 and a failure 502, with the plugin's own `words` and, for a refusal that names the
+  argument accepting it, `accept`), `POST /api/machines/<name>/enabled`, `POST /api/machines/<name>/run`
+  (`{"command": [...]}`: a client's, never the page's).
+- `POST /api/machines/<name>/terminal`, `GET` the same path (its output), `POST .../terminal/input` and
+  `.../terminal/close`: its login terminal.
+
+Each machine plugin's and AI assistant's status carries its External API (`pluginApi`, `apis`, `apiFacts`) and its
+Internal API (`internal`; `null`, with `internalError` in words, when the library could not read it). Beside these,
+the frame's: `/api/tray`, `/api/app`, `/api/plugins`, `/api/interface`, `/api/login/pairs`, `/api/traffic`,
+`/api/codebase`, `/api/ui`, and `GET /api/app/apis`: the platform's own External and Internal API (`{"app",
+"internal", "apis", "apiFacts"}`), or with `?plugin=<name>` an attached plugin's (`{"name", "internal", "apis",
+"apiFacts"}`). Writes carry the write header (`X-Liminal-Charts: 1`), as in every Liminal app; only this machine is
+answered (the platform listens on 127.0.0.1), and of web pages only its own.
 
 A job's state says `startedAt`, `cancels` (it can be asked to stop), `cancelling` (it was asked) and `cancelled` (it
 had been asked when its work ended, and it has ended). The page shows a Cancel button in the job's panel while a job
@@ -78,7 +128,9 @@ job begun at another time than the one a panel follows (that one ended, then ano
 
 An ask is logged by the hook's name and how many arguments it was given, never their values; a plugin's reads are not
 logged at all (`present`, `status`, `view`, `charts`, `instances`, `wanted`, `services`, `startups`, `processes`, its
-tabs' hooks, and from 0.31.0 `serving`: what a model server offers the other AI plugins). A plugin asking another
+tabs' hooks, and from 0.31.0 `serving`: what a model server offers the other AI plugins). From 0.32.0, with
+liminal-libs 1.63.0, so are the hooks a plugin names in its `READ_HOOKS` that it answers itself and that are not
+its jobs: noted as reads in Connections, and drawn as reads on its Internal API tab. A plugin asking another
 through the platform (`app.ask`) is noted in Connections as the one asking.
 
 ## When the platform stops

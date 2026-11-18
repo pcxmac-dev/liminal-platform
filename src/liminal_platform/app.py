@@ -1,6 +1,9 @@
 """The platform app: the frame's App with the chip icon; its routes serve the machine's facts, the machine
 plugins (their status, a setup run in a thread with its lines kept, a command, disabled or enabled), the Docker
-instances and the plugins attached."""
+instances and the plugins attached. 0.32.0: each plugin's status also says what the plugin shares with the platform
+(its Internal API: `internal`, liminal-libs 1.63.0's internal.py), and the platform says its own two (GET
+/api/app/apis, the frame's): its routes (routes.py) and what it calls on its plugins (CALLS), and what it associates
+with (apis.py)."""
 from __future__ import annotations
 
 import contextlib
@@ -20,11 +23,19 @@ from liminal_libs import docker as docker_mod
 from liminal_libs import layout
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
 from liminal_libs.machines.terminal import Output, Terminal
+from liminal_libs.web import WRITE_HEADER
+
+from .routes import ROUTES  # its own routes, as its Internal API lists them: plain rows, nothing imported with them
 
 try:  # a declared tab's id (url-safe) and the fewest seconds between its asks, as liminal-libs apps/tabs.py says them
     from liminal_libs.apps.tabs import ID as TAB_ID, MIN_EVERY as TAB_MIN_EVERY
 except ImportError:  # a library from before its tabs: no plugin of it declares one, and a tab is what apps/tabs.py makes
     TAB_ID, TAB_MIN_EVERY = re.compile(r"[A-Za-z0-9_-]{1,40}"), 1.0
+
+try:  # what a plugin shares with its app, read from the plugin itself (liminal-libs 1.63.0's internal.py)
+    from liminal_libs import internal as internal_mod
+except ImportError:  # an older library: no status carries `internal` (the page says so), its reads are the platform's
+    internal_mod = None
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
@@ -169,7 +180,10 @@ def section_of(plugin) -> str:
     return section if section in SECTIONS else "machine"
 
 
-OWN_TABS = ("main", "api")  # the page's own tabs on every plugin's page: a declared tab never takes their place
+# the page's own tabs on every plugin's page, whose ids a declared tab never takes (in any case): Main, External API and
+# Internal API (0.32.0, liminal-libs 1.63.0; the user, 2026-11-16: "there should be an external api tab, and an
+# internal api tab"), and "api", the address of the API tab before them, which the page opens as External API
+OWN_TABS = ("main", "api", "external", "internal")
 TAB_MAX_EVERY = 3600.0  # the most seconds between a tab's asks
 MAX_TABS = 8  # declared tabs drawn on one plugin's page
 MAX_TAB_TITLE = 60  # characters of a tab's title
@@ -185,15 +199,16 @@ def _tab_said(t) -> dict | None:
 
 
 def tabs_of(plugin) -> list[dict]:
-    """The tabs a machine plugin declares after Main and API (the user, 2026-11-14: "so for the firewall's both are going
-    to get a 'world wide web view'"; "there needs to be a way to 'filter' (another tab)"): liminal-libs apps/tabs.py's
-    `Tab`s in its `TABS`, each as its `as_dict()` says it, {id, title, hook, every}; none from an older library or plugin.
-    The page asks a tab's hook every `every` seconds while the tab is shown, and the platform asks it as a read: noted as
-    one in who talks to whom, never logged, never a change. So a tab is left out when its hook is the setup, a command,
-    the settings or the scan (asked through their own routes, or not at all) or one of its jobs; so is one whose id is
-    Main's, API's or an earlier tab's (in any case), and one that cannot say itself. Its every is kept between
-    TAB_MIN_EVERY and TAB_MAX_EVERY seconds, its title to MAX_TAB_TITLE characters (its id when it has none); MAX_TABS at
-    the most."""
+    """The tabs a machine plugin declares after Main, External API and Internal API (the user, 2026-11-14: "so for the
+    firewall's both are going to get a 'world wide web view'"; "there needs to be a way to 'filter' (another tab)"):
+    liminal-libs apps/tabs.py's `Tab`s in its `TABS`, each as its `as_dict()` says it, {id, title, hook, every}; none
+    from an older library or plugin. The page asks a tab's hook every `every` seconds while the tab is shown, and the
+    platform asks it as a read: noted as one in who talks to whom, never logged, never a change. So a tab is left out
+    when its hook is the setup, a command, the settings or the scan (asked through their own routes, or not at all) or
+    one of its jobs; so is one whose id is one of the page's own (OWN_TABS: Main's, External API's, Internal API's, and
+    "api", the old address of External API) or an earlier tab's, in any case, and one that cannot say itself. Its every
+    is kept between TAB_MIN_EVERY and TAB_MAX_EVERY seconds, its title to MAX_TAB_TITLE characters (its id when it has
+    none); MAX_TABS at the most."""
     try:
         declared = list(itertools.islice(iter(getattr(plugin, "TABS", ()) or ()), 4 * MAX_TABS))
         jobs = {h for h in (getattr(plugin, "JOB_HOOKS", ()) or ()) if isinstance(h, str)}
@@ -345,6 +360,94 @@ class Setup:
         return out
 
 
+# What the platform's own code calls and reads on a plugin of each kind (0.32.0; liminal-libs 1.63.0's internal.py: a
+# plugin's Internal API says, for each hook, whether the app's object code uses it and how; the user, 2026-11-17: "all
+# plugins are middleware", "even for other plugins", "and then the app object code"). Each `how` is in the code's
+# words; the platform's own Internal API lists both by kind. tests/test_internal_tab.py holds them to this module's
+# source: every name its code reads or calls on a plugin is here, and every name here is one it does (but `instances`,
+# asked through liminal_libs.docker; `api_facts`, through facts_of; `attach` and `detach`, which the frame calls).
+CALLS = {
+    "machine": {
+        "present": "whether it is there: for the tray, at most once a minute",
+        "status": "its state: each GET /api/machines/{name}, /api/machines and /api/status, while it is enabled",
+        "instances": ("its Docker instances: GET /api/instances and /api/status, while it is enabled "
+                      "(liminal_libs.docker.instances)"),
+        "interface": "the hooks it answers: with each status and each ask",
+        "setup": "POST /api/machines/{name}/setup and /job {action: install}: its steps, as a job",
+        "update_packages": "POST /api/machines/{name}/job {action: update}, as a job",
+        "check": "GET /api/machines/{name}/check: while its page is shown, and before an install or an update",
+        "terminal": "POST /api/machines/{name}/terminal: the command its login terminal runs",
+        "terminal_title": "its terminal's title (else its user and distribution_name)",
+        "run": "POST /api/machines/{name}/run: a client's command, never the page's",
+        "settings_changed": "after POST /api/plugins/{name}/settings kept them",
+        "api_facts": "what it learned of its APIs: with each status while it is enabled",
+        "attach": "while it is enabled and valid: the platform and a login that notes what it reads and keeps",
+        "detach": "when it is disabled or not valid",
+        "app_stopping": ("when the platform stops, once the asks and the jobs that take a cancel under way are "
+                         "waited for (STOP_WAIT_S at the most): each machine plugin that has it, enabled or "
+                         "not, attached or not"),
+        "ask": ("any other hook by name: POST /api/machines/{name}/ask, and /job {action: hook} for one of its "
+                "JOB_HOOKS")},
+    "assistant": {
+        "served": "whether its key and its plan serve: with each status",
+        "keys_set": "whether its key is set, when it does not serve",
+        "free_note": "why its plan has no API access",
+        "settings_changed": "after POST /api/plugins/{name}/settings kept them",
+        "interface": "the hooks it answers: in GET /api/status's plugins while it is attached (the frame's plugins())",
+        "api_facts": "what it learned of its APIs: with each status while it is enabled",
+        "attach": "while it is enabled and valid", "detach": "when it is disabled or not valid"}}
+ATTRIBUTES = {  # read or looked up, never called (KIND: which of CALLS' kinds it is; chosen: whether it has installs to
+    # choose from, looked up before an update, which it then checks itself)
+    "machine": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "SECTION", "STEPS", "TABS", "JOB_HOOKS",
+                "keys", "apis", "api", "app", "login", "user", "distribution_name", "chosen", "GROUP",
+                "CANCEL_HOOKS"),
+    "assistant": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "vendor", "default_model", "key_names",
+                  "keys", "apis", "api", "app")}
+# the terms of the platform's ask (PlatformApp.ask; POST /api/machines/{name}/ask), as a plugin's Internal API says them
+ASK_TERMS = (f"the hooks a machine plugin answers (its tabs' too), while it is enabled, none of "
+             f"{', '.join(NOT_ASKED[:-1])} and {NOT_ASKED[-1]} (routes of their own, or none); the arguments by "
+             "position, in one list; its answer as JSON; a refusal is a HookRefused: 400 with the plugin's own words "
+             "and the argument that accepts it, a failure 502; none begun while the platform stops (503)")
+PAGE_ASKS_DEPTH = 6  # how deep a plugin's status is walked for the hooks its page asks (page_asks)
+PAGE_ASKS_NODES = 2000  # and how many of its dicts and lists at the most
+PAGE_ASKS_EACH = 100  # values of each looked at: a table's rows past its first hundred are more of the same
+MAX_PAGE_ASKS = 200  # hooks' names taken from it at the most
+
+
+def page_asks(status) -> list[str]:
+    """The hooks a plugin's status names for its page to ask (its forms', actions' and options' `hook`; a table's
+    `move`, `select`, options, actions and tasks): the value of every key named "hook" that is a hook's name, each once,
+    the status walked through its dicts and lists, the shallowest first: PAGE_ASKS_DEPTH deep, PAGE_ASKS_NODES of them
+    and PAGE_ASKS_EACH values of each at the most, so a long table cannot hide the forms after it. Nothing of the
+    plugin is asked, and the status is not changed; a status that is not a dict names none. Its Internal API then says
+    of those hooks that its page asks them, which tells one its page asks from one that only other plugins ask."""
+    if not isinstance(status, dict):
+        return []
+    found: dict[str, None] = {}
+    queue, at = [(status, 0)], 0
+    try:
+        while at < len(queue) and len(found) < MAX_PAGE_ASKS:
+            node, depth = queue[at]
+            at += 1
+            if isinstance(node, dict):
+                hook = node.get("hook")
+                if isinstance(hook, str) and hook.isidentifier() and len(hook) <= 80:
+                    found.setdefault(hook, None)
+                values = node.values()
+            else:
+                values = node
+            if depth >= PAGE_ASKS_DEPTH:
+                continue
+            for value in itertools.islice(values, PAGE_ASKS_EACH):
+                if len(queue) >= PAGE_ASKS_NODES:
+                    break
+                if isinstance(value, (dict, list, tuple)):
+                    queue.append((value, depth + 1))
+    except Exception:  # noqa: BLE001 - a status that cannot be walked: what was found in it so far
+        pass
+    return list(found)
+
+
 class PlatformApp(App):
     NAME = "platform"
     TITLE = "Liminal Platform"
@@ -369,6 +472,11 @@ class PlatformApp(App):
     TRACE_LOGIN = True
     WATCH_OUTSIDE = True
     READ_HOOKS = READS
+    # its own Internal API (liminal-libs 1.63.0's App, GET /api/app/apis): what its code calls and reads on its plugins
+    # of each kind, and its routes beside the frame's; its External API is `apis` (apis.py, imported when asked)
+    CALLS = CALLS
+    ATTRIBUTES = ATTRIBUTES
+    ROUTES = ROUTES
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
                  assistants: dict | None = None, settings=None, terminal=None, once: bool = False):
@@ -387,6 +495,7 @@ class PlatformApp(App):
         self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login
         self._settings_cache: tuple[float, object] | None = None
         self._invalid: set[str] = set()  # the plugins found not valid by the last status: out of the tray
+        self._unsaid: set[str] = set()  # the plugins whose Internal API could not be read: said once in the log
         self._terminals: dict[str, Terminal] = {}  # a login terminal per plugin (the page's terminal panel)
         self._terminal_of = terminal  # (argv, title) -> Terminal: a test's
         self._settling = threading.Lock()
@@ -664,7 +773,8 @@ class PlatformApp(App):
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
                 "icon": getattr(p, "ICON", "") or "analysis",  # its maker's mark (0.10.1), else the chart
                 "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
-                "hidden": p.name in self.hidden(), "settings": self.settings_of(p), **self.api_card(p, on)}
+                "hidden": p.name in self.hidden(), "settings": self.settings_of(p), **self.api_card(p, on),
+                **self.internal_card(p)}
 
     # -- a plugin's settings, entered on its page (the user, 2026-11-08: "i need a way to put my credentials in to the
     # namecheap plugin and allow it to function"): its keys (KeyVar), kept through the platform's login (Login.save:
@@ -836,7 +946,8 @@ class PlatformApp(App):
                 "enabled": on, "valid": valid, "why": why, "state": state,
                 "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "tabs": tabs_of(m), "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
-                "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m), **self.api_card(m, on)}
+                "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m),
+                **self.api_card(m, on), **self.internal_card(m, status if on else None)}
 
     @staticmethod
     def api_card(p, live: bool = True) -> dict:
@@ -852,6 +963,83 @@ class PlatformApp(App):
         except Exception:  # noqa: BLE001 - a declaration that cannot be read: the page says it declares none
             declared = []
         return {"pluginApi": str(getattr(p, "api", "") or ""), "apis": declared, "apiFacts": apis_mod.facts_of(p) if declared and live else {}}
+
+    # -- what a plugin shares with the platform, and what the platform shares itself (0.32.0; liminal-libs 1.63.0's
+    # internal.py; the user, 2026-11-16: "the internal api is for interfaces the plugin shares with the rest of the
+    # app"; 2026-11-17: "describe the internal API like structure that the app code can work with", "all plugins are
+    # middleware") -----------------------------------------------------------------------------------------------------
+    def internal_card(self, p, status=None) -> dict:
+        """What a plugin shares with the platform, for its Internal API tab: {"internal": ...}, made from the plugin
+        object itself by the library (internal.internal_of, through plugin_internal: its base and the standard interface
+        it implements, its own hooks, who uses each and how it is called, its tabs, its settings, what it asks of other
+        plugins), asking it nothing, so a disabled plugin has it too. That part is kept for the platform's life; the
+        status gets a copy of it with `pageAsks`, the hooks its page asks as `status` (the status just read from it, or
+        None) names them (page_asks). {} with a library before internal.py, whose frame has no plugin_internal: the
+        page then says the platform was started before it could say it. When the library is there and cannot read
+        this plugin (it raises, or makes something other than a plugin's Internal API of it): {"internal": None,
+        "internalError": words}, which only a platform that has the library sends, so its tab says that it could not
+        be read, not to restart the platform; why is in the platform's log, once, and never in the status."""
+        if internal_mod is None or not callable(getattr(App, "plugin_internal", None)):
+            return {}
+        try:
+            shared = self.plugin_internal(p)
+            if not isinstance(shared, dict):
+                raise TypeError(f"the library made a {type(shared).__name__} of it, not its Internal API")
+        except Exception as e:  # noqa: BLE001 - its Internal API tab says it could not be read; why, logged once
+            with self._lock:
+                said = p.name in self._unsaid
+                self._unsaid.add(p.name)
+            if not said:
+                self.log(f"platform: what {p.name} shares could not be read: {type(e).__name__}: {e}")
+            title = str(getattr(p, "title", "") or p.name)
+            return {"internal": None,
+                    "internalError": f"What {title} shares with the platform could not be read: the platform's log "
+                                     "says why."}
+        return {"internal": {**shared, "pageAsks": page_asks(status)}}  # a copy: the part kept is never changed
+
+    def plugin_internal(self, plugin, tabs=None) -> dict:
+        """What a plugin shares with the platform (the frame's plugin_internal: kept for the app's life), with its tabs
+        as the platform keeps them (tabs_of) when none are given."""
+        return super().plugin_internal(plugin, tabs=tabs_of(plugin) if tabs is None else tabs)
+
+    @staticmethod
+    def _machine_kind(p) -> bool:
+        return getattr(p, "KIND", "") == "machine"
+
+    def askable(self, p) -> set[str]:
+        """The hooks the platform asks a plugin by name, whoever wants them (its page, a client, another plugin): a
+        machine plugin's `asks`, what POST /api/machines/{name}/ask and PlatformApp.ask take while it is enabled; none
+        of an AI assistant's (ask takes machine plugins only)."""
+        return set(self.asks(p)) if self._machine_kind(p) else set()
+
+    def known_plugins(self) -> list:
+        """Every plugin of the platform, attached or not (what a plugin asks of another, and who asks a plugin, are
+        said from them): the machine plugins, then the AI assistants."""
+        return [*self.machines().values(), *self.assistant_plugins().values()]
+
+    def call_words(self, p) -> dict:
+        """How the platform is asked one of a plugin's hooks, in words, for its Internal API's "How it is called": by
+        another plugin (its app's ask, the arguments in one list), by a client over HTTP, as a job; then the terms
+        (ASK_TERMS). Over HTTP as the frame takes a write: from this machine (the platform listens on 127.0.0.1 and
+        answers only a request addressed to it), with the write header (WRITE_HEADER: 1; without it, 403). An AI
+        assistant is asked nothing by name here."""
+        if not self._machine_kind(p):
+            return {"terms": "the platform asks an AI assistant nothing by name"}
+        name, header = p.name, f"with the header {WRITE_HEADER}: 1, from this machine"
+        return {"plugins": f"self.app.ask({name!r}, hook, [arguments])",
+                "clients": f'POST /api/machines/{name}/ask {{"hook": hook, "args": [arguments]}} {header}',
+                "jobs": (f'POST /api/machines/{name}/job {{"action": "hook", "hook": hook, "args": [arguments]}} '
+                         f"{header}: one of its JOB_HOOKS, its lines then read from GET "
+                         f"/api/machines/{name}/job?since="),
+                "terms": ASK_TERMS}
+
+    @property
+    def apis(self) -> tuple:
+        """What the platform itself associates with, for its own External API (apis.py): imported when first asked,
+        so the platform's start loads nothing more for it."""
+        from .apis import APIS
+
+        return APIS
 
     @staticmethod
     def hooks(m) -> list[str]:
@@ -874,8 +1062,17 @@ class PlatformApp(App):
 
     @staticmethod
     def reads_of(m) -> tuple[str, ...]:
-        """The hooks of a machine plugin that only read: READS, and its tabs' hooks (the page asks them every few seconds
-        while a tab is shown): noted as reads in who talks to whom, and not logged."""
+        """The hooks of a machine plugin that only read: READS, its tabs' hooks (the page asks them every few seconds
+        while a tab is shown) and, with liminal-libs 1.63.0 (internal.reads_of), those it says only read (its
+        READ_HOOKS) that it answers itself and are not its jobs: noted as reads in who talks to whom, and not logged,
+        and drawn as reads on its Internal API tab. Without that library, or if it cannot say: READS and the tabs'."""
+        if internal_mod is not None:
+            try:
+                said = internal_mod.reads_of(m, READS, tabs_of(m))
+                if isinstance(said, tuple) and all(isinstance(h, str) for h in said):
+                    return said
+            except Exception:  # noqa: BLE001 - a plugin's declaration that cannot be read: the platform's own reads
+                pass
         return (*READS, *(h for h in tab_hooks(m) if h not in READS))
 
     def _refuse_stopping(self) -> None:
