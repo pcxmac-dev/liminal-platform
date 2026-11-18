@@ -62,10 +62,10 @@ The tab is in the address after the plugin's name, so a reload or a link keeps i
 again as `#name/external`; no plugin's own tab takes these ids, nor `api`.
 
 The platform's own two views are an entry under This machine, beside Connections and Codebase: External API (`#app`),
-what the platform's own code calls that Liminal does not make (the commands it runs and the system interfaces it reads,
-declared in `apis.py`), and Internal API (`#app/internal`), what its code calls on its plugins and what it offers them
-and other apps, its routes, the login it includes and its plugins. Both come from `GET /api/app/apis`, asked while the
-entry is shown.
+what the platform's own code calls that Liminal does not make (the commands it runs, the system interfaces it reads and
+the signals `serve` takes, declared in `apis.py`), and Internal API (`#app/internal`), what its code calls on its
+plugins and what it offers them and other apps, its routes, the login it includes, its plugins and what a job's hook is
+handed. Both come from `GET /api/app/apis`, asked while the entry is shown.
 
 The page is read from the checkout at each request, so it draws with what a running platform has: with a liminal-libs
 that has no `internal.js`, Main and External API and no entry of its own; with a platform process started before these

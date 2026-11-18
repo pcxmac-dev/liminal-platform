@@ -4,14 +4,15 @@
 What the platform's own code calls that Liminal does not make, and nothing of its plugins' (each says its own on its
 page): the docker command (the Docker row of its status, its instances), WSL's command line (asked by the Docker row on
 Windows when no docker command is there), the version control tools its Codebase reads the workspace with (git, and
-Subversion or Mercurial for a working copy of theirs), and how it reads this machine's facts (Python's platform and os
-modules; Windows' GlobalMemoryStatusEx through ctypes). Imported only when the platform's own External API is asked
-(PlatformApp.apis), so the platform's start loads nothing more for it.
+Subversion or Mercurial for a working copy of theirs), how it reads this machine's facts (Python's platform and os
+modules; Windows' GlobalMemoryStatusEx through ctypes), and the signals its serve takes on POSIX (0.31.0's SIGTERM and
+SIGHUP, through Python's signal module). Imported only when the platform's own External API is asked (PlatformApp.apis),
+so the platform's start loads nothing more for it.
 
-Every address is a page of the maker's own, for people to read, read on 2026-11-17: the platform never fetches any of
-them (liminal_libs' dead_links is asked only by a check run by hand, LIMINAL_VENDOR_PAGES=1). This is the one .py of the
-platform that names an outside host (the user, 2026-10-31: the app's code names no provider's host, links for people
-excepted): tests/test_own_apis.py holds every other to that."""
+Every address is a page of the maker's own, for people to read, read on 2026-11-17 (those of the signal module's card
+on 2026-11-18): the platform never fetches any of them (liminal_libs' dead_links is asked only by a check run by hand,
+LIMINAL_VENDOR_PAGES=1). This is the one .py of the platform that names an outside host (the user, 2026-10-31: the app's
+code names no provider's host, links for people excepted): tests/test_own_apis.py holds every other to that."""
 from __future__ import annotations
 
 try:  # liminal-libs 1.63.0: the cards' own module, which loads neither the registry nor pandas
@@ -27,6 +28,7 @@ _SVN = "https://svnbook.red-bean.com/en/1.7/"
 _HG = "https://www.mercurial-scm.org/doc/hg.1.html"
 _WIN_MEMORY = "https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/"
 _PY = "https://docs.python.org/3/library/"
+_SIGNAL = _PY + "signal.html"
 
 DOCKER = Api(
     name="Docker's command line", maker="Docker, Inc.", kind="command",
@@ -231,4 +233,37 @@ WINDOWS_MEMORY = Api(
     ),
     verified=VERIFIED)
 
-APIS = (DOCKER, WSL, GIT, SUBVERSION, MERCURIAL, PYTHON, WINDOWS_MEMORY)
+SIGNALS = Api(
+    name="Python's signal module", maker="Python Software Foundation", kind="system",
+    about=("The system's signals as the platform's serve takes them (0.31.0, cli.py): on POSIX (the Linux platform, "
+           "WSL's among them) SIGTERM (kill, a service's stop) and SIGHUP (its terminal closed: the WSL suite's apps "
+           "run in terminal tabs) end it as Ctrl+C does, so the platform stops and its plugins stop what they "
+           "started; after SIGHUP its output goes to the null device first (os.dup2), its log keeps the rest. Left "
+           "at the system's default (signal(7): Term), either would end the process at once and nothing of that stop "
+           "would run. A signal it was started with ignored (nohup's SIGHUP) or handled already is left as it was; on "
+           "Windows, where neither comes from outside, none is set."),
+    base="the signal module, from the serve's main thread (POSIX only)",
+    version="Python 3.12 to 3.15",
+    auth="none: the signals the system sends this process",
+    limits=("none: each handler is set once, as the serve starts, and kept until the process ends; the serve sees a "
+            "signal within half a second"),
+    costs="free (the PSF licence)",
+    links=(
+        Link("signal: set handlers for asynchronous events", _SIGNAL, "docs"),
+        Link("Execution of Python signal handlers", _SIGNAL + "#execution-of-python-signal-handlers", "guide"),
+        Link("signal(7): an overview of signals", "https://man7.org/linux/man-pages/man7/signal.7.html", "reference"),
+    ),
+    calls=(
+        Call("signal.getsignal(SIGTERM), getsignal(SIGHUP)", "the handler a signal has now: SIG_DFL (the default "
+             "way), SIG_IGN (ignored), a Python callable, or None (one not set from Python)",
+             used="as the serve starts: only a signal still at SIG_DFL is taken", docs=_SIGNAL + "#signal.getsignal"),
+        Call("signal.signal(SIGTERM, handler), signal(SIGHUP, handler)", "a handler set for a signal, only from the "
+             "main thread (ValueError from another); Python runs it later in the main thread, at its next bytecode "
+             "instruction for example",
+             used=("as the serve starts: each ends the serve as Ctrl+C does, its handler setting a flag the serve's "
+                   "loop sees (after SIGHUP, the output let go first), taking no lock and raising nothing"),
+             docs=_SIGNAL + "#signal.signal"),
+    ),
+    verified="2026-11-18")
+
+APIS = (DOCKER, WSL, GIT, SUBVERSION, MERCURIAL, PYTHON, WINDOWS_MEMORY, SIGNALS)

@@ -477,6 +477,17 @@ class PlatformApp(App):
     CALLS = CALLS
     ATTRIBUTES = ATTRIBUTES
     ROUTES = ROUTES
+    # and what a hook asked as a job is handed beside its arguments, which neither CALLS nor ROUTES says (0.32.0):
+    # lines internal.app_internal reads whole, each at most 400 characters (NOTE_CHARS), 40 at the most (MAX_WORDS)
+    INTERNAL_NOTES = (
+        "A hook asked as a job (one of its JOB_HOOKS: POST /api/machines/{name}/job {action: hook, hook, args}) is "
+        "called with its arguments by position and log=, the job's output: each line it gives log (log(line)) is "
+        "shown in the job's panel as it comes (GET /api/machines/{name}/job?since=), and its answer once it ends.",
+        "log.cancelled is set by the page's Cancel (POST /api/machines/{name}/job/cancel) for a hook its "
+        "CANCEL_HOOKS names (from liminal-libs 1.62.0): the hook looks at it between its steps and ends by itself. "
+        "Any other job runs to its end.",
+        "The job lets go of its arguments once the hook has run (a password typed into its form among them): what it "
+        "keeps for its panel is the hook's lines, its answer and its state, nothing it was asked with.")
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
                  assistants: dict | None = None, settings=None, terminal=None, once: bool = False):

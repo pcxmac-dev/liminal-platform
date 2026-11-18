@@ -32,6 +32,8 @@ charts, the integrator and the login follow.
   attached).
 - `routes.py` lists the 23 routes of `api()`, 0.31.0's job/cancel among them, each with what it is, its class and who
   asks it; `GET /api/status` is a client's.
+- The platform's Internal API says what a job's hook is handed (`INTERNAL_NOTES`): `log=` and `log.cancelled`.
+- The platform's External API names the signals `serve` handles on POSIX: SIGTERM and SIGHUP (the `signal` module).
 - On a phone's width the tabs wrap.
 - With a liminal-libs before 1.63.0 the page shows Main and External API, and no entry of its own; with a platform
   process from before, the Internal API tab and the entry say to restart it. The floor stays liminal-libs>=1.54.0.
