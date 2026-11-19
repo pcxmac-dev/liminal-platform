@@ -129,6 +129,9 @@ td .form-open { margin-right: 4px; white-space: nowrap; }
 .form-dialog .said { font-weight: 600; overflow-wrap: anywhere; }
 .form-dialog .said.fault { color: var(--down); }
 .form-dialog ul.lines { margin: 6px 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
+/* 0.34.0: an answer's lines and a refusal's words drawn as they are, every space and line kept: a call waiting for
+   your answer shows its arguments exactly (MCP's Open…), and an ask-twice call's second confirmation its own */
+.form-dialog ul.lines li, .form-dialog blockquote.words { white-space: pre-wrap; }
 .form-dialog .buttons { margin-top: 14px; }
 .form-dialog[aria-busy="true"] .buttons button { cursor: progress; }
 /* 0.10.0: Connections, who talks to whom (apps.traffic): a line per link and class in the class's colour (the theme's

@@ -2,10 +2,11 @@
 ollama and vLLM, i also need 3 harness plugins for the platform :: OpenCode, Aider, and Continue"; "they will be
 classified as AI plugins"; "the other plugins are strictly proprietary service plugins"): a machine plugin whose SECTION
 is "ai" says its group beside it (liminal-libs 1.62.0's AiPlugin.GROUP: "inference" for a model server's, "harness" for
-a coding harness's). The overview's row and the status carry both, so the page's list draws one AI heading: the
-assistants (the proprietary services), then a group for each. The tray puts their icons after the assistants', the
-model servers before the harnesses. "ai" with a group the platform does not draw, or with none, is a machine plugin, as
-any section it does not know is.
+a coding harness's; 0.34.0, liminal-libs 1.66.0's ProtocolPlugin: "protocol" for a protocol plugin's, MCP's first). The
+overview's row and the status carry both, so the page's list draws one AI heading: the assistants (the proprietary
+services), then a group for each. The tray puts their icons after the assistants', the model servers before the
+harnesses, and the protocols after them. "ai" with a group the platform does not draw, or with none, is a machine
+plugin, as any section it does not know is.
 
 Stand-in plugins asked of the app itself: nothing is served, no port is opened, no process is started (conftest's
 no_outside fails a test that does), and this machine's facts are a stand-in's."""
@@ -57,6 +58,16 @@ class Coder(Box):
     GROUP = "harness"
 
 
+class Gateway(Box):
+    """A stand-in protocol plugin's (0.34.0): the fourth group, after the harnesses."""
+
+    name = "gateway"
+    title = "A protocol gateway"
+    ICON = "mcp"
+    SECTION = "ai"
+    GROUP = "protocol"
+
+
 class Stray(Box):
     """A plugin of the AI section naming a group the platform does not draw."""
 
@@ -88,11 +99,12 @@ def _tray(app) -> list[tuple[str, str]]:
 
 
 def test_an_ai_plugin_says_its_group_and_ai_without_one_is_a_machine_plugin():
-    assert AI_SECTION == "ai" and AI_GROUPS == ("inference", "harness")
+    assert AI_SECTION == "ai" and AI_GROUPS == ("inference", "harness", "protocol")
     assert SECTIONS == ("machine", "virtualization", "os", "cloud")  # the four stay: AI is no fifth among them
-    said = [(section_of(p), group_of(p)) for p in (Server(), Second(), Coder(), Stray(), Bare(), Grouped(), Box())]
-    assert said == [("ai", "inference"), ("ai", "inference"), ("ai", "harness"), ("machine", ""), ("machine", ""),
-                    ("cloud", ""), ("machine", "")]
+    said = [(section_of(p), group_of(p))
+            for p in (Server(), Second(), Coder(), Gateway(), Stray(), Bare(), Grouped(), Box())]
+    assert said == [("ai", "inference"), ("ai", "inference"), ("ai", "harness"), ("ai", "protocol"), ("machine", ""),
+                    ("machine", ""), ("cloud", ""), ("machine", "")]
     assert group_of(Bot()) == "" and group_of(object()) == ""  # an assistant; an older library's plugin, with no GROUP
 
     class Odd(Box):
@@ -155,6 +167,25 @@ def test_the_tray_puts_the_ai_plugins_after_the_assistants_the_model_servers_bef
         bot.key = False  # no assistant active: the AI machine plugins still come last
         assert _ask(app, "GET", "/api/assistants")[1]["assistants"][0]["state"] == "invalid"
         assert _tray(app) == [("platform", "chip"), ("box", "chip"), ("stray", "chip"), ("server", "ollama")]
+    finally:
+        app.stop()
+
+
+def test_the_protocols_come_after_the_harnesses_whatever_the_registrys_order():
+    """0.34.0 (the user, 2026-11-18: "basically a protocol plugin that mediates MCP connections to resources by local AI
+    agents"): a protocol plugin (liminal-libs 1.66.0's ProtocolPlugin, MCP's first) is drawn under AI plugins in a
+    fourth group, Protocols, and its icon comes after the harnesses' in the tray, even one the registry lists first."""
+    bot = Bot()
+    bot.key = True
+    machines = {"gateway": Gateway(), "coder": Coder(), "box": Box(), "server": Server()}
+    app = PlatformApp(log=lambda m: None, machines=machines, assistants={"bot": bot}, settings=lambda: object())
+    try:
+        assert _tray(app) == [("platform", "chip"), ("box", "chip"), ("bot", "copilot"), ("server", "ollama"),
+                              ("coder", "opencode"), ("gateway", "mcp")]
+        rows = {p["name"]: (p["section"], p["group"]) for p in _ask(app, "GET", "/api/overview")[1]["plugins"]}
+        assert rows["gateway"] == ("ai", "protocol") and rows["coder"] == ("ai", "harness")
+        m = _ask(app, "GET", "/api/machines/gateway")[1]
+        assert (m["section"], m["group"], m["state"]) == ("ai", "protocol", "active")
     finally:
         app.stop()
 

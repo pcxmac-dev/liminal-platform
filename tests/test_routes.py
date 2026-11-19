@@ -15,7 +15,7 @@ import pytest
 from liminal_libs.apps import App
 from liminal_libs.apps.traffic import CLASSES
 
-from liminal_platform.app import PlatformApp
+from liminal_platform.app import RPC_METHODS, PlatformApp
 from liminal_platform.routes import MACHINE, ROUTES
 
 pytestmark = pytest.mark.usefixtures("no_outside")  # nothing started, served or reached (tests/conftest.py)
@@ -87,6 +87,8 @@ def test_the_table_lists_every_route_the_chain_answers_and_no_other():
     assert len(found) >= 20 and ("POST", MACHINE + "/ask") in found and ("GET", MACHINE) in found  # the reading reads
     assert ("POST", "/api/plugins/{name}/settings") in found and ("GET", MACHINE + "/job") in found
     assert ("POST", MACHINE + "/job/cancel") in found  # 0.31.0's Cancel, listed since 0.32.0
+    # 0.34.0: an agent's request to a protocol plugin, on each of the three methods MCP's transport uses
+    assert {(m, MACHINE + "/rpc") for m in RPC_METHODS} <= found and ("PUT", MACHINE + "/rpc") not in found
     listed = [(r[0], r[1]) for r in ROUTES]
     assert len(listed) == len(set(listed)), "a route listed twice"
     assert set(listed) - found == set(), "rows the chain does not answer"
@@ -104,6 +106,9 @@ def test_each_row_says_what_it_is_its_class_and_who_asks_it():
     assert {r[3] for r in ROUTES} == {"read", "change", "ask", "stream"}  # the four classes a request of it is noted as
     # the command is a client's alone, and a change (classify), never the page's ask
     assert next(r for r in ROUTES if r[1] == MACHINE + "/run")[3:] == ("change", "client")
+    # 0.34.0: an agent's request is a program's, and an ask whatever its method (classify: /rpc)
+    assert [r[0] for r in ROUTES if r[1] == MACHINE + "/rpc"] == list(RPC_METHODS)
+    assert {r[3:] for r in ROUTES if r[1] == MACHINE + "/rpc"} == {("ask", "client")}
 
 
 def test_who_asks_the_whole_status_and_what_is_noted_of_a_terminals_keys():

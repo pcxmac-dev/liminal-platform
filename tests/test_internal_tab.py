@@ -343,7 +343,8 @@ def test_a_hook_said_to_only_read_is_asked_as_one(monkeypatch):
 
 PLUGIN_NAMES = {"m", "p", "a", "machine", "plugin"}  # the names the platform's code gives a plugin object
 INDIRECT = {"instances": "liminal_libs.docker.instances asks each machine plugin", "api_facts": "sources.apis.facts_of",
-            "attach": "the frame's attach", "detach": "the frame's detach"}
+            "attach": "the frame's attach", "detach": "the frame's detach",
+            "rpc": "0.34.0's route: the plugin's own ask, by the name its RPC_HOOK gives"}
 
 
 def _plugin(node) -> bool:
@@ -406,6 +407,11 @@ def test_calls_and_attributes_are_what_the_platforms_code_does():
     # getattr), its AI group and the hooks whose job takes a cancel (reads)
     assert {"app_stopping", "GROUP", "CANCEL_HOOKS"} <= set(taken) and "app_stopping" in called
     assert "app_stopping" in CALLS["machine"] and {"GROUP", "CANCEL_HOOKS"} <= set(ATTRIBUTES["machine"])
+    # 0.34.0's: the hook a route's requests are handed to and the two words of who may ask a hook (read, never called),
+    # and that hook itself, asked through the plugin's own ask by the name RPC_HOOK gives (INDIRECT)
+    words = {"RPC_HOOK", "PLUGIN_ONLY_HOOKS", "PAGE_ONLY_HOOKS"}
+    assert words <= set(taken) and words <= set(ATTRIBUTES["machine"]) and not words & called
+    assert "rpc" in CALLS["machine"] and "rpc" not in taken and "/rpc" in CALLS["machine"]["rpc"]
     missing = {n: sorted(lines) for n, lines in taken.items() if n not in declared}
     assert not missing, f"read or called on a plugin, not in CALLS or ATTRIBUTES: {missing}"
     assert declared - set(taken) == set(INDIRECT), "declared, but the platform's code never takes it"

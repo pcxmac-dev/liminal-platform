@@ -4,7 +4,9 @@ instances and the plugins attached. 0.32.0: each plugin's status also says what 
 (its Internal API: `internal`, liminal-libs 1.63.0's internal.py), and the platform says its own two (GET
 /api/app/apis, the frame's): its routes (routes.py) and what it calls on its plugins (CALLS), and what it associates
 with (apis.py). 0.33.0: a firewall's globe loads its internet infrastructure layers through the platform's ask, as
-reads (READS: world_layer)."""
+reads (READS: world_layer). 0.34.0: the AI plugins' fourth group, Protocols; the route a protocol plugin answers an
+agent's request on (POST, GET and DELETE /api/machines/{name}/rpc); and who may ask a hook: one only another plugin
+asks (PLUGIN_ONLY_HOOKS) is never asked over HTTP, one only its page asks (PAGE_ONLY_HOOKS) never by a plugin."""
 from __future__ import annotations
 
 import contextlib
@@ -14,9 +16,12 @@ import math
 import os
 import platform as py_platform
 import re
+import select
+import socket
 import sys
 import threading
 import time
+from collections.abc import Callable, Mapping
 from http import HTTPStatus
 from pathlib import Path
 
@@ -37,6 +42,12 @@ try:  # what a plugin shares with its app, read from the plugin itself (liminal-
     from liminal_libs import internal as internal_mod
 except ImportError:  # an older library: no status carries `internal` (the page says so), its reads are the platform's
     internal_mod = None
+
+try:  # who asks a hook, handed over in so many words (liminal-libs 1.66.0's apps/asking.py): the page, or a plugin
+    from liminal_libs.apps import asking as asking_mod
+except ImportError:  # an older library hands no asker over: the platform's own gates read the two words themselves
+    asking_mod = None
+PAGE = getattr(asking_mod, "PAGE", "page")  # the asker of a request from the page, and of a job it started
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
@@ -65,6 +76,22 @@ JOB_REFUSAL_S = 1.0
 # asked to stop are waited for this long at most in all, before each plugin is told that it stops
 STOP_WAIT_S = 5.0
 STOPPING = "the platform is stopping: its plugins are asked nothing new"  # an ask or a job refused meanwhile (503)
+# 0.34.0 (the user, 2026-11-18: "now i need an MCP plugin for platform, basically a protocol plugin that mediates MCP
+# connections to resources by local AI agents"): POST, GET and DELETE /api/machines/{name}/rpc, the platform's own port
+# for an agent's requests, for a plugin whose RPC_HOOK names one of its hooks (liminal-libs 1.66.0's ProtocolPlugin:
+# rpc). The hook is handed each request whole: its method, the headers of this list (named in lowercase), its JSON body
+# and gone(). Its answer is sent as it is, with the headers of RPC_ANSWER_HEADERS alone
+RPC_METHODS = ("POST", "GET", "DELETE")
+RPC_HEADERS = ("authorization", "mcp-session-id", "mcp-protocol-version", "mcp-method", "mcp-name", "accept",
+               "content-type", "user-agent", "last-event-id")
+RPC_PARAM = "mcp-param-"  # and up to RPC_PARAMS of these, passed on unread (MCP 2026-07-28 mirrors a tool's values)
+RPC_PARAMS = 16
+RPC_HEADER_CHARS = 4096  # characters of one header's value at the most, either way
+RPC_ANSWER_HEADERS = ("Mcp-Session-Id", "MCP-Protocol-Version", "WWW-Authenticate", "Allow", "Retry-After")
+_PLAIN = re.compile(r"[\t\x20-\x7e]*")  # a header's value the route sends: one line of plain text
+# answers that never have a body (RFC 9110 15.3.5, 15.3.6, 15.4.5). The frame sends a 204 with nothing when its body is
+# None; it would send "null" with a 205 or a 304, so the route sends neither
+RPC_BODILESS = (HTTPStatus.NO_CONTENT, HTTPStatus.RESET_CONTENT, HTTPStatus.NOT_MODIFIED)
 
 
 def _wait(query: dict) -> float:
@@ -155,16 +182,19 @@ SECTIONS = ("machine", "virtualization", "os", "cloud")  # the list's sections f
 # ollama and vLLM, i also need 3 harness plugins for the platform :: OpenCode, Aider, and Continue"; "they will be
 # classified as AI plugins"; "the other plugins are strictly proprietary service plugins"): the list's AI section. The
 # AI assistants (a vendor's service each) are its proprietary services; after them come the machine plugins whose
-# SECTION is "ai", each in the group it names. SECTIONS stays the four a machine plugin is otherwise drawn under
+# SECTION is "ai", each in the group it names. SECTIONS stays the four a machine plugin is otherwise drawn under.
+# 0.34.0 (2026-11-18: "basically a protocol plugin that mediates MCP connections to resources by local AI agents"): a
+# fourth group, after the harnesses: the protocol plugins (liminal-libs 1.66.0's ProtocolPlugin; MCP's first)
 AI_SECTION = "ai"
-AI_GROUPS = ("inference", "harness")  # a machine plugin's groups under AI, in the list's order and the tray's
+AI_GROUPS = ("inference", "harness", "protocol")  # a machine plugin's groups under AI, in the list's and tray's order
 
 
 def group_of(plugin) -> str:
     """The group of the AI section a machine plugin is drawn in (0.31.0): its own word, liminal-libs 1.62.0's
     `AiPlugin.GROUP`, when its SECTION is "ai": "inference" for a model server's (llama.cpp, Ollama, vLLM), "harness"
-    for a coding harness's (OpenCode, Aider, Continue). "" for every other plugin: one of another section, one naming a
-    group the platform does not draw, one from an older library with no GROUP at all."""
+    for a coding harness's (OpenCode, Aider, Continue), and from 0.34.0 "protocol" for a protocol plugin's (MCP's:
+    liminal-libs 1.66.0's ProtocolPlugin). "" for every other plugin: one of another section, one naming a group the
+    platform does not draw, one from an older library with no GROUP at all."""
     group = getattr(plugin, "GROUP", "")
     ai = getattr(plugin, "SECTION", "") == AI_SECTION
     return group if ai and isinstance(group, str) and group in AI_GROUPS else ""
@@ -177,8 +207,9 @@ def section_of(plugin) -> str:
     1.51.0's `MachinePlugin.SECTION`: "virtualization" for a hypervisor's or a container engine's (Hyper-V, libvirt, LXD,
     Docker, Kubernetes, Windows containers), "os" for an operating system's (WSL's distributions, the Windows and Linux
     administration and firewalls), "cloud" for a cloud provider's account. 0.31.0 (2026-11-16: "they will be classified
-    as AI plugins"): "ai" for a model server's or a harness's, which says its group beside it (group_of). Anything else
-    ("ai" with no group the platform draws too), or none from an older library or plugin, is "machine"."""
+    as AI plugins"): "ai" for a model server's, a harness's or (0.34.0) a protocol plugin's, which says its group beside
+    it (group_of). Anything else ("ai" with no group the platform draws too), or none from an older library or plugin,
+    is "machine"."""
     if group_of(plugin):
         return AI_SECTION
     section = getattr(plugin, "SECTION", "")
@@ -256,12 +287,214 @@ def cancel_hooks(plugin) -> tuple[str, ...]:
         return ()
 
 
+# -- who may ask a hook, and a protocol plugin's route (0.34.0; liminal-libs 1.66.0's apps/asking.py, internal.py's
+# PLUGIN_ONLY_HOOKS and PAGE_ONLY_HOOKS, machines/protocol.py's RPC_HOOK) ---------------------------------------------
+def rpc_hook(plugin) -> str:
+    """The hook a machine plugin's route hands an agent's requests to (0.34.0): the name its RPC_HOOK gives
+    (liminal-libs 1.66.0's ProtocolPlugin: rpc). "" for none: a plugin that names none, or names it in anything but a
+    hook's name. Whether the plugin answers that hook is the route's to look at."""
+    try:
+        hook = getattr(plugin, "RPC_HOOK", "")
+    except Exception:  # noqa: BLE001 - a word that cannot be read names nothing
+        return ""
+    return hook if isinstance(hook, str) and hook.isidentifier() else ""
+
+
+def _words_of(word: str, value) -> tuple[str, ...]:
+    """One of the two words as a plugin says it, read here for a library before 1.66.0: a tuple (or a list) of hooks'
+    names; a ValueError for anything else, so a gate that asks it refuses."""
+    if isinstance(value, (tuple, list)) and all(isinstance(h, str) for h in value):
+        return tuple(value)
+    raise ValueError(f"{word} must be a tuple of str")
+
+
+def gated(plugin) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(the hooks a plugin says only another plugin asks: its PLUGIN_ONLY_HOOKS; those it says only its page asks: its
+    PAGE_ONLY_HOOKS), 0.34.0. As liminal-libs 1.66.0 reads them (internal.plugin_only and page_only: a base's names stay
+    its subclasses'); with an older library, as the plugin's own attributes say them. Each () when it says none. A
+    ValueError when either cannot be read, or is not a tuple of words: a gate that asks it refuses."""
+    plugin_only = getattr(internal_mod, "plugin_only", None) if internal_mod is not None else None
+    page_only = getattr(internal_mod, "page_only", None) if internal_mod is not None else None
+    try:
+        if callable(plugin_only) and callable(page_only):
+            return tuple(plugin_only(plugin)), tuple(page_only(plugin))
+        return (_words_of("PLUGIN_ONLY_HOOKS", getattr(plugin, "PLUGIN_ONLY_HOOKS", ())),
+                _words_of("PAGE_ONLY_HOOKS", getattr(plugin, "PAGE_ONLY_HOOKS", ())))
+    except ValueError:
+        raise
+    except Exception as e:  # noqa: BLE001 - a word that cannot be read is one the gates refuse on
+        raise ValueError(f"who may ask its hooks cannot be read ({type(e).__name__}: {e})") from None
+
+
+def refusal(plugin, hook: str, who) -> str:
+    """Why `who` may not ask a plugin's `hook`, in words; "" when it may (0.34.0). `who` is PAGE (its page, or a job its
+    page started), another plugin's name, or None (an ask that names no one). liminal-libs 1.66.0's own rule
+    (asking.refusal); with an older library the same rule here, on the words as gated() reads them: a hook in neither
+    word is never refused; one only other plugins ask is refused to the page, to no one and to its own plugin; one only
+    its page asks is refused to anyone else; and when the words cannot be read, every hook of that plugin."""
+    if asking_mod is not None:
+        return asking_mod.refusal(plugin, hook, who)
+    name = str(getattr(plugin, "name", "") or "a plugin")
+    try:
+        by_plugins, by_page = gated(plugin)
+    except ValueError as e:
+        return f"{name}: who may ask its hooks cannot be read ({e}), so it is asked nothing"
+    said = f"{name}'s {hook}"
+    if hook in by_plugins and hook in by_page:
+        return f"{said} is said to be asked only by other plugins and only from its page, so no one can ask it."
+    if hook in by_page and who != PAGE:
+        return f"{said} is asked only from its page, never by another plugin: {who or 'no one'} asked it."
+    if hook in by_plugins and who in (None, PAGE, name):
+        return f"{said} is asked only by another plugin, never from a page, by a program or by {name} itself."
+    return ""
+
+
+def not_by_name(plugin) -> set[str]:
+    """The hooks of a machine plugin that its page and a program never ask by name (0.34.0): the one its RPC_HOOK names
+    (the route's alone) and those its PLUGIN_ONLY_HOOKS name (another plugin's alone). None for a plugin that says
+    neither; its RPC hook alone when its words cannot be read (every ask of it is refused then)."""
+    out = {rpc_hook(plugin)} - {""}
+    return out | set(_plugin_only(plugin))
+
+
+def _plugin_only(plugin) -> tuple[str, ...]:
+    """Its PLUGIN_ONLY_HOOKS as gated() reads them; none when they cannot be read (every gate refuses it then)."""
+    try:
+        return gated(plugin)[0]
+    except ValueError:
+        return ()
+
+
+def _page_only(plugin) -> tuple[str, ...]:
+    """Its PAGE_ONLY_HOOKS as gated() reads them; none when they cannot be read (every gate refuses it then)."""
+    try:
+        return gated(plugin)[1]
+    except ValueError:
+        return ()
+
+
+def _asker() -> str | None:
+    """Who asks now, as the library hands it over (asking.asker): PAGE, a plugin's name, or None. None with a library
+    before 1.66.0, which hands no one over."""
+    return asking_mod.asker() if asking_mod is not None else None
+
+
+def _asked_by(who):
+    """The asker for a block, in this thread alone (asking.asking): PAGE, a plugin's name, or None for no one; the
+    one before put back after it. Nothing with an older library."""
+    return asking_mod.asking(who) if asking_mod is not None else contextlib.nullcontext()
+
+
+def _handed(target):
+    """`target` carrying the asker of this moment into the thread that runs it (asking.handed: a job's hand-over, read
+    where the job is started, set in its own thread); `target` itself with an older library."""
+    return asking_mod.handed(target) if asking_mod is not None else target
+
+
+def rpc_headers(handler) -> dict[str, str]:
+    """A request's headers as the route hands them to its plugin (0.34.0): those RPC_HEADERS names and up to RPC_PARAMS
+    whose names begin with RPC_PARAM, named in lowercase; one sent twice is its values joined by ", " (RFC 9110 5.3).
+    No other header is handed over. Refused (431) past either bound: a value longer than RPC_HEADER_CHARS, or more
+    than RPC_PARAMS mcp-param- headers. Nothing for a request that has no headers (the app asked directly)."""
+    raw = getattr(handler, "headers", None)
+    try:
+        items = list(raw.items()) if raw is not None else []
+    except Exception:  # noqa: BLE001 - headers that cannot be read: none handed over
+        items = []
+    out: dict[str, str] = {}
+    for name, value in items:
+        key = str(name).strip().lower()
+        param = key.startswith(RPC_PARAM) and len(key) > len(RPC_PARAM)
+        if key not in RPC_HEADERS and not param:
+            continue
+        if param and key not in out and sum(k.startswith(RPC_PARAM) for k in out) >= RPC_PARAMS:
+            raise Refused(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
+                          f"a request here carries {RPC_PARAMS} {RPC_PARAM}* headers at the most")
+        text = f"{out[key]}, {value}" if key in out else str(value)
+        if len(text) > RPC_HEADER_CHARS:
+            raise Refused(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE,
+                          f"a header's value here is {RPC_HEADER_CHARS:,} characters at the most: {key}'s is longer")
+        out[key] = text
+    return out
+
+
+def gone_of(handler) -> Callable[[], bool]:
+    """gone() for a request (0.34.0): whether its agent has closed the connection it asked on, read without waiting and
+    taking nothing off it: a select (poll where the system has it, as select takes no socket numbered past 1023 on
+    Linux), then a peek at one byte (MSG_PEEK). A connection that can no longer be looked at is gone; a request with no
+    connection (the app asked directly) never is."""
+    connection = getattr(handler, "connection", None)
+
+    def gone() -> bool:
+        return connection is not None and _closed(connection)
+
+    return gone
+
+
+def _closed(connection) -> bool:
+    """Whether the other end has closed `connection`: it is readable and a peek finds its end (b""), or it cannot be
+    looked at (reset; closed here). Readable with a byte waiting, or not readable: it is open."""
+    try:
+        poll = getattr(select, "poll", None)
+        if callable(poll):
+            watch = poll()
+            watch.register(connection, select.POLLIN | select.POLLPRI)
+            ready = bool(watch.poll(0))
+        else:
+            readable, _, broken = select.select([connection], [], [connection], 0)
+            ready = bool(readable or broken)
+        return ready and connection.recv(1, socket.MSG_PEEK) == b""
+    except (BlockingIOError, InterruptedError, TimeoutError):
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def rpc_answer(answer, title: str, hook: str) -> tuple[int, dict | None, dict[str, str]]:
+    """What a plugin's RPC hook answered, as the route sends it (0.34.0): its status (200 to 599), its body (a dict, or
+    None: a 202 or a 204 then has no body at all, liminal-libs 1.66.0's send_json) and, of its headers, those
+    RPC_ANSWER_HEADERS names, in their own spelling, whose value is one line of plain text of RPC_HEADER_CHARS at the
+    most; any other is left out. Anything but (status, body[, headers]) is refused (502) in words.
+
+    The agent always gets an answer. A body the frame cannot send as JSON (NaN or Infinity in it, a set, bytes, a
+    loop) would leave it none: the frame's send fails after the route returns, and the connection just closes. So that
+    body is refused here (502). So is a body on a 204, and a 205 or a 304 (RPC_BODILESS), which never have one."""
+    if isinstance(answer, tuple) and len(answer) in (2, 3):
+        status, data = answer[0], answer[1]
+        headers = answer[2] if len(answer) == 3 else None
+        if (isinstance(status, int) and not isinstance(status, bool) and 200 <= status <= 599
+                and (data is None or isinstance(data, dict)) and (headers is None or isinstance(headers, Mapping))):
+            if status == HTTPStatus.NO_CONTENT and data is not None:
+                raise Refused(HTTPStatus.BAD_GATEWAY, f"{title}'s {hook} answered a 204 with a body: a 204 has none")
+            if status in RPC_BODILESS and status != HTTPStatus.NO_CONTENT:
+                raise Refused(HTTPStatus.BAD_GATEWAY, f"{title}'s {hook} answered a {int(status)}: the route sends no "
+                                                      f"{int(status)}, as it cannot send one without a body")
+            try:  # as the frame sends it (web.send_json): strict JSON
+                json.dumps(data, allow_nan=False)
+            except Exception as e:  # noqa: BLE001 - whatever would stop the frame's own send, said by its type alone
+                raise Refused(HTTPStatus.BAD_GATEWAY, f"{title}'s {hook} answered a body that is not JSON "
+                                                      f"({type(e).__name__}): nothing of it was sent") from None
+            spelled = {h.lower(): h for h in RPC_ANSWER_HEADERS}
+            out: dict[str, str] = {}
+            for name, value in (headers or {}).items():
+                known = spelled.get(name.strip().lower()) if isinstance(name, str) else None
+                text = str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) else None
+                if known and text is not None and len(text) <= RPC_HEADER_CHARS and _PLAIN.fullmatch(text):
+                    out[known] = text
+            return status, data, out
+    raise Refused(HTTPStatus.BAD_GATEWAY, f"{title}'s {hook} answered what the route cannot send: (a status from 200 "
+                                          "to 599, a JSON object or nothing, its headers)")
+
+
 class Setup:
     """A machine plugin's job under way, in a thread: its setup, its packages' update, or one of its hooks (`action`:
     the hook's name; 0.19.0, `call`: the hook asked with the job's output as its `log`); what it prints as it comes
     (`output`, read from an offset by the page's terminal panel), its steps (a hook's answer) when done. 0.31.0 (a
     model's download runs for a long time): a hook's job can be asked to stop when the plugin names that hook in its
-    CANCEL_HOOKS (`cancels`, `cancel`); a setup, a packages' update and every other hook run to their end."""
+    CANCEL_HOOKS (`cancels`, `cancel`); a setup, a packages' update and every other hook run to their end. 0.34.0
+    (liminal-libs 1.66.0's apps/asking.py): it is made where it is asked, and the asker of that moment (the page, for
+    the page's routes) is read there and set in its own thread, so its hook is asked as it was asked to run: never
+    from what the thread happens to inherit."""
 
     def __init__(self, machine, steps, action: str = "setup", traffic=None, by: str = "platform", call=None):
         self.machine = machine
@@ -276,7 +509,8 @@ class Setup:
         self.error: str | None = None
         self.started = time.time()
         self.traffic, self.by = traffic, by  # who asked it, noted when it ends (apps.traffic)
-        self.thread = threading.Thread(target=self._run, name=f"setup-{machine.name}", daemon=True)
+        self.asker = _asker()  # who asked it to run (0.34.0): PAGE from the page's routes; set in its thread (_handed)
+        self.thread = threading.Thread(target=_handed(self._run), name=f"setup-{machine.name}", daemon=True)
         # 0.31.0: its work's end and a cancel, taken one after the other, so a cancel that comes as the work ends is
         # either seen by it or refused, and whether it was cancelled is decided once, as the work ended
         self._ending = threading.Lock()
@@ -392,7 +626,9 @@ CALLS = {
                          "waited for (STOP_WAIT_S at the most): each machine plugin that has it, enabled or "
                          "not, attached or not"),
         "ask": ("any other hook by name: POST /api/machines/{name}/ask, and /job {action: hook} for one of its "
-                "JOB_HOOKS")},
+                "JOB_HOOKS"),
+        "rpc": ("POST, GET and DELETE /api/machines/{name}/rpc (0.34.0): the hook its RPC_HOOK names, through its "
+                "ask, handed an agent's request whole (method, the allow-listed headers, body, gone); never by name")},
     "assistant": {
         "served": "whether its key and its plan serve: with each status",
         "keys_set": "whether its key is set, when it does not serve",
@@ -402,17 +638,21 @@ CALLS = {
         "api_facts": "what it learned of its APIs: with each status while it is enabled",
         "attach": "while it is enabled and valid", "detach": "when it is disabled or not valid"}}
 ATTRIBUTES = {  # read or looked up, never called (KIND: which of CALLS' kinds it is; chosen: whether it has installs to
-    # choose from, looked up before an update, which it then checks itself)
+    # choose from, looked up before an update, which it then checks itself; 0.34.0: RPC_HOOK, the hook its route's
+    # requests are handed to, and the two words of who may ask a hook)
     "machine": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "SECTION", "STEPS", "TABS", "JOB_HOOKS",
                 "keys", "apis", "api", "app", "login", "user", "distribution_name", "chosen", "GROUP",
-                "CANCEL_HOOKS"),
+                "CANCEL_HOOKS", "RPC_HOOK", "PLUGIN_ONLY_HOOKS", "PAGE_ONLY_HOOKS"),
     "assistant": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "vendor", "default_model", "key_names",
                   "keys", "apis", "api", "app")}
 # the terms of the platform's ask (PlatformApp.ask; POST /api/machines/{name}/ask), as a plugin's Internal API says them
 ASK_TERMS = (f"the hooks a machine plugin answers (its tabs' too), while it is enabled, none of "
              f"{', '.join(NOT_ASKED[:-1])} and {NOT_ASKED[-1]} (routes of their own, or none); the arguments by "
              "position, in one list; its answer as JSON; a refusal is a HookRefused: 400 with the plugin's own words "
-             "and the argument that accepts it, a failure 502; none begun while the platform stops (503)")
+             "and the argument that accepts it, a failure 502; none begun while the platform stops (503). From 0.34.0 "
+             "a hook its PLUGIN_ONLY_HOOKS names is asked by another plugin alone (403 over HTTP), one its "
+             "PAGE_ONLY_HOOKS names from its page alone (403 to a plugin; 401 over HTTP without the login's word that "
+             "you are there), and the hook its RPC_HOOK names through its route alone")
 PAGE_ASKS_DEPTH = 6  # how deep a plugin's status is walked for the hooks its page asks (page_asks)
 PAGE_ASKS_NODES = 2000  # and how many of its dicts and lists at the most
 PAGE_ASKS_EACH = 100  # values of each looked at: a table's rows past its first hundred are more of the same
@@ -492,7 +732,19 @@ class PlatformApp(App):
         "CANCEL_HOOKS names (from liminal-libs 1.62.0): the hook looks at it between its steps and ends by itself. "
         "Any other job runs to its end.",
         "The job lets go of its arguments once the hook has run (a password typed into its form among them): what it "
-        "keeps for its panel is the hook's lines, its answer and its state, nothing it was asked with.")
+        "keeps for its panel is the hook's lines, its answer and its state, nothing it was asked with.",
+        "POST, GET and DELETE /api/machines/{name}/rpc (0.34.0) hand an agent's request whole to the hook its "
+        "RPC_HOOK names: its method, the headers of the route's allow-list (named in lowercase), its JSON body and "
+        "gone(), whether the agent has closed its connection. Its answer (status, body or None, headers) is sent as it "
+        "is, with the allow-listed headers alone.",
+        "That route is not counted as under way: a call it holds for your answer must not hold up the stop, and the "
+        "plugin's app_stopping ends it. Nothing is logged per request: the plugin notes each one itself.",
+        "A hook its PLUGIN_ONLY_HOOKS names is asked only by another plugin through the platform (self.app.ask), "
+        "which names that plugin as its asker (liminal-libs 1.66.0's apps/asking.py): over HTTP it is refused (403), "
+        "and its page is never offered it.",
+        "A hook its PAGE_ONLY_HOOKS names is asked only from its page: a plugin's ask of it is refused (403); over "
+        "HTTP it is asked when the login says you are there (App.present: today, a browser signed in to the "
+        "platform), else refused (401), or when the platform holds no login. The page is its asker, in a job too.")
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
                  assistants: dict | None = None, settings=None, terminal=None, once: bool = False):
@@ -531,10 +783,11 @@ class PlatformApp(App):
     # -- who talks to whom (apps.traffic; the page's Connections) -------------------------------------------------
     def classify(self, method: str, path: str) -> str:
         """A page's request in its class: a terminal's keys and output and a job's output read are streams, a hook
-        asked by name an ask; the rest as the frame says (a GET reads, anything else asks for a change)."""
+        asked by name an ask, and (0.34.0) an agent's request on a protocol plugin's route an ask, whatever its method;
+        the rest as the frame says (a GET reads, anything else asks for a change)."""
         if "/terminal" in path or (method == "GET" and path.endswith(("/job", "/setup"))):
             return "stream"
-        if path.endswith("/ask"):
+        if path.endswith(("/ask", "/rpc")):
             return "ask"
         return super().classify(method, path)
 
@@ -1069,12 +1322,16 @@ class PlatformApp(App):
     def asks(m) -> list[str]:
         """What the page may ask a machine plugin by name: its hooks (Plugin.interface) but the setup, the
         settings, the scan and a command, which have routes of their own or none; and the hook of each tab it declares
-        (tabs_of), which it answers once it lists it in its HOOKS (Plugin.ask refuses another, in its words)."""
+        (tabs_of), which it answers once it lists it in its HOOKS (Plugin.ask refuses another, in its words). 0.34.0:
+        none that its page and a program never ask (not_by_name: the hook its RPC_HOOK names, the route's alone, and
+        those its PLUGIN_ONLY_HOOKS name, another plugin's alone), as none of NOT_ASKED."""
         try:
             hooks = [h for h in m.interface()["hooks"] if h not in NOT_ASKED]
         except Exception:  # noqa: BLE001 - a plugin that cannot say: nothing to ask
             return []
-        return hooks + [h for h in tab_hooks(m) if h not in hooks]
+        left = not_by_name(m)
+        hooks = [h for h in hooks if h not in left]
+        return hooks + [h for h in tab_hooks(m) if h not in hooks and h not in left]
 
     @staticmethod
     def reads_of(m) -> tuple[str, ...]:
@@ -1116,25 +1373,122 @@ class PlatformApp(App):
         (400) or failure (502) is a HookRefused: the plugin's own words, and the argument accepting a refusal that names
         one. Noted in who talks to whom as asked by whoever calls (0.31.0, as the frame's own ask notes it): a plugin
         asking another through the platform is the one asking (a harness asking a model server what it serves:
-        Connections draws the harness to the server), anything else the platform. Under way as _under_way says."""
-        caller = self.traffic.actor(sys._getframe(1)) or self.NAME
+        Connections draws the harness to the server), anything else the platform. Under way as _under_way says.
+
+        0.34.0 (liminal-libs 1.66.0's apps/asking.py): a plugin that asks is that call's asker, as the platform names
+        it, never an argument (one named "page" asks as no one). A hook only its page asks (PAGE_ONLY_HOOKS) is refused
+        to it (403); one only other plugins ask (PLUGIN_ONLY_HOOKS), never offered to its page, is asked for it, but
+        not for its own plugin. That word only narrows who asks: a hook the platform asks by no name (NOT_ASKED, the
+        hook its RPC_HOOK names) stays refused to every plugin, as before. The platform's own code asks as the asker it
+        was handed: the page in the page's routes (_from_page), no one otherwise, whom a gated hook refuses. A refusal
+        is noted as an ask that failed; a plugin that says neither word is asked as before."""
+        who = self.traffic.actor(sys._getframe(1))
+        caller = who or self.NAME
         m = self.machine(name)
         self._refuse_disabled(name)
-        if hook not in self.asks(m):
-            raise Refused(HTTPStatus.BAD_REQUEST, f"{name} is not asked {hook!r} here: {', '.join(self.asks(m)) or 'nothing'}")
-        reads = self.reads_of(m)
-        with self._under_way():
-            if hook not in reads:  # its name and how many arguments, never their values: a key put in a form (0.20.1)
-                many = f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""
-                self.log(f"platform: {name} asked {hook}{many}")
-            try:
-                with self.traffic.timed(caller, name, "read" if hook in reads else "ask", hook):
-                    answer = m.ask(hook, *args)
-            except (TypeError, ValueError, LookupError) as e:
-                raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e), _accepting(e)) from None
-            except Exception as e:  # noqa: BLE001 - the plugin's own words
-                raise HookRefused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}", str(e)) from None
+        plugin = who if who and who != self.NAME else None  # a plugin asking another through the platform
+        named = None if plugin == PAGE else plugin
+        with _asked_by(named) if plugin else contextlib.nullcontext():
+            # the asker just named, or the one the platform's code was handed; with an older library a plugin alone
+            # is checked here (the page's routes checked their own: _from_page)
+            words = refusal(m, hook, _asker()) if asking_mod is not None else refusal(m, hook, named) if plugin else ""
+            if words:
+                self.traffic.record(caller, name, "ask", f"{hook}: refused", 0.0, False)
+                raise HookRefused(HTTPStatus.FORBIDDEN, words, words)
+            askable = self.asks(m)
+            # a hook left out of asks only for being another plugin's; never one the platform asks by no name (its
+            # setup, its settings, a scan, a command, the hook its route hands the requests to)
+            for_plugins = (plugin and hook in _plugin_only(m) and hook in self.hooks(m) and hook not in NOT_ASKED
+                           and hook != rpc_hook(m))
+            if hook not in askable and not for_plugins:
+                raise Refused(HTTPStatus.BAD_REQUEST, f"{name} is not asked {hook!r} here: "
+                                                      f"{', '.join(askable) or 'nothing'}")
+            reads = self.reads_of(m)
+            with self._under_way():
+                if hook not in reads:  # its name and how many arguments, never their values: a key in a form (0.20.1)
+                    many = f" ({len(args)} argument{'' if len(args) == 1 else 's'})" if args else ""
+                    self.log(f"platform: {name} asked {hook}{many}")
+                try:
+                    with self.traffic.timed(caller, name, "read" if hook in reads else "ask", hook):
+                        answer = m.ask(hook, *args)
+                except (TypeError, ValueError, LookupError) as e:
+                    raise HookRefused(HTTPStatus.BAD_REQUEST, f"{type(e).__name__}: {e}", str(e),
+                                      _accepting(e)) from None
+                except Exception as e:  # noqa: BLE001 - the plugin's own words
+                    raise HookRefused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}", str(e)) from None
         return _json_of(answer)
+
+    @contextlib.contextmanager
+    def _from_page(self, handler, m, hook: str):
+        """An ask of one of a plugin's hooks over HTTP (0.34.0): POST /api/machines/{name}/ask, and /job for one of its
+        JOB_HOOKS. Its asker is the page (PAGE), for the hook and for a job's own thread (Setup), never a plugin. A hook
+        the plugin says only another plugin asks (PLUGIN_ONLY_HOOKS) is refused (403). One it says only its page asks
+        (PAGE_ONLY_HOOKS) is refused (401) when the login says the person at this browser is not shown to be there
+        (App.present False: today, a browser not signed in to the platform), and asked when it says they are, or when
+        the platform holds no login (None). A hook in neither word is asked as before."""
+        words = refusal(m, hook, PAGE)
+        if words:
+            raise HookRefused(HTTPStatus.FORBIDDEN, words, words)
+        if hook in _page_only(m) and self._present(handler) is False:
+            title = str(getattr(m, "title", "") or m.name)
+            words = (f"{title}'s {hook} is asked only from its page, and the platform's login does not show that you "
+                     "are there: sign in on the platform's page, then ask again.")
+            raise HookRefused(HTTPStatus.UNAUTHORIZED, words, words)
+        with _asked_by(PAGE):
+            yield
+
+    def _present(self, handler) -> bool | None:
+        """Whether the person at the browser of `handler` is shown to be there (liminal-libs 1.66.0's App.present: the
+        login's own proof when it offers one, else a browser signed in to it; None when the platform holds no login).
+        None with an older library, which has no such word; False when the frame cannot say."""
+        present = getattr(App, "present", None)
+        if not callable(present):
+            return None
+        try:
+            said = self.present(handler)
+        except Exception:  # noqa: BLE001 - a proof that fails proves nothing
+            return False
+        return said if said is None else said is True
+
+    def rpc(self, handler, name: str, method: str, body) -> tuple:
+        """One request of an agent, handed whole to a plugin (0.34.0; the user, 2026-11-18: "basically a protocol
+        plugin that mediates MCP connections to resources by local AI agents"): POST, GET and DELETE
+        /api/machines/{name}/rpc, on the platform's own port. The hook its RPC_HOOK names (liminal-libs 1.66.0's
+        ProtocolPlugin: rpc) is asked through its own ask with (method, headers, body, gone): the headers of the
+        route's allow-list (rpc_headers), the JSON object the frame read ({} for none; None for a GET) and gone(),
+        whether the agent has closed its connection (gone_of). Its answer is sent as rpc_answer says: (status, body or
+        None, headers).
+
+        Its asker is no one: an agent's request is neither its page's ask nor a plugin's, and the plugin finds the
+        agent by its token. Refused: 404 for a plugin whose RPC_HOOK names none of the hooks it answers, 409 while it
+        is disabled, 503 while the platform stops, 431 past the headers' bounds, 400 for a body that is not JSON (the
+        frame reads NaN and Infinity, which JSON does not have: an answer that echoes the request's id would hold them),
+        502 for a hook that fails (its words kept out: a request's may hold its token) or answers what cannot be sent.
+        Not counted as under way (_under_way): a call it holds for your answer must not hold up the stop, and the
+        plugin's app_stopping ends it. Nothing is logged per request: the plugin notes its own."""
+        m = self.machine(name)
+        hook = rpc_hook(m)
+        if not hook or hook not in self.hooks(m):
+            raise Refused(HTTPStatus.NOT_FOUND, f"{name} takes no requests here: it names none of its hooks for them "
+                                                "(RPC_HOOK)")
+        self._refuse_disabled(name)
+        with self._lock:
+            self._refuse_stopping()
+        heard, gone, title = rpc_headers(handler), gone_of(handler), str(getattr(m, "title", "") or name)
+        if body is not None:  # strict JSON, as the answer is sent: none of NaN or Infinity reaches the plugin
+            try:
+                json.dumps(body, allow_nan=False)
+            except (TypeError, ValueError, RecursionError):
+                raise Refused(HTTPStatus.BAD_REQUEST, "the body is not JSON: NaN and Infinity are not JSON numbers") \
+                    from None
+        self.traffic.own(m, name)
+        try:
+            with _asked_by(None):
+                answer = m.ask(hook, method, heard, body, gone)
+        except Exception as e:  # noqa: BLE001 - said in words, its own kept out
+            raise Refused(HTTPStatus.BAD_GATEWAY, f"{title} could not answer: its {hook} failed "
+                                                  f"({type(e).__name__})") from None
+        return rpc_answer(answer, title, hook)
 
     def check(self, name: str) -> dict:
         """A plugin's check of this PC for what it installs (the user: \"each plugin should have a scheme for checking the
@@ -1440,8 +1794,9 @@ class PlatformApp(App):
                     hook, args = body.get("hook"), body.get("args") or []
                     if not isinstance(hook, str):
                         raise Refused(HTTPStatus.BAD_REQUEST, "hook is a hook's name")
-                    try:
-                        return 202, self.start_hook_job(name, hook, args).describe(since=0)
+                    try:  # (0.34.0: asked as the page asks, in the job's own thread too: _from_page)
+                        with self._from_page(handler, m, hook):
+                            return 202, self.start_hook_job(name, hook, args).describe(since=0)
                     except HookRefused as e:  # refused before it began, naming what accepts it: the plugin's words with it
                         return e.status, e.answer()
                 if what not in ("install", "update"):
@@ -1478,9 +1833,12 @@ class PlatformApp(App):
                 if not isinstance(hook, str) or not isinstance(args, list):
                     raise Refused(HTTPStatus.BAD_REQUEST, "hook is a hook's name, args a list")
                 try:
-                    return 200, {"answer": self.ask(name, hook, args)}
+                    with self._from_page(handler, m, hook):  # 0.34.0: asked as the page asks (who may ask a hook)
+                        return 200, {"answer": self.ask(name, hook, args)}
                 except HookRefused as e:  # the plugin's words, and what accepts a refusal (a form's second confirmation)
                     return e.status, e.answer()
+            if action == "rpc" and method in ("POST", "GET", "DELETE"):  # 0.34.0: an agent's request, to its plugin
+                return self.rpc(handler, name, method, None if method == "GET" else body)
             if method == "POST" and action == "enabled":
                 on = body.get("on")
                 if not isinstance(on, bool):

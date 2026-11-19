@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.34.0 (2026-11-19)
+
+The platform's side of the MCP plugin, and a fourth group of AI plugins. The user, 2026-11-18: "now i need an MCP
+plugin for platform, basically a protocol plugin that mediates MCP connections to resources by local AI agents"; "top
+4 inference engines, top 4 agentic harnesses (open source)"; "all platform"; "both linux and windows compatibility".
+The protocol plugin's base, the two words of who may ask a hook, the asker and the proof that you are there are
+liminal-libs 1.66.0's (`machines/protocol.py`, `internal.py`, `apps/asking.py`, `App.present`). The plugins are built
+on this release.
+
+- **Protocols**, after Harnesses under AI plugins: a machine plugin whose `SECTION` is "ai" and whose `GROUP` is
+  "protocol" (liminal-libs 1.66.0's `ProtocolPlugin`, MCP's first). The list, the overview, each status and the tray
+  follow `AI_GROUPS`; in the tray the protocols come after the harnesses.
+- **An agent's route**: `POST`, `GET` and `DELETE /api/machines/{name}/rpc`, on the platform's own port (no new one),
+  for a plugin whose `RPC_HOOK` names one of the hooks it answers. The hook is handed the request whole, through the
+  plugin's own ask: its method, the headers of an allow-list named in lowercase (the bearer token, MCP's session,
+  version, method and name, `accept`, `content-type`, `user-agent`, `last-event-id`, and up to 16 `mcp-param-*`; each
+  at most 4,096 characters), its JSON body and `gone()`, whether the agent has closed its connection, read without
+  waiting (a select, poll where the system has it, then a one-byte peek). Its answer is sent as it is: a status from
+  200 to 599, a JSON object or nothing, and five headers at the most (`Mcp-Session-Id`, `MCP-Protocol-Version`,
+  `WWW-Authenticate`, `Allow`, `Retry-After`), each one line of plain text. Refused: 404, 409 while the plugin is
+  disabled, 503 while the platform stops, 431 past the headers' bounds, 400 for a body holding NaN or Infinity (JSON
+  has neither), 502 for a hook that fails (its words kept out) or answers what cannot be sent: a body that is not JSON,
+  a 204 with a body, a 205 or a 304. So the agent always reads an answer (the review found that such a body left it
+  none: the frame's send failed after the route returned). The request is no one's ask, the plugin finding the agent
+  by its token; it is not counted as under way (a call held for your answer never holds up the stop: the plugin's
+  `app_stopping` ends it), and it leaves no line in the platform's log. It is noted as an ask (`classify`), and listed
+  in `routes.py`.
+- **Who may ask a hook.** The page is the asker of `POST .../ask` and `.../job`, inside the job's own thread too (a job
+  records its asker where it is started and sets it in its thread: never what the thread inherits). A plugin asking
+  through the platform is that call's asker, named by the platform. A hook a plugin's `PLUGIN_ONLY_HOOKS` names is
+  refused over HTTP (403) and never offered to its page (left out of `asks`, as the RPC hook is); another plugin asks
+  it, its own plugin does not. The word only narrows who asks: one of `NOT_ASKED` (setup, settings, scan, run) or the
+  RPC hook stays refused to every plugin even when the word names it (the review found that it let every plugin ask
+  them by name). A hook its `PAGE_ONLY_HOOKS` names is refused to a plugin (403, noted in Connections as
+  an ask that failed), and over HTTP asked when the login says you are there (`App.present`: today a browser signed in
+  to the platform's login, which any program can open as the passwordless user: a speed bump), refused (401) when it
+  says you are not, and asked when the platform holds no login. A plugin whose words cannot be read is asked nothing by
+  name. A plugin that says neither word is asked exactly as before.
+- **What a plugin says is drawn as text, every space and line kept**: an answer's lines and a refusal's words, so a
+  call waiting for your answer shows its arguments exactly (the MCP plugin's Open…), and so does an ask-twice call's
+  second confirmation.
+- Its Internal API: `CALLS` says `rpc` (the route), `ATTRIBUTES` the three words it reads (`RPC_HOOK`,
+  `PLUGIN_ONLY_HOOKS`, `PAGE_ONLY_HOOKS`), `ASK_TERMS` the gates, and four notes the route and the gates.
+- With a liminal-libs before 1.66.0 the platform reads the two words from the plugin itself and holds them the same:
+  there is no proof to ask, and no asker is handed over. The floor stays liminal-libs>=1.54.0: every new name is read
+  with getattr.
+
+Tests: test_rpc_route.py (each method handed over whole, both allow-lists, the bounds, gone() on a stand-in
+connection with select and with poll, the answers, 404, 409, 503, never asked by name, no one's ask, nothing logged, a
+held request that never holds the stop, and the library's own ProtocolPlugin through the routes: a token shown once,
+an agent found by it, a harness's agent and launch token, each gate held); test_page_only.py and test_plugin_only.py
+(refused to a plugin, over HTTP by the login's word or always, the asker named, a job's thread handed the page, a
+thread handed nothing refused, words that cannot be read, a plugin named "page", an older library); the pinned groups,
+the routes' rows, `rpc` and the three words in CALLS and ATTRIBUTES, and the page's text drawn as text. Each fix undone
+on a scratch copy fails a test (31 of 31). The review's four (an answer that is not JSON, a request holding NaN or
+Infinity, a body on a 204 and a 205 or a 304, held by tests that drive the frame's own handler in memory as an agent
+reads it, no socket made; and PLUGIN_ONLY_HOOKS opening a hook asked by no name) each fail with their fix undone (7 of
+7).
+
 ## 0.33.0 (2026-11-18)
 
 The firewalls' globe loads its layers. The user, 2026-11-16: "the globe-firewall should allow filtering, so i can view

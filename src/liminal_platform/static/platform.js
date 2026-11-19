@@ -212,7 +212,8 @@
 
   // -- the tray: the chip, a divider, an icon per active plugin, in the one dark box ------------------------
   // the active plugins, none hidden, in the platform's order (0.10.2: the machine plugins, then the AI assistants;
-  // 0.31.0: then the machine plugins of the AI section, the inference plugins before the harnesses)
+  // 0.31.0: then the machine plugins of the AI section, the inference plugins before the harnesses; 0.34.0: then the
+  // protocols)
   function drawRail() {
     const sel = selected();
     const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden)); });
@@ -274,7 +275,8 @@
   }
 
   // the tray as the platform will say it once it answers: the active plugins not hidden, machines then assistants, then
-  // (0.31.0) the machine plugins of the AI section, inference before harnesses: the AI plugins' icons sit together
+  // (0.31.0) the machine plugins of the AI section, inference before harnesses (0.34.0: then the protocols): the AI
+  // plugins' icons sit together
   function trayFollows(name, present) {
     if (!tray || !st) return;
     const p = pluginOf(name);
@@ -298,11 +300,12 @@
   const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins']];
   // 0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform"; "i also need 3
   // harness plugins for the platform"; "they will be classified as AI plugins"; "the other plugins are strictly
-  // proprietary service plugins"): a machine plugin whose section is "ai" and whose group is one of these two is drawn
+  // proprietary service plugins"): a machine plugin whose section is "ai" and whose group is one of these is drawn
   // under AI plugins, in its group, after the assistants (the proprietary services). A server older than 0.31.0 sends
   // no group (and "machine" for such a plugin's section): it stays under Machine plugins there, as an unknown section
-  // does.
-  const AI_GROUPS = [['inference', 'Inference'], ['harness', 'Harnesses']];
+  // does. 0.34.0 (2026-11-18: "basically a protocol plugin that mediates MCP connections to resources by local AI
+  // agents"): Protocols after the harnesses, MCP's first; a server older than 0.34.0 sends no such group
+  const AI_GROUPS = [['inference', 'Inference'], ['harness', 'Harnesses'], ['protocol', 'Protocols']];
   const isAi = (m) => m.section === 'ai' && AI_GROUPS.some(([g]) => g === m.group);
   const sectionOf = (m) => (isAi(m) ? 'ai' : SECTIONS.some(([s]) => s === m.section) ? m.section : 'machine');
   const inSection = (all, s) => all.filter((m) => sectionOf(m) === s);
@@ -317,7 +320,8 @@
     const more = (p) => (popOf(p.name) || { style: '' }).style;
     const drawn = (m) => item(m.name, m.icon || 'chip', m.title, stateLine(m), cls(m), more(m));
     // 0.31.0: every AI plugin under the one heading, each in its group: the assistants (a vendor's service each), then
-    // the machine plugins that serve local models, then the harnesses. A group is drawn when it has plugins
+    // the machine plugins that serve local models, then the harnesses, then (0.34.0) the protocols. A group is drawn
+    // when it has plugins
     const assistants = st.assistants || [], ai = all.filter(isAi);
     const assistant = (a) => item(a.name, a.icon || 'analysis', a.title,
       pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a));

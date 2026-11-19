@@ -2,11 +2,13 @@
 ollama and vLLM, i also need 3 harness plugins for the platform :: OpenCode, Aider, and Continue"; "they will be
 classified as AI plugins"; "the other plugins are strictly proprietary service plugins"): the page's list draws one AI
 plugins heading with its groups under it, Proprietary services (the assistants), Inference and Harnesses (the machine
-plugins whose section is "ai", each in the group it names), and the tray keeps that order; a job the platform says can
-be cancelled (a model's download runs for a long time) has a Cancel button in its panel's head, which asks the platform
-to stop it. The page's script and styles are the files the platform serves, tested by their text; the platform is asked
-directly where the two must agree. Nothing is started and no port is opened (conftest's no_outside fails a test that
-does). A platform before 0.31.0 sends neither `group` nor `cancels`: the page draws it as before."""
+plugins whose section is "ai", each in the group it names), and from 0.34.0 Protocols (2026-11-18: "basically a
+protocol plugin that mediates MCP connections to resources by local AI agents"), and the tray keeps that order; a job
+the platform says can be cancelled (a model's download runs for a long time) has a Cancel button in its panel's head,
+which asks the platform to stop it. The page's script and styles are the files the platform serves, tested by their
+text; the platform is asked directly where the two must agree. Nothing is started and no port is opened (conftest's
+no_outside fails a test that does). A platform before 0.31.0 sends neither `group` nor `cancels`: the page draws it as
+before."""
 from __future__ import annotations
 
 import re
@@ -29,9 +31,9 @@ def _styles() -> str:
     return " ".join((PlatformApp.STATIC / "platform.css").read_text(encoding="utf-8").split())
 
 
-def test_the_list_draws_the_ai_plugins_under_one_heading_in_three_groups():
+def test_the_list_draws_the_ai_plugins_under_one_heading_in_four_groups():
     js = _script()
-    assert "const AI_GROUPS = [['inference', 'Inference'], ['harness', 'Harnesses']];" in js
+    assert "const AI_GROUPS = [['inference', 'Inference'], ['harness', 'Harnesses'], ['protocol', 'Protocols']];" in js
     # under AI only with the section and a group the page draws: one or the other alone is a machine plugin
     assert "const isAi = (m) => m.section === 'ai' && AI_GROUPS.some(([g]) => g === m.group);" in js
     assert ("const sectionOf = (m) => (isAi(m) ? 'ai' : SECTIONS.some(([s]) => s === m.section) ? m.section "
@@ -67,7 +69,8 @@ def test_the_pages_groups_are_the_platforms_in_its_order(monkeypatch):
     # this machine's facts stood in: on Linux the real ones run `uname -p` for the processor's name
     monkeypatch.setattr(platform_app, "facts", lambda: {"host": "a stand-in", "cpus": 1})
     groups = re.search(r"const AI_GROUPS = (.*);", _script()).group(1)
-    assert tuple(re.findall(r"'([a-z]+)', '[A-Za-z ]+'", groups)) == platform_app.AI_GROUPS == ("inference", "harness")
+    assert tuple(re.findall(r"'([a-z]+)', '[A-Za-z ]+'", groups)) == platform_app.AI_GROUPS == (
+        "inference", "harness", "protocol")
     assert platform_app.AI_SECTION == "ai" and "m.section === 'ai'" in _script()
 
     class Served(Box):
@@ -77,11 +80,21 @@ def test_the_pages_groups_are_the_platforms_in_its_order(monkeypatch):
         SECTION = "ai"
         GROUP = "inference"
 
-    app = PlatformApp(log=lambda m: None, machines={"box": Box(), "served": Served()}, assistants={})
+    class Gateway(Box):
+        """A stand-in protocol plugin's (0.34.0: MCP's group)."""
+
+        name = "gateway"
+        SECTION = "ai"
+        GROUP = "protocol"
+
+    app = PlatformApp(log=lambda m: None, machines={"box": Box(), "served": Served(), "gateway": Gateway()},
+                      assistants={})
     try:
         rows = {p["name"]: (p["section"], p["group"]) for p in app.overview()["plugins"]}
-        assert rows == {"box": ("machine", ""), "served": ("ai", "inference")}  # what `held` keeps: section and group
+        assert rows == {"box": ("machine", ""), "served": ("ai", "inference"),  # what `held` keeps: section and group
+                        "gateway": ("ai", "protocol")}
         assert app.api(None, "GET", "/api/machines/served", {}, None)[1]["group"] == "inference"
+        assert app.api(None, "GET", "/api/machines/gateway", {}, None)[1]["group"] == "protocol"
     finally:
         app.stop()
 
@@ -164,6 +177,28 @@ def test_a_panel_knows_its_job_by_when_it_began_and_follows_no_other():
     assert other in poll  # told apart before a line of it is written in this panel
     assert poll.index("const got = await api('GET', `api/machines/${enc(name)}/job?since=${j.offset}&wait=2`);") \
         < poll.index(other)
+
+
+def test_what_a_plugin_answers_or_refuses_with_is_drawn_as_text_every_space_and_line_kept():
+    """0.34.0 (the MCP plugin's page; the plan's critique: "Add a test that untrusted strings are drawn as text"): a
+    call waiting for your answer is opened whole (its waiting_call: the agent's arguments, every character shown as
+    the library writes it), and an ask-twice call's second confirmation repeats its exact arguments in the plugin's
+    refusal. What a plugin says is put on the page as text, never as markup (esc: & < > " ' written as entities), and
+    the dialog keeps its spaces and its lines, so "rm  -rf" is not shown as "rm -rf"."""
+    js, styles = _script(), _styles()
+    assert "const esc = window.LiminalIcons.esc;" in js  # the library's: every character of markup escaped
+    answer = _part(js, "function answerHtml(a)")
+    assert "${esc(cap(String(a.said)))}</p>" in answer and "`<li>${esc(l)}</li>`" in answer  # its said, each line
+    assert "<p class=\"said\">${esc(a)}</p>" in answer and "facts(a)" in answer  # words alone; facts escape their own
+    draw = _part(js, "function drawDialog()")
+    assert '<blockquote class="words">${esc(dlg.words)}</blockquote>' in draw  # a refusal: the plugin's own words
+    assert "(x.words ? `<p class=\"words\">${esc(filled(x.words, f, values))}</p>` : '')" in draw
+    cell = js[js.index("const cellHtml = "):js.index("const longWord = ")]
+    assert "`${esc(c.text)}${c.sub ? `<div class=\"sub\">${esc(c.sub)}</div>` : ''}`) : esc(c));" in cell
+    assert ".form-dialog ul.lines li, .form-dialog blockquote.words { white-space: pre-wrap; }" in styles
+    assert ".form-dialog ul.lines { margin: 6px 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }" \
+        in styles  # a long word still breaks, so a long argument never widens the dialog
+    assert ".form-dialog .note, .form-dialog .words { overflow-wrap: anywhere; }" in styles
 
 
 def test_the_route_the_button_asks_is_one_the_platform_answers():

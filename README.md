@@ -18,13 +18,15 @@ framework"; "it also has an icon just like the chart/login and integrator"). An 
 
 The list on the left has a heading for each kind of plugin, in this order: Machine plugins, Virtualization plugins,
 OS plugins and Cloud plugins (a machine plugin's own `SECTION`; each is drawn when it has plugins), then AI plugins
-(the user, 2026-11-16: "they will be classified as AI plugins"). Under AI plugins are three groups: Proprietary
+(the user, 2026-11-16: "they will be classified as AI plugins"). Under AI plugins are four groups: Proprietary
 services (the AI assistants, a vendor's service each: "the other plugins are strictly proprietary service plugins"),
-Inference (the machine plugins that serve local models: llama.cpp, Ollama, vLLM) and Harnesses (those that set up a
-coding harness to work with a model server: OpenCode, Aider, Continue). A machine plugin is drawn in one of the last
-two when its `SECTION` is `"ai"` and its `GROUP` is `"inference"` or `"harness"`; one that names another group, like
-one that names a section the platform does not draw, is listed under Machine plugins. In the tray the machine plugins
-come first, then the assistants, then the inference plugins and the harnesses, so the AI plugins' icons sit together.
+Inference (the machine plugins that serve local models: llama.cpp, Ollama, vLLM), Harnesses (those that set up a
+coding harness to work with a model server: OpenCode, Aider, Continue) and, from 0.34.0, Protocols (the user,
+2026-11-18: "basically a protocol plugin that mediates MCP connections to resources by local AI agents": MCP's
+first). A machine plugin is drawn in one of the last three when its `SECTION` is `"ai"` and its `GROUP` is
+`"inference"`, `"harness"` or `"protocol"`; one that names another group, like one that names a section the platform
+does not draw, is listed under Machine plugins. In the tray the machine plugins come first, then the assistants, then
+the inference plugins, the harnesses and the protocols, so the AI plugins' icons sit together.
 
 Plugins can be disabled: a right click on a plugin's icon in the tray offers Disable, and the switch at the head
 of a plugin's page enables or disables it (disabled: asked nothing, out of the tray, detached; kept in the
@@ -114,6 +116,49 @@ shown on its own Internal API view:
   (`{"command": [...]}`: a client's, never the page's).
 - `POST /api/machines/<name>/terminal`, `GET` the same path (its output), `POST .../terminal/input` and
   `.../terminal/close`: its login terminal.
+- `POST`, `GET` and `DELETE /api/machines/<name>/rpc` (0.34.0): an agent's request, on the platform's own port, for a
+  plugin whose `RPC_HOOK` names one of the hooks it answers (liminal-libs 1.66.0's `ProtocolPlugin`: `rpc`; the MCP
+  plugin's endpoint is `/api/machines/mcp/rpc`). The hook is handed the request whole: its method; the headers of the
+  route's allow-list, named in lowercase (`authorization`, `mcp-session-id`, `mcp-protocol-version`, `mcp-method`,
+  `mcp-name`, `accept`, `content-type`, `user-agent`, `last-event-id`, and up to 16 `mcp-param-*`), each at most 4,096
+  characters, a header sent twice as its values joined by `, `; its JSON body (none for a GET, `{}` for a write that
+  sends none); and `gone()`, whether the agent has closed its connection, read without waiting (a select, poll where
+  the system has it, then a one-byte peek). No other header is handed over: not the cookie, not the write header. Its
+  answer is sent as it is: a status
+  from 200 to 599, a JSON object or nothing (a 202 or a 204 with no body at all), and of its headers `Mcp-Session-Id`,
+  `MCP-Protocol-Version`, `WWW-Authenticate`, `Allow` and `Retry-After` alone, each one line of plain text. Refused:
+  404 for a plugin with no such hook, 409 while it is disabled, 503 while the platform stops, 431 past the headers'
+  bounds, 400 for a body holding NaN or Infinity (Python's reader takes them, JSON has neither, and an answer echoing
+  the request's id would hold them), 502 for a hook that fails or answers what cannot be sent (its words kept out: a
+  request's may hold its token). What cannot be sent: a body that is not JSON, a 204 with a body, a 205 or a 304. The
+  agent always reads an answer: such a body once left it none, the frame's send failing after the route returned.
+  The frame's checks come first, as for every route: this machine only, no other site's page, the write header
+  on a POST and a DELETE, a JSON object of at most 5 MB. The hook is never asked by name and never offered to the page.
+  The request is no one's ask (neither the page's nor a plugin's): the plugin finds the agent by its token. It is not
+  counted as under way, so a call it holds for your answer never holds up the stop (the plugin's `app_stopping` ends
+  it), and it leaves no line in the platform's log: the plugin notes each request itself. The frame notes it in
+  Connections as a program's request to the platform, and the plugin as its agent's.
+
+Who may ask a hook (0.34.0, liminal-libs 1.66.0's `PLUGIN_ONLY_HOOKS`, `PAGE_ONLY_HOOKS` and `apps/asking.py`). The
+asker is handed over in so many words, never taken from what a thread inherits: the page, for `POST .../ask` and
+`.../job` (inside the job's own thread too, as the job records it where it is started); the plugin that asks, for its
+`app.ask` through the platform, as the platform names it (never an argument; one that took the name `page` asks as no
+one); no one otherwise.
+
+- A hook a plugin's `PLUGIN_ONLY_HOOKS` names (the MCP plugin's: an agent for a harness, a token for its window) is
+  asked only by another plugin: over HTTP it is refused (403), and its page is never offered it (it is left out of the
+  status's `asks`, as the setup and the command are). Its own plugin asking it is refused too. The word only narrows
+  who asks: a hook the platform asks by no name (its setup, its settings, a scan, a command, the route's hook) stays
+  refused to every plugin, even when the word names it.
+- A hook its `PAGE_ONLY_HOOKS` names (the MCP plugin's decisions) is asked only from its page: a plugin's ask of it is
+  refused (403), and noted in Connections as an ask that failed. Over HTTP it is asked when the login says you are
+  there (`App.present`: today, a browser signed in to the platform's login), refused (401) when it says you are not,
+  and asked when the platform holds no login. A signed-in session can be opened by any program that signs in as the
+  passwordless user: it is a speed bump, not a proof. The proof the user picks later takes its place there.
+- A plugin whose words cannot be read is asked nothing by name. A plugin that says neither word is asked as before, and
+  the login is asked nothing for it.
+- With a liminal-libs before 1.66.0 the platform reads the two words from the plugin itself and holds them the same;
+  there is no proof to ask, and no asker is handed to a plugin's hook.
 
 Each machine plugin's and AI assistant's status carries its External API (`pluginApi`, `apis`, `apiFacts`) and its
 Internal API (`internal`; `null`, with `internalError` in words, when the library could not read it). Beside these,
@@ -173,7 +218,10 @@ default). A button names a form: an action `{"form": id, "title": ...}`, a table
 cell `{"form": id, "title": "Remove", "values": {...}, "label": ...}` whose values fill the fields by name. A form with
 nothing to fill goes straight to its confirmation. The answer is said by its `said` and `lines` (a fault when `ok` is
 false). A field of type accept is false unless the hook refuses naming it (`accept`), when the page asks a second,
-explicit confirmation with the field's words and sends the same arguments with it true.
+explicit confirmation with the field's words and sends the same arguments with it true. What a plugin says is drawn
+as text, never as markup; from 0.34.0 an answer's lines and a refusal's words keep every space and line they have, so
+a call waiting for your answer shows its arguments exactly (the MCP plugin's Open…, its waiting_call), and so does the
+second confirmation of a call whose rule asks twice.
 
 A field of type password (a Linux plugin's sudo password; a key) is typed hidden and never shown (0.31.0): the
 confirmation lists it as "(given)", also while what was sent is answered; it is never put back in its field when the

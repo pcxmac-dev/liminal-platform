@@ -42,7 +42,8 @@ ROUTES = (
                                       "CANCEL_HOOKS names, which ends by itself between its steps", "change",
      "page"),
     ("POST", MACHINE + "/job", "a job started {action: install | update | hook, hook, args}: its setup, its "
-                               "packages' update, or one of its JOB_HOOKS with its arguments", "change", "page"),
+                               "packages' update, or one of its JOB_HOOKS with its arguments (a hook refused as /ask "
+                               "refuses it; the page its asker, in the job's own thread too)", "change", "page"),
     ("POST", MACHINE + "/terminal", "its login terminal opened, or the one open given back from its last lines",
      "stream", "page"),
     ("GET", MACHINE + "/terminal", "its terminal's output after an offset (?since=, ?wait=)", "stream", "page"),
@@ -52,7 +53,16 @@ ROUTES = (
     ("POST", MACHINE + "/terminal/close", "its terminal closed", "stream", "page"),
     ("POST", MACHINE + "/setup", "its setup started {steps}: only those steps, or all of them", "change", "page"),
     ("POST", MACHINE + "/ask", "one of its hooks asked by name {hook, args}: the arguments by position, its answer "
-                               "as JSON, its refusal in its own words", "ask", "page"),
+                               "as JSON, its refusal in its own words; one only other plugins ask refused (403), one "
+                               "only its page asks refused (401) when the login says you are not there", "ask",
+     "page"),
+    ("POST", MACHINE + "/rpc", "an agent's request, handed whole to the hook its RPC_HOOK names (MCP's JSON-RPC): "
+                               "its method, the allow-listed headers, its JSON body and gone(); the hook's answer "
+                               "sent as it is, with the allow-listed headers alone", "ask", "client"),
+    ("GET", MACHINE + "/rpc", "the same route's GET, handed over as a POST is (MCP: the plugin answers 405, Allow: "
+                              "POST, DELETE)", "ask", "client"),
+    ("DELETE", MACHINE + "/rpc", "the same route's DELETE, handed over as a POST is (MCP: a legacy session ended)",
+     "ask", "client"),
     ("POST", MACHINE + "/enabled", "the plugin enabled or disabled {on}, as POST /api/plugins/{name}/enabled does",
      "change", "client"),
     ("POST", MACHINE + "/run", "a command on it {command}: a client's, never the page's", "change", "client"),
