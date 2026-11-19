@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
+import time
 
 import pytest
 
@@ -85,8 +86,26 @@ class Box(MachinePlugin):
 from liminal_libs.machines.firewall import Firewall, Rule  # noqa: E402
 
 
+def sock(proto="tcp", local="192.168.1.20", local_port=51000, remote="", remote_port=0, *, state="established",
+         pid=4321, program="msedge.exe", started=None, seen=None) -> dict:
+    """One socket as liminal-libs 1.65.0's socket readers give it (sockets' row): a stand-in. The addresses are the
+    local network's and this machine's (never placed, so no GeoIP file is opened for them)."""
+    return {"proto": proto, "family": 6 if ":" in local else 4, "state": state, "local": local,
+            "local_port": local_port, "remote": remote, "remote_port": remote_port, "pid": pid,
+            "pids": [pid] if pid else [], "program": program, "path": "", "service": "", "service_title": "",
+            "user": "", "started": started, "process_started": None, "count": 1, "inode": 0,
+            "seen": seen if seen is not None else started, "unread": {}}
+
+
+def socket_table(rows) -> dict:
+    """This machine's socket table as liminal-libs 1.65.0's sockets.read answers it, of the rows given: a stand-in."""
+    return {"system": "windows", "at": time.time(), "awake": time.monotonic(), "took": 0.004, "root": False,
+            "starts": True, "read": ("tcp4", "tcp6", "udp4", "udp6"), "cut": False, "rows": [dict(r) for r in rows],
+            "notes": []}
+
+
 class Wall(Firewall):
-    """A stand-in firewall: its rules in memory."""
+    """A stand-in firewall: its rules in memory; from liminal-libs 1.65.0 its Netstat over a stand-in socket table."""
 
     name = "wall"
     title = "A wall"
@@ -96,6 +115,16 @@ class Wall(Firewall):
 
     def __init__(self):
         self.rules = {"base": Rule("base", ports=(9000,), detail="a rule of Liminal's: the wall is valid")}
+        self.sockets: list[dict] = []  # the rows its Netstat reads (sock's), none by default
+
+    def make_netstat_view(self):
+        """liminal-libs 1.65.0: its Netstat tab and hosts recording over a stand-in socket table of `sockets` (the
+        guard, no_real_hosts, refuses this machine's), no name looked up; the hosts database and the layers in the
+        test's own folder (the same guard's). A library before it never asks."""
+        from liminal_libs.machines.netstat import NetstatView
+
+        return NetstatView(self.name, reader=lambda: socket_table(self.sockets), names={},
+                           login_of=lambda: getattr(self, "login", None))
 
     def present(self):
         return True
@@ -140,6 +169,62 @@ def _folders_of_the_tests_own(monkeypatch, tmp_path):
     monkeypatch.setenv("LIMINAL_PLATFORM_DIR", str(tmp_path / "platform"))
     monkeypatch.setenv("LIMINAL_UI_FILE", str(tmp_path / "ui.json"))
     monkeypatch.setenv("LIMINAL_PLATFORM_LOGIN_URL", "none")  # no login app reached or started (a test sets a stand-in)
+
+
+@pytest.fixture(autouse=True)
+def _none_of_this_users_saved_variables(monkeypatch):
+    """Every test (0.33.0): an app a test builds with no login of its own makes the platform's, an EnvironmentLogin that
+    reads this user's saved variables under the process's (saved_variables: on Windows the user's Environment key in
+    the registry, secrets included), and from liminal-libs 1.65.0 a firewall attached to it asks that login for its
+    hosts' recording. In a test it reads none of them: the process's environment alone, as the library's tests and a
+    plugin's own login read it."""
+    monkeypatch.setattr(app_module, "saved_variables", lambda: {})
+
+
+HOSTS_VARIABLE = "LIMINAL_HOSTS_RECORDING"  # liminal-libs 1.65.0's hostbook.VARIABLE, named here for older libraries
+
+
+@pytest.fixture(autouse=True)
+def no_real_hosts(monkeypatch, tmp_path):
+    """Every test (0.33.0; B-critique B1), as liminal-libs' own suite has it: from liminal-libs 1.65.0 a firewall reads
+    its hosts' recording setting through its login when it is attached, and an app a test builds with no login reads
+    this user's own variables (EnvironmentLogin with the saved ones under the process's), so once the user chose
+    "always" the stand-in Wall attached here would start a thread reading this machine's socket table into this
+    machine's own hosts database, beside the user's running platform. So each test runs with LIMINAL_HOSTS_RECORDING
+    "shown" in its process (which wins over a saved one), the socket reader refused (a Reached again, noted and failed
+    at the test's end: sockets.read, looked up when the code reads), and the hosts database, the GeoIP files (which
+    place an internet host on the Netstat tab and the globe) and the infrastructure layers in the test's own folder;
+    each book handed out there is let go after the test. Yields the reads refused, so the guard's own test can clear
+    the one it made on purpose. A library before 1.65.0 has neither the reader nor the two: the variable and the GeoIP
+    folder alone are set."""
+    from liminal_libs import geo  # (every library the platform runs on has it: the World tab's places)
+
+    monkeypatch.setenv(HOSTS_VARIABLE, "shown")
+    monkeypatch.setattr(geo, "data_folder", lambda: tmp_path / "liminal-data" / geo.FOLDER)
+    try:
+        from liminal_libs import hostbook, sockets
+        from liminal_libs.machines import infrastructure
+    except ImportError:  # a library before 1.65.0: no firewall records hosts
+        yield []
+        return
+    refused: list[str] = []
+
+    def read(*args, **kwargs):
+        refused.append(f"sockets.read {args[:1]!r}"[:300])
+        raise Reached("the test read this machine's socket table for real: give the code a reader of its own")
+
+    monkeypatch.setenv(hostbook.VARIABLE, "shown")  # the library's own name for it (HOSTS_VARIABLE today)
+    monkeypatch.setattr(sockets, "read", read)
+    monkeypatch.setattr(hostbook, "path", lambda: tmp_path / "liminal-data" / hostbook.FOLDER / hostbook.FILE)
+    monkeypatch.setattr(hostbook, "_BOOKS", {})
+    monkeypatch.setattr(infrastructure, "folder", lambda: tmp_path / "liminal-data" / infrastructure.FOLDER)
+    yield refused
+    for book in list(hostbook._BOOKS.values()):  # the books handed out in the test: written and let go
+        try:
+            book.close()
+        except Exception:  # noqa: BLE001 - a test's own book that it broke on purpose
+            pass
+    assert not refused, f"the test read this machine's socket table for real: {refused}"
 
 
 def _port(url: str) -> int:

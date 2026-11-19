@@ -10,11 +10,14 @@ machine is asked, nothing captured, no address reached."""
 from __future__ import annotations
 
 import re
+import time
+
+import pytest
 
 from liminal_libs.apps.tabs import Tab
 from liminal_libs.machines import MachinePlugin
 
-from conftest import _port
+from conftest import Wall, _port, page_script, sock
 from test_app import _call
 
 from liminal_platform.app import MAX_TAB_TITLE, MAX_TABS, NOT_ASKED, READS, PlatformApp, tab_hooks, tabs_of
@@ -209,7 +212,9 @@ def test_the_page_draws_what_a_tab_answers_with_the_drawers_it_has(served):
     app, port, lines, box = served
     js = _page(port)
     # the globe: the library's, made once in an element kept across redraws, given each answer, destroyed when left
-    assert "window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow() })" in js and "v.globe.update(spec);" in js
+    # (0.33.0: with the key its layers' switches are remembered under and the way to their geometry)
+    assert "window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load });" in js
+    assert "v.globe.update(spec);" in js
     assert "v.globe.destroy();" in js and 'data-globe-slot="${esc(m.name)}"' in js and "slot.replaceWith(v.globeEl);" in js
     # charts: LiminalCharts cards whose ids are the tab's, in place when they are the same charts
     assert "const chartsId = (m, t, i) => `${t.id}-${m.name}-${i}`;" in js and "Charts.cards(s, { id: chartsId(m, t, i) })" in js
@@ -246,8 +251,10 @@ def test_the_page_draws_connections_with_their_filters_and_chips(served):
     assert '<span class="chip flow-flag" title="${esc(g.words || \'\')}">' in flows and '<span class="sr-only">: ${esc(g.words)}.</span>' in flows
     assert 'class="sub flow-words touch-only" aria-hidden="true"' in flows and '<span class="chip flow-label" title="${esc(from)}">' in flows
     assert "`listed in ${l.source}`" in flows and "<tr${marked ? ' class=\"flagged\"' : ''}>" in flows
-    # drawn in place: the bar made once, so a search being typed goes on; a choice draws the rows again, asking nothing
-    assert "if (!f || !box.querySelector('.flow-bar')) {" in flows and "put('.flow-rows', 'flowRows', p.rows);" in flows
+    # drawn in place: the bar made once, so a search being typed goes on (made again only when it offers "Flagged only"
+    # now and not then, or the other way: 0.33.0); a choice draws the rows again, asking nothing
+    assert "if (!f || !bar || !bar.querySelector('input.flow-flagged') !== !flaggable(f)) {" in flows
+    assert "put('.flow-rows', 'flowRows', p.rows);" in flows
     assert "keepFocus(() => drawFlows(on, box));" in flows
     assert "data.addEventListener('input', (e) => { const el = e.target.closest && e.target.closest('input.flow-search[data-tab]');" in flows
     assert "const fk = e.target.closest('button.flow-kind[data-tab]');" in js
@@ -359,3 +366,161 @@ def test_a_rows_own_values_and_a_tab_that_is_slow_to_answer(served):
     assert "; what is shown is from ${clockAt(v.at)}" in said and "`What is shown is from ${clockAt(v.at)}, its last answer.`" in said
     leave = _between(js, "function leaveTab() {", "const tabAsks = ")
     assert "clearTimeout(v.slow);" in leave
+
+
+class Layered(MachinePlugin):
+    """A stand-in whose globe draws internet infrastructure layers, as liminal-libs 1.65.0's firewalls' does: its tab's
+    page names the read hook a layer's geometry is asked through, and a filter's choice is a hook of its own. It says
+    nothing of its reads (no READ_HOOKS): the platform's READS alone keep a layer's load out of the log."""
+
+    name, title, about, api, order = "layered", "Layered", "a stand-in globe with layers", "2.2", 911
+    HOOKS = (*MachinePlugin.HOOKS, "world", "world_layer", "world_pick")
+    TABS = (Tab("world", "World Wide Web", "world", 2.0),)
+    LAYER = {"id": "datacentres", "title": "Data centres", "kind": "points", "mark": "square", "slot": 4, "on": True,
+             "names_from": 5.0, "count": 1, "version": "0123456789ab", "credits": [], "note": "a stand-in"}
+
+    def __init__(self):
+        self.asked: list = []
+
+    def present(self):
+        return True
+
+    def status(self):
+        return {"present": True, "valid": True, "summary": "layered", "why": ""}
+
+    def world(self):
+        self.asked.append(("world",))
+        return {"globe": {"home": None, "origins": [], "layers": [dict(self.LAYER)], "layer_hook": "world_layer"}}
+
+    def world_layer(self, layer):
+        self.asked.append(("world_layer", layer))
+        if layer != self.LAYER["id"]:
+            raise LookupError(f"no layer {layer!r} is installed here")
+        return {"id": layer, "version": self.LAYER["version"], "parts": []}
+
+    def world_pick(self, choice):
+        self.asked.append(("world_pick", choice))
+        return {"said": "Hosts recorded · all of them", "ok": True}
+
+
+def test_a_globes_layer_is_asked_as_a_read_and_leaves_no_line_in_the_log():
+    """0.33.0 (B-firewall-plan 3): a firewall's globe asks one infrastructure layer's geometry at a time through the
+    platform's ask, with the layer's id (the page's layerLoader). `world_layer`, beside "wanted", is one of the
+    platform's reads: noted as a read in who talks to whom and never logged, whatever the plugin or its library says of
+    it; its refusal is the plugin's own words (400). Picking a filter stays an ask, logged by its name and how many
+    arguments, never their values. Asked of the app directly: nothing is served, no port is opened."""
+    p, lines = Layered(), []
+    app = PlatformApp(log=lines.append, machines={"layered": p}, assistants={})
+    try:
+        assert "world_layer" in READS and "world_layer" in PlatformApp.reads_of(p)
+        assert "world_pick" not in PlatformApp.reads_of(p) and {"world_layer", "world_pick"} <= set(PlatformApp.asks(p))
+        ask = lambda hook, *args: app.api(None, "POST", "/api/machines/layered/ask", {},  # noqa: E731
+                                          {"hook": hook, "args": list(args)})
+        status, out = ask("world_layer", "datacentres")
+        assert status == 200 and out == {"answer": {"id": "datacentres", "version": "0123456789ab", "parts": []}}
+        status, out = ask("world_layer", "cables")
+        assert status == 400 and out["words"] == "no layer 'cables' is installed here"
+        assert lines == []  # a read: never in the log, answered or refused
+        status, out = ask("world_pick", "program=msedge.exe")
+        assert status == 200 and out["answer"]["ok"] is True
+        assert lines == ["platform: layered asked world_pick (1 argument)"]  # its name and how many: never the value
+        assert p.asked == [("world_layer", "datacentres"), ("world_layer", "cables"),
+                           ("world_pick", "program=msedge.exe")]
+        said = [(r["from"], r["what"], r["kind"]) for r in app.traffic.recent() if r["to"] == "layered"]
+        assert ("platform", "world_layer", "read") in said and ("platform", "world_pick", "ask") in said
+        assert ("platform", "world_layer", "ask") not in said  # (its two asks, answered and refused: one row, a read)
+    finally:
+        app.stop()
+
+
+def test_a_firewalls_netstat_and_its_globes_layers_through_the_platform(tmp_path):
+    """0.33.0, on liminal-libs 1.65.0's Firewall (the suite's Wall, its Netstat over a stand-in socket table): the
+    Netstat tab's hook is asked as a read. Its connections name no "flagged" among their filters, so the page draws no
+    "Flagged only" that would only empty a table that flags nothing (B-critique M13); since when comes as words under a
+    key of its own beside the row's time (the page draws the words as sent, the time in its tooltip), and each row's
+    direction and kinds are among those its filters offer. A layer of its globe is asked as a read, its refusal carried
+    in the plugin's own words; a filter's pick is an ask, logged. What is checked is the platform's side: the library's
+    own words and shapes are the library's tests'. Asked of the app directly: nothing served, no port opened, no socket
+    table read but the stand-in."""
+    pytest.importorskip("liminal_libs.machines.netstat", reason="a library before 1.65.0 has no Netstat tab")
+    now, lines, wall = time.time(), [], Wall()
+    wall.sockets = [sock(local_port=51000, remote="192.168.1.50", remote_port=445, started=now - 3 * 86400),
+                    sock(local="0.0.0.0", local_port=8775, state="listening", pid=901, program="python.exe",
+                         started=now - 3600)]
+    app = PlatformApp(log=lines.append, machines={"wall": wall}, assistants={}, state=tmp_path / "platform")
+    ask = lambda hook, *args: app.api(None, "POST", "/api/machines/wall/ask", {},  # noqa: E731
+                                      {"hook": hook, "args": list(args)})
+    try:
+        status, m = app.api(None, "GET", "/api/machines/wall", {}, None)
+        assert status == 200 and {"world", "netstat"} <= {t["id"] for t in m["tabs"]}
+        assert {"netstat", "world_layer", "world_pick"} <= set(m["asks"])
+        reads = PlatformApp.reads_of(wall)
+        assert {"world", "netstat", "world_layer"} <= set(reads) and "world_pick" not in reads
+        status, out = ask("netstat")
+        assert status == 200 and isinstance(out["answer"]["flows"], dict)
+        flows = out["answer"]["flows"]
+        assert "flagged" not in flows["filters"]  # so the page draws no "Flagged only" (flaggable)
+        assert "since" in [c["key"] for c in flows["columns"]]
+        [row] = [r for r in flows["rows"] if r.get("time") == pytest.approx(now - 3 * 86400)]  # the connection's
+        assert isinstance(row["since"], str) and row["since"]  # words, drawn as sent
+        assert row["dir"] in flows["filters"]["dir"]
+        assert {label["kind"] for label in row["labels"]} <= set(flows["filters"]["labels"])
+        with pytest.raises(LookupError) as refused:  # no layer installed: the plugin's own refusal
+            wall.world_layer("datacentres")
+        status, out = ask("world_layer", "datacentres")
+        assert status == 400 and out["words"] == str(refused.value)
+        status, out = ask("world_pick", "clear")
+        assert status == 200 and "answer" in out  # (what the pick says is the plugin's)
+        assert [x for x in lines if " asked " in x] == ["platform: wall asked world_pick (1 argument)"]
+        said = {(r["what"], r["kind"]) for r in app.traffic.recent() if r["to"] == "wall"}
+        assert {("netstat", "read"), ("world_layer", "read"), ("world_pick", "ask")} <= said
+    finally:
+        app.stop()
+
+
+@pytest.mark.usefixtures("no_outside")
+def test_the_page_loads_a_globes_layers_through_the_platform_and_draws_flagged_only_where_it_is_named():
+    """0.33.0: the page gives the globe its loader (layerLoader: the spec's layer_hook, asked through the platform with
+    the layer's id, only where the platform may ask the plugin for it; the answer's geometry, a refusal's own words,
+    worded as a tab's failed ask is: refusalWords) and a key its layers' switches are remembered under (the plugin's
+    name and the tab's), and gives the loader again when the way to the layers changed (a platform started again on a
+    newer library, the page left open); a globe whose way is gone is made anew with none, since the library's draw
+    keeps the loader it has when given none. "Flagged only" is drawn only where the page's filters name it, and holds
+    nothing where it is not drawn (B-critique M13); since when is drawn in the words the plugin sends, the row's own
+    time in its tooltip; how long a connection is up says its days past a day, as the plugin's own tables do. The
+    page's script read from its folder: no port opened, nothing served (the guard, no_outside)."""
+    js = page_script()
+    words = "(e.answer && e.answer.words) || e.message || 'it did not answer'"
+    assert js.count(words) == 1  # one way for both: a tab's page and a globe's layer
+    assert f"const refusalWords = (e) => String({words});" in js
+    assert "(e) => ({ page: null, error: refusalWords(e) }))" in _between(js, "function askOf(v) {", "async function")
+    loader = _between(js, "const layerLoader = (m, spec) => {", "\n  };")
+    assert "const hook = typeof spec.layer_hook === 'string' ? spec.layer_hook : '', name = m.name;" in loader
+    assert "return hook && (m.asks || []).includes(hook)" in loader and ": null;" in loader
+    assert "(id) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: [String(id)] })" in loader
+    assert ".then((out) => (out ? out.answer : null), (e) => { throw new Error(refusalWords(e)); })" in loader
+    assert "m.status" not in loader  # what it keeps of the plugin: its name alone, never its status
+    place = _between(js, "function placeGlobe(on) {", "function dropGlobe(v) {")
+    assert "const load = layerLoader(m, spec), way = load ? spec.layer_hook : '';" in place
+    gone = "if (v.globe && v.globeWay && !way) dropGlobe(v);"  # its way gone: made anew, with none
+    assert gone in place and place.index(gone) < place.index("if (!v.globeEl) {") < place.index("const slot = ")
+    assert "if (!v.globe || v.globeWay !== way) {" in place and "v.globeWay = way;" in place
+    assert "} else if (v.globeSpec !== spec) v.globe.update(spec);" in place
+    assert "v.globeWay = '';" in _between(js, "function dropGlobe(v) {", "// its charts (page.charts")
+    assert "globeSpec: null, globeWay: '' };" in js
+    flows = _between(js, "const FLOW_COLUMNS = {", "function drawTab(name) {")
+    assert ("const flaggable = (f) => !!f.filters && typeof f.filters === 'object' && ownOf(f.filters, 'flagged') "
+            "!== undefined;") in flows
+    html = _between(flows, "function flowsHtml(m, t, v) {", "function drawFlows(on, box) {")
+    assert "const flagged = !flaggable(f) ? ''" in html and "\n      + flagged\n" in html.replace("\r\n", "\n")
+    assert html.count("flow-flagged") == 1  # drawn in one place alone, behind the condition
+    assert "if (!flaggable(f)) flowFilters[key].flagged = false;" in _between(flows, "function filterOf(key, f) {",
+                                                                               "function dirsOf(f, x) {")
+    assert "if (c.key === 'since') return flowSince(r, v);" in flows and "since: 'Since'" in flows
+    since = _between(flows, "function flowSince(r, v) {", "\n  }")
+    assert "const d = words ? momentOf(ownOf(r, 'time')) : null;" in since and "if (!d) return esc(words);" in since
+    assert '">${esc(words)}</time>`;' in since and "toLocaleTimeString" not in since  # the words as sent, not a time
+    assert "const d = momentOf(v);" in _between(flows, "function flowTime(v) {", "\n  }")
+    lasted = _between(flows, "function lasted(v) {", "\n  }")  # "Up for": three days are "3 d 0 h", not "72.0 h"
+    days = "if (s >= 86400) return `${Math.floor(s / 86400).toLocaleString()} d ${Math.floor((s % 86400) / 3600)} h`;"
+    assert days in lasted and lasted.index("return '–';") < lasted.index(days) < lasted.index("return s < 1 ?")

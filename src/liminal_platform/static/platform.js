@@ -191,6 +191,9 @@
     }
     return out;
   }
+  // 0.33.0: what an ask that failed says, one way for a tab's page and a globe's layer: the plugin's own words (its
+  // refusal, the answer api() keeps), else the error's, else that it did not answer
+  const refusalWords = (e) => String((e.answer && e.answer.words) || e.message || 'it did not answer');
 
   // a plugin's state (the user: "if a plugin is not in a valid state it has to be disabled, and thus shaded out on the left
   // side"): disabled by the user (the switch, the tray's right click), or not valid (set up for Liminal: its own word, why),
@@ -1400,7 +1403,8 @@
   const TAB_PARTS = ['head', 'actions', 'globe', 'charts', 'flows', 'tables'];
   const SHOWN_PARTS = ['title', 'note', 'globe', 'flows', 'charts', 'tables', 'actions'];  // a page with none: nothing to show yet
   let tabView = null;  // the tab shown: {key, name, id, hook, every, timer, asking, again, page, error, at (its last answer's
-  // time), late (an ask unanswered for long), slow (the timer saying so), drawn, globe, globeEl, globeSpec}
+  // time), late (an ask unanswered for long), slow (the timer saying so), drawn, globe, globeEl, globeSpec, globeWay
+  // (0.33.0: the hook its globe's layers are loaded through, "" for none)}
   let tabFramed = '';  // what framed the tab drawn last (frameKey): a status that changes it draws the pane anew
   const viewKey = (m, t) => `${m.name}/${t.id}`;
   const viewOf = (m, t) => (tabView && tabView.key === viewKey(m, t) ? tabView : null);
@@ -1513,6 +1517,19 @@
   const globeSlot = (m, p) => (!p.globe || typeof p.globe !== 'object' ? ''
     : window.LiminalGlobe ? `<div class="tab-globe-slot" data-globe-slot="${esc(m.name)}"></div>`
       : '<p class="muted small">The globe is drawn by the library\'s liminal-globe.js, which this page could not load.</p>');
+  // 0.33.0 (the user, 2026-11-16: the firewall globe should "have all the backbones,ibones, major internet
+  // infrastructure, (as many as possible) datacenter locations"): the globe's way to a layer's geometry
+  // (liminal-libs 1.65.0's globe asks it once a layer's version, while the layer is on and drawn): the spec's
+  // layer_hook (the firewalls' world_layer, a read: files on this machine), asked through the platform with the
+  // layer's id, its answer the geometry and a refusal the plugin's own words. None where the spec names no hook or the
+  // platform may not ask the plugin for it: the globe then keeps its layers off and says why. An older globe ignores it
+  const layerLoader = (m, spec) => {
+    const hook = typeof spec.layer_hook === 'string' ? spec.layer_hook : '', name = m.name;
+    return hook && (m.asks || []).includes(hook)
+      ? (id) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: [String(id)] })
+        .then((out) => (out ? out.answer : null), (e) => { throw new Error(refusalWords(e)); })
+      : null;
+  };
   function placeGlobe(on) {
     const { m, v } = on, p = pageOf(v) || {}, box = $(`tab-globe-${m.name}`);
     const spec = p.globe && typeof p.globe === 'object' && window.LiminalGlobe ? p.globe : null;
@@ -1524,12 +1541,20 @@
       return;
     }
     if (!box) return;  // its place not drawn: never drawn into an element off the page
+    // 0.33.0: its layers' switches remembered in this browser under the plugin's name and the tab's, and their loader
+    // given again (drawn into the same element: the same globe, updated in place) when the way to them changed since
+    // (a platform started again on a library whose firewalls name one, the page left open meanwhile). The library's
+    // draw takes a new loader but keeps the one it has when given none, so a globe whose way is gone is made anew
+    const load = layerLoader(m, spec), way = load ? spec.layer_hook : '';
+    if (v.globe && v.globeWay && !way) dropGlobe(v);
     if (!v.globeEl) { v.globeEl = document.createElement('div'); v.globeEl.className = 'tab-globe'; }
     const slot = box && box.querySelector('[data-globe-slot]');
     if (slot) slot.replaceWith(v.globeEl);
     else if (box && v.globeEl.parentNode !== box) { box.textContent = ''; box.appendChild(v.globeEl); }
-    if (!v.globe) v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow() });
-    else if (v.globeSpec !== spec) v.globe.update(spec);
+    if (!v.globe || v.globeWay !== way) {
+      v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load });
+      v.globeWay = way;
+    } else if (v.globeSpec !== spec) v.globe.update(spec);
     v.globeSpec = spec;
     v.drawn.globe = 'drawn';
   }
@@ -1539,6 +1564,7 @@
     v.globe = null;
     v.globeEl = null;
     v.globeSpec = null;
+    v.globeWay = '';
   }
 
   // its charts (page.charts: a LiminalCharts spec, {span, t, charts}, as a status's, or a list of them): each apart from
@@ -1571,7 +1597,8 @@
   // only, the search) and are kept per tab while the page lives; the rows are drawn again with each answer and each
   // choice, the filters only when what they offer changes, so a search being typed goes on
   const FLOW_COLUMNS = { time: 'Time', dir: 'Direction', proto: 'Protocol', local: 'Local', remote: 'Remote', name: 'Name',
-    program: 'Program', labels: 'Labels', flags: 'Flags', bytes: 'Bytes', packets: 'Packets', duration: 'Duration' };
+    program: 'Program', labels: 'Labels', flags: 'Flags', bytes: 'Bytes', packets: 'Packets', duration: 'Duration',
+    since: 'Since' };
   const FLOW_NUM = new Set(['bytes', 'packets', 'duration']);
   const FLOW_SHOWN = ['time', 'dir', 'remote', 'name', 'program', 'labels', 'flags', 'bytes'];  // when the page names no columns
   // a direction's word, from the page's own three alone (a Map: a row's "constructor" or "__proto__" is no direction), and a
@@ -1585,6 +1612,9 @@
   const flowsOf = (p) => (p && p.flows && typeof p.flows === 'object' && !Array.isArray(p.flows) ? p.flows : null);
   const flowRows = (f) => listOf(Array.isArray(f.rows) ? f.rows.slice(0, MAX_FLOWS_READ) : []);
   const flagsOf = (r) => listOf(r.flags);
+  // 0.33.0 (B-critique M13): "Flagged only" is drawn only where the page's filters name it (`flagged`, the Filter
+  // tab's): a table that flags nothing (the firewalls' Netstat) gets no switch that would only empty it, nor holds one
+  const flaggable = (f) => !!f.filters && typeof f.filters === 'object' && ownOf(f.filters, 'flagged') !== undefined;
   const labelsOf = (r) => listOf(r.labels).filter((l) => typeof l.kind === 'string' && l.kind);
   function flowColumns(f) {  // {key, title, num}: the page's own (a key, or {key, title, num}), else the usual ones
     const given = (Array.isArray(f.columns) ? f.columns : []).map((c) => (typeof c === 'string' ? { key: c } : c && typeof c.key === 'string' ? c : null)).filter(Boolean);
@@ -1596,6 +1626,7 @@
       const given = f.filters && typeof f.filters === 'object' ? f.filters : {};
       flowFilters[key] = { dir: '', flagged: given.flagged === true, kinds: new Set(), search: typeof given.search === 'string' ? given.search : '' };
     }
+    if (!flaggable(f)) flowFilters[key].flagged = false;  // its switch not drawn now: nothing it held filters the rows
     return flowFilters[key];
   }
   function dirsOf(f, x) {  // the directions offered: the page's, else in and out; the one chosen stays offered
@@ -1621,15 +1652,29 @@
     return [...kept.filter((r) => flagsOf(r).length), ...kept.filter((r) => !flagsOf(r).length)];
   }
   const wordsOf = (id) => String(id ?? '').replace(/[-_]+/g, ' ').trim();
-  function flowTime(v) {  // a time as this browser's clock says it, the whole of it in its tooltip
+  function momentOf(v) {  // a row's time (epoch seconds or milliseconds, or ISO) as a Date; null when it says none
     const ms = typeof v === 'number' ? (v > 1e12 ? v : v * 1000) : typeof v === 'string' && v ? Date.parse(v) : NaN;
     const d = new Date(Number.isFinite(ms) ? ms : NaN);
-    if (Number.isNaN(d.getTime())) return esc(v ?? '');  // not a time this browser can say: as it came
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  function flowTime(v) {  // a time as this browser's clock says it, the whole of it in its tooltip
+    const d = momentOf(v);
+    if (!d) return esc(v ?? '');  // not a time this browser can say: as it came
     return `<time datetime="${esc(d.toISOString())}" title="${esc(d.toLocaleString())}">${esc(d.toLocaleTimeString())}</time>`;
   }
-  function lasted(v) {  // a duration in words
+  // 0.33.0 (B-critique M13): since when, in the words the plugin sends (liminal-libs 1.65.0's Netstat: the time of day
+  // when it is today, else with its date, "14 Nov 14:03"), drawn as sent; the whole moment in its tooltip where the
+  // row's own time says it
+  function flowSince(r, v) {
+    const words = v === undefined || v === null ? '' : String(typeof v === 'object' ? (v.text ?? '') : v);
+    const d = words ? momentOf(ownOf(r, 'time')) : null;
+    if (!d) return esc(words);
+    return `<time datetime="${esc(d.toISOString())}" title="${esc(d.toLocaleString())}">${esc(words)}</time>`;
+  }
+  function lasted(v) {  // a duration in words (0.33.0: past a day its days and hours, "3 d 0 h", as the library's own)
     const s = Number(v);
     if (v === null || v === undefined || v === '' || !Number.isFinite(s) || s < 0) return '–';
+    if (s >= 86400) return `${Math.floor(s / 86400).toLocaleString()} d ${Math.floor((s % 86400) / 3600)} h`;
     return s < 1 ? 'under 1 s' : s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
   }
   // a flag: its id in words on the chip, the plugin's words in its tooltip, to a screen reader and, on a touch screen, under it
@@ -1644,6 +1689,7 @@
   function flowCell(r, c) {
     const v = ownOf(r, c.key), none = v === undefined || v === null || v === '';
     if (c.key === 'time') return flowTime(v);
+    if (c.key === 'since') return flowSince(r, v);
     if (c.key === 'dir') {
       const w = dirWord(v);
       return w ? `<span class="flow-arrow" aria-hidden="true">${v === 'in' ? '↓' : v === 'out' ? '↑' : '↔'}</span> ${w.toLowerCase()}` : esc(v ?? '');
@@ -1683,19 +1729,22 @@
     if (!f) return '';
     const x = filterOf(v.key, f), p = flowParts(m, t, f, x), at = `data-machine="${esc(m.name)}" data-tab="${esc(t.id)}"`;
     const id = `flow-search-${m.name}-${t.id}`;
+    const flagged = !flaggable(f) ? ''  // 0.33.0 (M13): only where the page's filters name it
+      : `<label><input type="checkbox" class="flow-flagged" ${at}${x.flagged ? ' checked' : ''}> Flagged only</label>`;
     Object.assign(v.drawn, { flowHead: p.head, flowDirs: p.dirs, flowKinds: p.kinds, flowRows: p.rows });
     return `<section class="flows-box" aria-label="${esc(f.title || 'Connections')}"><div class="flow-head">${p.head}</div>`
       + `<div class="flow-bar" role="group" aria-label="Filter the ${esc(String(f.title || 'connections').toLowerCase())}">`
       + `<label>Direction <select class="flow-dir" ${at}>${p.dirs}</select></label>`
-      + `<label><input type="checkbox" class="flow-flagged" ${at}${x.flagged ? ' checked' : ''}> Flagged only</label>`
+      + flagged
       + `<span class="flow-kinds" role="group" aria-label="Only these labels"${p.kinds ? '' : ' hidden'}>${p.kinds}</span>`
       + `<label class="sr-only" for="${esc(id)}">Search the ${esc(String(f.title || 'connections').toLowerCase())}</label>`
       + `<input type="search" id="${esc(id)}" class="flow-search" ${at} value="${esc(x.search)}" placeholder="Search: an address, a name, a program, a label" ${kb('search')}>`
       + `<span class="muted small flow-count" role="status">${esc(p.count)}</span></div><div class="flow-rows">${p.rows}</div></section>`;
   }
   function drawFlows(on, box) {  // in place: the bar made once (a search being typed goes on), its parts and the rows when they changed
-    const { m, t, v } = on, f = flowsOf(pageOf(v));
-    if (!f || !box.querySelector('.flow-bar')) {  // none, or none drawn yet: drawn whole
+    const { m, t, v } = on, f = flowsOf(pageOf(v)), bar = box.querySelector('.flow-bar');
+    // none, none drawn yet, or its "Flagged only" offered now and not then (or the other way): drawn whole
+    if (!f || !bar || !bar.querySelector('input.flow-flagged') !== !flaggable(f)) {
       const html = flowsHtml(m, t, v);
       if (f || v.drawn.flows !== html) box.innerHTML = html;
       v.drawn.flows = html;
@@ -1757,7 +1806,7 @@
     if (!want) return;
     if (!tabView) {
       tabView = { key: want, name: m.name, id: t.id, hook: t.hook, every: t.every, timer: 0, asking: false, again: false, page: null,
-        error: '', at: 0, late: false, slow: 0, drawn: {}, globe: null, globeEl: null, globeSpec: null };
+        error: '', at: 0, late: false, slow: 0, drawn: {}, globe: null, globeEl: null, globeSpec: null, globeWay: '' };
     }
     tabView.hook = t.hook;  // as its status says them now
     tabView.every = t.every;
@@ -1797,7 +1846,7 @@
     const under = { at: Date.now(), answer: null };
     under.answer = api('POST', `api/machines/${enc(v.name)}/ask`, { hook: v.hook, args: [] })
       .then((out) => ({ page: out ? out.answer : null, error: '' }),
-        (e) => ({ page: null, error: String((e.answer && e.answer.words) || e.message || 'it did not answer') }))  // its own words
+        (e) => ({ page: null, error: refusalWords(e) }))  // its own words
       .finally(() => { if (tabAsks.get(v.key) === under) tabAsks.delete(v.key); });
     tabAsks.set(v.key, under);
     return under;

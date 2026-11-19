@@ -54,8 +54,11 @@ external should be all the SDKs/APIs the plugin associates with"):
   contract's defaults, then its own, each with its arguments, its line, whether it only reads and who uses it (the
   platform's code, other plugins, its page); how the platform asks it; the settings it reads through the login; and
   what it asks of other plugins. What it says to whom as it happens is Connections'.
-- Then its own tabs (its `TABS`: a firewall's World Wide Web, eBPF's Compare and Functions), each asked every few
-  seconds while it is shown.
+- Then its own tabs (its `TABS`: a firewall's World Wide Web and Netstat, eBPF's Compare and Functions), each asked
+  every few seconds while it is shown. A firewall's globe draws its internet infrastructure layers (0.33.0, with
+  liminal-libs 1.65.0): the page asks the plugin the hook the globe names (`world_layer`) with a layer's id, once a
+  layer's version, and remembers the layers' switches in this browser under the plugin's name and the tab's. A table
+  of connections (Netstat's) draws Since as the plugin sends it, and Flagged only only where its filters name it.
 
 The tab is in the address after the plugin's name, so a reload or a link keeps it: `#name` (Main), `#name/external`,
 `#name/internal`, `#name/<id>`. An address that names the old API tab (`#name/api`) opens External API and is written
@@ -128,7 +131,8 @@ job begun at another time than the one a panel follows (that one ended, then ano
 
 An ask is logged by the hook's name and how many arguments it was given, never their values; a plugin's reads are not
 logged at all (`present`, `status`, `view`, `charts`, `instances`, `wanted`, `services`, `startups`, `processes`, its
-tabs' hooks, and from 0.31.0 `serving`: what a model server offers the other AI plugins). From 0.32.0, with
+tabs' hooks, from 0.31.0 `serving`: what a model server offers the other AI plugins, and from 0.33.0 `world_layer`:
+one infrastructure layer of a firewall's globe, read back from this machine's files). From 0.32.0, with
 liminal-libs 1.63.0, so are the hooks a plugin names in its `READ_HOOKS` that it answers itself and that are not
 its jobs: noted as reads in Connections, and drawn as reads on its Internal API tab. A plugin asking another
 through the platform (`app.ask`) is noted in Connections as the one asking.

@@ -3,7 +3,8 @@ plugins (their status, a setup run in a thread with its lines kept, a command, d
 instances and the plugins attached. 0.32.0: each plugin's status also says what the plugin shares with the platform
 (its Internal API: `internal`, liminal-libs 1.63.0's internal.py), and the platform says its own two (GET
 /api/app/apis, the frame's): its routes (routes.py) and what it calls on its plugins (CALLS), and what it associates
-with (apis.py)."""
+with (apis.py). 0.33.0: a firewall's globe loads its internet infrastructure layers through the platform's ask, as
+reads (READS: world_layer)."""
 from __future__ import annotations
 
 import contextlib
@@ -40,10 +41,14 @@ except ImportError:  # an older library: no status carries `internal` (the page 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
 READS = ("present", "status", "view", "charts", "instances", "wanted", "services", "startups", "processes",
-         "serving")  # asks not logged
+         "serving", "world_layer")  # asks not logged
 # (and a plugin's tab hooks: PlatformApp.reads_of). `serving` (0.31.0): what a model server offers the other AI plugins
 # (liminal-libs 1.62.0's ModelServer.serving: its instances as it holds them, no network and no process), asked through
-# the platform by a harness for its page and by a model server looking for another's hold on a port
+# the platform by a harness for its page and by a model server looking for another's hold on a port. `world_layer`
+# (0.33.0), beside "wanted", the Firewall base's other read: one internet infrastructure layer's geometry for a
+# firewall's globe (liminal-libs 1.65.0's Firewall.world_layer: a file on this machine read back, nothing downloaded),
+# asked by its page with the layer's id once a layer's version is shown; noted as a read, never logged, whatever the
+# library says of it
 DIR_VAR = "LIMINAL_PLATFORM_DIR"  # the platform's own folder: its log, which plugins are disabled
 LOGIN_VAR = "LIMINAL_PLATFORM_LOGIN"  # memory: a scratch preview's login, nothing it saves leaving the process
 PLUGINS_FILE = "plugins.json"

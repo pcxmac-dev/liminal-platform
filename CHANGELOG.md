@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.33.0 (2026-11-18)
+
+The firewalls' globe loads its layers. The user, 2026-11-16: "the globe-firewall should allow filtering, so i can view
+apps connected to hosts all across the globe, or ports talking to all hosts. The globe should have the same kind of
+geography associated with the exchanges globe, but the firewall globe should instead of exchanges, have all the
+backbones,ibones, major internet infrastructure, (as many as possible) datacenter locations." The Netstat tab, the
+hosts database, the globe's filters and its internet infrastructure are liminal-libs 1.65.0's Firewall base's, and the
+firewall plugins name the data sets (plugin-platform-firewall-windows 0.7.0, plugin-platform-firewall-linux 0.9.0):
+the platform gives the globe its way to a layer and draws the Netstat tab's table.
+
+- **A layer's geometry through the platform.** The globe asks its page for a layer once a version, while that layer
+  is on and drawn. The page asks the plugin the hook the globe names (`layer_hook`: the firewalls' `world_layer`, a
+  file on this machine read back, nothing downloaded) with the layer's id, `POST /api/machines/NAME/ask`, and hands
+  the answer to the globe; a refusal is said in the plugin's own words. Where the globe names no hook, or the plugin
+  offers none, its layers stay off and their switches say why.
+- `world_layer` is asked as a read (`READS`, beside `wanted`): noted as one in Connections, never logged.
+- **The layers' switches are remembered in this browser**, under the plugin's name and the tab's
+  (`liminal-globe-layers:NAME/world`). A globe left open while the platform starts again on a library whose
+  firewalls name a hook is given its loader then, drawn again in the same element; one whose way is gone is made anew
+  without it.
+- **The Netstat tab's table** (the library's flows): a **Since** column, drawn as the plugin sends it ("15 Nov
+  21:01", "20:59:23") with the whole moment in its tooltip; **Up for** says the days past a day ("3 d 0 h", as the
+  library does); and **Flagged only** is drawn only where a page's filters name it, so a table that flags nothing
+  (Netstat) has no switch that would only empty it. What an ask that failed says is one expression for a tab's page
+  and a globe's layer (`refusalWords`).
+- With a liminal-libs before 1.65.0 nothing changes: the firewalls have neither the Netstat tab nor layers. The floor
+  stays liminal-libs>=1.54.0.
+
+Tests: tests/conftest.py's autouse `no_real_hosts` (as the library's: the recording setting `shown`, the socket
+table's reader refused, the hosts database, the layers and the GeoIP folder in the test's own folder, and a stand-in
+socket table for the test's firewall) and `_none_of_this_users_saved_variables` (an app built with no login reads
+none of this user's saved variables, so no test opens the registry); test_no_outside.py tests both. test_plugin_tabs.py:
+a layer asked as a read and never logged; the Netstat tab and the layers through the platform on 1.65.0, the
+library's own refusal words; the page's loader, key, way, Flagged only and Since pinned. The page-pin test reads the
+page's script and no longer serves.
+
 ## 0.32.0 (2026-11-18)
 
 External API and Internal API on every plugin's page, and the platform's own two views. The user, 2026-11-16: "for all
