@@ -867,15 +867,22 @@ class PlatformApp(App):
             self._saved()
             return set(self._hidden or ())
 
-    def _keep(self, disabled: set[str], hidden: set[str]) -> None:
-        """plugins.json written whole (a part file renamed): the plugins disabled, and those hidden from the dock."""
-        folder = self.state_dir
-        folder.mkdir(parents=True, exist_ok=True)
-        part = folder / (PLUGINS_FILE + ".part")
-        part.write_text(json.dumps({"disabled": sorted(disabled), "hidden": sorted(hidden)}, indent=1), encoding="utf-8")
-        os.replace(part, folder / PLUGINS_FILE)
+    def _keep(self, change: Callable[[set[str], set[str]], None]) -> None:
+        """plugins.json written whole (a part file renamed): the plugins disabled, and those hidden from the dock, as
+        `change` leaves them (it changes the two sets in place). Until 0.34.3 the sets were read, changed and written
+        outside the lock, through one shared plugins.json.part (the review of 2026-11-21, item 26): two switches at
+        once could lose one's change, and the second rename found the part file gone. The whole read-change-write is
+        now one step under the lock, through a part file of this process's own."""
         with self._lock:
-            self._disabled, self._hidden = set(disabled), set(hidden)
+            self._saved()
+            disabled, hidden = set(self._disabled), set(self._hidden or ())
+            change(disabled, hidden)
+            folder = self.state_dir
+            folder.mkdir(parents=True, exist_ok=True)
+            part = folder / f"{PLUGINS_FILE}.{os.getpid()}.part"
+            part.write_text(json.dumps({"disabled": sorted(disabled), "hidden": sorted(hidden)}, indent=1), encoding="utf-8")
+            os.replace(part, folder / PLUGINS_FILE)
+            self._disabled, self._hidden = disabled, hidden
 
     def enabled(self, name: str) -> bool:
         return name not in self.disabled()
@@ -886,9 +893,7 @@ class PlatformApp(App):
         was: enabled or not, attached, asked; its row in the list, its page and Connections keep it. Kept across
         restarts. The answer: hidden or not, and the tray as it is now."""
         self.platform_plugin(name)
-        names = self.hidden()
-        (names.add if on else names.discard)(name)
-        self._keep(self.disabled(), names)
+        self._keep(lambda disabled, hidden: (hidden.add if on else hidden.discard)(name))
         self.log(f"platform: {name} {'hidden' if on else 'visible'}")
         return {"name": name, "hidden": on, "tray": self.tray().as_dict()}
 
@@ -897,12 +902,7 @@ class PlatformApp(App):
         platform asks it nothing, its icon leaves the tray and it is detached (a plugin that samples stops);
         enabled, it is attached again when the platform attaches its plugins. Kept across restarts."""
         m = self.platform_plugin(name)
-        names = self.disabled()
-        if on:
-            names.discard(name)
-        else:
-            names.add(name)
-        self._keep(names, self.hidden())
+        self._keep(lambda disabled, hidden: (disabled.discard if on else disabled.add)(name))
         with self._lock:
             if self._active is not None:  # the tray follows without asking every plugin again
                 self._active = (self._active[0], [n for n in self._active[1] if n != name])

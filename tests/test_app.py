@@ -1452,3 +1452,53 @@ def test_a_plugin_asking_another_through_the_platform_is_noted_as_the_one_asking
         assert "platform: coder asked servers" in lines and not any("asked serving" in x for x in lines)
     finally:
         app.stop()
+
+
+def test_two_switches_at_once_both_kept(tmp_path, monkeypatch):
+    """The review of 2026-11-21, item 26: plugins.json was read, changed and written outside the lock, through one
+    shared .part file, so a switch made while another was being written lost its change (or found the part file
+    gone). The order is forced: the second switch is made at the very moment the first renames its part file;
+    both are kept, the file and the platform agreeing."""
+    import os
+    import threading
+
+    from conftest import Box, Wall
+
+    app = PlatformApp(log=lambda m: None, machines={"box": Box(), "wall": Wall()}, assistants={}, state=tmp_path)
+    real_lock, real_replace = app._lock, os.replace
+    second_waits = threading.Event()  # the second switch is done, or waits for the lock the first holds
+
+    class Watched:  # the app's own lock, telling when the second switch meets it held
+        def acquire(self, *a, **kw):
+            if threading.current_thread() is not threading.main_thread() and real_lock.locked():
+                second_waits.set()
+            return real_lock.acquire(*a, **kw)
+
+        def release(self):
+            real_lock.release()
+
+        def locked(self):
+            return real_lock.locked()
+
+        __enter__ = acquire
+
+        def __exit__(self, *exc):
+            real_lock.release()
+
+    app._lock = Watched()
+    second = []
+
+    def replace(src, dst):
+        if threading.current_thread() is threading.main_thread() and not second:
+            second.append(threading.Thread(target=lambda: (app.set_hidden("box", True), second_waits.set())))
+            second[0].start()
+            assert second_waits.wait(10)  # it ran through, or it waits on the lock (not a sleep: either is told)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    app.set_enabled("wall", False)
+    second[0].join(10)
+    assert not second[0].is_alive()
+    assert app.disabled() == {"wall"} and app.hidden() == {"box"}
+    assert json.loads((tmp_path / "plugins.json").read_text(encoding="utf-8")) == {"disabled": ["wall"], "hidden": ["box"]}
+    assert [f.name for f in tmp_path.iterdir()] == ["plugins.json"]  # no part file left

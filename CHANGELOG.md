@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.34.3 (2026-11-24)
+
+The review of 2026-11-21 (Monday list item 26), a P3. Enabling or disabling plugins, or hiding them from the dock, at
+the same time could lose a change: plugins.json was read, changed and written outside the lock, through one shared
+plugins.json.part, so the second write could undo the first or find the part file renamed away. The whole
+read-change-write is now one step under the lock (`_keep` takes the change), through a part file of the process's own,
+then renamed into place. A pause forgotten on restart is not the platform's: the paused services are held in memory by
+liminal-libs' `machines/wsl.py`, and the platform keeps none of its own.
+
 ## 0.34.2 (2026-11-24)
 
 The review of 2026-11-21 (Monday list item 26), two P2s. A closed terminal tab left its login shell running: idle
