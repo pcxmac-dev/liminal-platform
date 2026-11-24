@@ -78,15 +78,17 @@ def test_a_machine_is_set_up_from_the_page_and_runs_a_command(served):
         time.sleep(0.05)
     assert s["ok"] is True and s["lines"] == ["box: docker: ok"] and s["done"] == [{"step": "docker", "ok": True, "detail": "done"}] and box.setups == [("docker",)]
     assert _call(port, "POST", "/api/machines/box/setup", {"steps": "docker"})[0] == 400
-    status, out = _call(port, "POST", "/api/machines/box/run", {"command": ["ls", "/"]})
-    assert status == 200 and out["output"] == "ran ls /\n" and box.ran[-1] == ("ls", "/")
-    assert _call(port, "POST", "/api/machines/box/run", {"command": ["false"]})[0] == 502
-    assert _call(port, "POST", "/api/machines/box/run", {"command": []})[0] == 400
+    # no route runs a command (0.34.1; the review of 2026-11-21): refused, and nothing run
+    ran = list(box.ran)
+    for command in (["ls", "/"], ["false"], []):
+        status, out = _call(port, "POST", "/api/machines/box/run", {"command": command})
+        assert status == 404 and "no route runs a command" in out["error"]
+    assert box.ran == ran
     assert [m["name"] for m in _call(port, "GET", "/api/machines")[1]["machines"]] == ["box", "wall"]
     assert _call(port, "GET", "/api/instances")[1]["instances"][0]["name"] == "box"
     # a write without the header is refused by the frame
     conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.request("POST", "/api/machines/box/run", body=b"{}", headers={"Content-Type": "application/json"})
+    conn.request("POST", "/api/machines/box/setup", body=b"{}", headers={"Content-Type": "application/json"})
     assert conn.getresponse().status == 403
 
 
@@ -353,7 +355,6 @@ def test_a_plugin_disabled_and_enabled_again(served):
     assert [i["id"] for i in _call(port, "GET", "/api/tray")[1]["items"]] == ["platform", "wall"] and st["instances"] == []
     assert _call(port, "POST", "/api/machines/box/ask", {"hook": "present", "args": []})[0] == 409
     assert _call(port, "POST", "/api/machines/box/setup", {})[0] == 409
-    assert _call(port, "POST", "/api/machines/box/run", {"command": ["ls"]})[0] == 409
     assert _call(port, "POST", "/api/machines/box/enabled", {"on": "no"})[0] == 400
     assert _call(port, "POST", "/api/machines/nothing/enabled", {"on": True})[0] == 404
     # kept in the platform's own folder: a restarted platform leaves it detached

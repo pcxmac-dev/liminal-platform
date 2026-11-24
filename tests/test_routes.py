@@ -104,8 +104,8 @@ def test_each_row_says_what_it_is_its_class_and_who_asks_it():
         assert kind in CLASSES and kind == app.classify(method, path.replace("{name}", "x")), row
         assert path.count("{") == path.count("}") <= 1 and ("{" not in path or "{name}" in path), row
     assert {r[3] for r in ROUTES} == {"read", "change", "ask", "stream"}  # the four classes a request of it is noted as
-    # the command is a client's alone, and a change (classify), never the page's ask
-    assert next(r for r in ROUTES if r[1] == MACHINE + "/run")[3:] == ("change", "client")
+    # no route runs a command (0.34.1; the review of 2026-11-21): the command line's alone
+    assert not any(r[1] == MACHINE + "/run" for r in ROUTES)
     # 0.34.0: an agent's request is a program's, and an ask whatever its method (classify: /rpc)
     assert [r[0] for r in ROUTES if r[1] == MACHINE + "/rpc"] == list(RPC_METHODS)
     assert {r[3:] for r in ROUTES if r[1] == MACHINE + "/rpc"} == {("ask", "client")}

@@ -65,5 +65,4 @@ ROUTES = (
      "ask", "client"),
     ("POST", MACHINE + "/enabled", "the plugin enabled or disabled {on}, as POST /api/plugins/{name}/enabled does",
      "change", "client"),
-    ("POST", MACHINE + "/run", "a command on it {command}: a client's, never the page's", "change", "client"),
 )

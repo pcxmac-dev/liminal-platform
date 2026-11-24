@@ -392,27 +392,6 @@ def test_a_terminal_opened_as_the_platform_stops_is_waited_for_closed_and_refuse
                 t.join(10)
 
 
-def test_a_command_run_as_the_platform_stops_is_waited_for_and_no_other_is_run(monkeypatch):
-    monkeypatch.setattr(app_module, "STOP_WAIT_S", 30.0)
-    events = []
-    app, shell, made = _shell_app(events)
-    run = {"command": ["ls"]}
-    asker = stopper = None
-    try:
-        asker, stopper, answers = _stopping_while(app, shell, lambda: _api(app, "POST", "/api/machines/shell/run", run))
-        assert events == [] and _api(app, "POST", "/api/machines/shell/run", run) == (503, {"error": STOPPING})
-        shell.go.set()
-        stopper.join(10)
-        asker.join(10)
-        assert not stopper.is_alive() and answers == [(200, {"output": "ran\n"})]
-        assert events == ["ran ls", "told"]  # the one under way ended before the plugin was told; none other ran
-    finally:
-        shell.go.set()
-        for t in (asker, stopper):
-            if t is not None and t.is_alive():
-                t.join(10)
-
-
 def test_once_it_stops_no_terminal_is_opened_and_no_command_run_until_it_starts_again(monkeypatch):
     events, lines = [], []
     app, shell, made = _shell_app(events, lines)
@@ -420,11 +399,9 @@ def test_once_it_stops_no_terminal_is_opened_and_no_command_run_until_it_starts_
     app.stop()
     refused = (503, {"error": STOPPING})
     assert _api(app, "POST", "/api/machines/shell/terminal") == refused
-    assert _api(app, "POST", "/api/machines/shell/run", {"command": ["ls"]}) == refused
     assert not shell.inside.is_set() and made == [] and events == ["told"] and lines == []
     monkeypatch.setattr(App, "start", lambda self, port=None, open_browser=False: "its page")  # nothing is served
     assert app.start(0) == "its page"
     assert _api(app, "POST", "/api/machines/shell/terminal")[0] == 200 and app.terminal_of("shell") is made[0]
-    assert _api(app, "POST", "/api/machines/shell/run", {"command": ["ls"]}) == (200, {"output": "ran\n"})
     app.stop()
-    assert events == ["told", "ran ls", "terminal closed", "told"]
+    assert events == ["told", "terminal closed", "told"]

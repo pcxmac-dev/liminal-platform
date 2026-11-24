@@ -617,7 +617,6 @@ CALLS = {
         "check": "GET /api/machines/{name}/check: while its page is shown, and before an install or an update",
         "terminal": "POST /api/machines/{name}/terminal: the command its login terminal runs",
         "terminal_title": "its terminal's title (else its user and distribution_name)",
-        "run": "POST /api/machines/{name}/run: a client's command, never the page's",
         "settings_changed": "after POST /api/plugins/{name}/settings kept them",
         "api_facts": "what it learned of its APIs: with each status while it is enabled",
         "attach": "while it is enabled and valid: the platform and a login that notes what it reads and keeps",
@@ -1844,16 +1843,6 @@ class PlatformApp(App):
                 if not isinstance(on, bool):
                     raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
                 return 200, self.set_enabled(name, on)
-            if method == "POST" and action == "run":
-                self._refuse_disabled(name)
-                command = body.get("command")
-                if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
-                    raise Refused(HTTPStatus.BAD_REQUEST, "command is a list of words")
-                what = f"run {program_name(None, command) or 'a command'}"
-                with self._under_way():
-                    try:
-                        with self.traffic.timed(self.NAME, name, "ask", what):
-                            return 200, {"output": m.run(*command)}
-                    except Exception as e:  # noqa: BLE001 - the plugin's words
-                        raise Refused(HTTPStatus.BAD_GATEWAY, f"{type(e).__name__}: {e}") from None
+            if action == "run":  # the review of 2026-11-21 (item 26): any program or account here could send it
+                raise Refused(HTTPStatus.NOT_FOUND, 'no route runs a command on a machine (0.34.1): it ran any words given, as root or elevated, with no sign-in and no confirmation. On this machine: liminal-platform machine NAME run -- COMMAND')
         return super().api(handler, method, path, query, body)

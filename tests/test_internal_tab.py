@@ -454,10 +454,10 @@ def test_the_status_says_what_the_plugin_shares_as_the_platform_uses_it():
     assert (d["counts"]["standard"], d["counts"]["own"], d["counts"]["left"]) == (7, 7, 5)
     # who uses each, from what the platform's code calls (CALLS), its tabs, its services and what it asks by name
     users = {n: r["users"] for n, r in rows.items()}
-    assert users == {"present": "app", "status": "both", "setup": "app", "run": "app", "instances": "app", "scan": "",
+    assert users == {"present": "app", "status": "both", "setup": "app", "run": "", "instances": "app", "scan": "",
                      "settings": "", "refresh": "named", "poke": "named", "risky": "named", "fetch": "named",
                      "page": "app", "serve_others": "plugins", "check": "app"}
-    for name in ("present", "status", "setup", "check", "run"):
+    for name in ("present", "status", "setup", "check"):  # run: the command line's alone (0.34.1)
         assert rows[name]["how"] == CALLS["machine"][name], name
     assert {n for n, r in rows.items() if r["askable"]} == set(PlatformApp.asks(shared))
     # the kinds of call: a read it says it is, a change asked twice, a job, a tab's page, a service

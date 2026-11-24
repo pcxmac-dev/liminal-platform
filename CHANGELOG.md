@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.34.1 (2026-11-24)
+
+The review of 2026-11-21 (Monday list item 26), a P1: `POST /api/machines/<name>/run` is gone. It handed any list of
+words to the plugin's `run` (as root in the Linux firewall's, into PowerShell unquoted in the Windows admin's and
+firewall's), checked only that the request came from this machine with the write header, and asked for no sign-in
+and no confirmation: any program or account on this PC could empty the firewall or read the platform's environment.
+No page and no app used it. The command line keeps `liminal-platform machine NAME run`, in its own process. The
+route now answers 404 and says so.
+
 ## 0.34.0 (2026-11-19)
 
 The platform's side of the MCP plugin, and a fourth group of AI plugins. The user, 2026-11-18: "now i need an MCP
