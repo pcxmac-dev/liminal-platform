@@ -405,3 +405,72 @@ def test_once_it_stops_no_terminal_is_opened_and_no_command_run_until_it_starts_
     assert _api(app, "POST", "/api/machines/shell/terminal")[0] == 200 and app.terminal_of("shell") is made[0]
     app.stop()
     assert events == ["told", "terminal closed", "told"]
+
+
+class Ticks:
+    """A stand-in for the sweep's end event: its wait answers "not yet" `n` times (one sweep each), then "ended",
+    so the sweep's steps are run one by one with no time passing."""
+
+    def __init__(self, n: int, before=None):
+        self.n, self.before = n, before
+
+    def wait(self, timeout=None):
+        if self.n <= 0:
+            return True
+        self.n -= 1
+        if self.before is not None:
+            self.before()
+        return False
+
+
+def test_a_terminal_no_page_reads_is_closed_by_the_sweep_with_no_terminal_request():
+    # 0.34.2 (the review of 2026-11-21, item 26): a closed tab stops reading without closing its terminal; idle ones
+    # were closed only when another terminal request came, so its login shell ran on until then
+    events = []
+    app, shell, made = _shell_app(events)
+    shell.go.set()
+    now = [1000.0]
+    app._clock = lambda: now[0]
+    assert _api(app, "POST", "/api/machines/shell/terminal")[0] == 200
+    term = made[0]
+    term.seen = 1000.0  # read last at 1000
+    now[0] = 1000.0 + app_module.TERMINAL_IDLE_S - 1  # not idle long enough yet
+    app._sweep(Ticks(1))
+    assert term.alive and app.terminal_of("shell") is term
+    now[0] = 1000.0 + app_module.TERMINAL_IDLE_S + 1  # no page has read it since: the next sweep closes it
+    app._sweep(Ticks(1))
+    assert not term.alive and app.terminal_of("shell") is None and events == ["terminal closed"]
+
+
+def test_the_sweep_runs_while_it_is_served_and_ends_with_the_stop(monkeypatch):
+    events = []
+    app, shell, made = _shell_app(events)
+    monkeypatch.setattr(App, "start", lambda self, port=None, open_browser=False: "its page")  # nothing is served
+    monkeypatch.setattr(app_module, "TERMINAL_SWEEP_S", 3600.0)  # it never sweeps here: only its start and end
+    assert app.start(0) == "its page"
+    sweeper = app._sweeper
+    assert sweeper is not None and sweeper.is_alive()
+    app.start(0)  # a second start begins no second sweep
+    assert app._sweeper is sweeper
+    app.stop()
+    assert not sweeper.is_alive() and app._sweeper is None
+    once = PlatformApp(log=lambda m: None, machines={"shell": shell}, assistants={}, once=True)
+    assert once.start(0) == "its page" and once._sweeper is None  # a one-shot app sweeps nothing
+    once.stop()
+
+
+def test_a_job_that_takes_no_cancel_is_named_in_the_log_as_running_on(monkeypatch):
+    # 0.34.2 (the review of 2026-11-21, item 26): a setup, an update or a hook's job with no cancel runs on at the stop,
+    # and what it started may outlive the platform: said in the log, not left unsaid
+    monkeypatch.setattr(app_module, "JOB_REFUSAL_S", 0.05)
+    events, lines = [], []
+    puller = Puller(events)
+    app = PlatformApp(log=lines.append, machines={"puller": puller}, assistants={})
+    try:
+        job = {"action": "hook", "hook": "build", "args": []}
+        assert _api(app, "POST", "/api/machines/puller/job", job)[0] == 202 and puller.inside.wait(5)
+        app.stop()
+        assert ("platform: puller's build runs on as the platform stops: it takes no cancel, and what it started may "
+                "outlive the platform") in lines
+    finally:
+        puller.go.set()

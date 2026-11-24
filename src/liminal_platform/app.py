@@ -64,6 +64,9 @@ DIR_VAR = "LIMINAL_PLATFORM_DIR"  # the platform's own folder: its log, which pl
 LOGIN_VAR = "LIMINAL_PLATFORM_LOGIN"  # memory: a scratch preview's login, nothing it saves leaving the process
 PLUGINS_FILE = "plugins.json"
 TERMINAL_IDLE_S = 120.0  # a terminal no page has read for this long is closed
+# 0.34.2 (the review of 2026-11-21, item 26): how often the platform looks for such terminals by itself, so one whose
+# tab was closed is closed without waiting for another terminal request
+TERMINAL_SWEEP_S = 15.0
 PREPARING = ("wsl", "update", "version")  # setup steps that prepare this PC: never locked by a plugin's check
 MAX_INPUT = 8192  # characters of keys a page sends at once
 MAX_SETTING = 4096  # characters of one setting entered on a plugin's page
@@ -765,6 +768,11 @@ class PlatformApp(App):
         self._unsaid: set[str] = set()  # the plugins whose Internal API could not be read: said once in the log
         self._terminals: dict[str, Terminal] = {}  # a login terminal per plugin (the page's terminal panel)
         self._terminal_of = terminal  # (argv, title) -> Terminal: a test's
+        # 0.34.2: the clock a terminal's `seen` is read against (a test's moves), and the sweep that closes idle ones
+        # while the platform is served (_start_sweep), with the event that ends it
+        self._clock = time.monotonic
+        self._sweeper: threading.Thread | None = None
+        self._swept: threading.Event | None = None
         self._settling = threading.Lock()
         self._state = Path(state) if state is not None else None  # the platform's folder; platform_dir() unless given
         self._disabled: set[str] | None = None  # read from the folder's plugins.json when first wanted
@@ -1608,13 +1616,46 @@ class PlatformApp(App):
 
     def _close_idle(self) -> None:
         """Terminals no page has read for TERMINAL_IDLE_S, or that ended, closed."""
-        now = time.monotonic()
+        now = self._clock()
         with self._lock:
             gone = [(n, t) for n, t in self._terminals.items() if not t.alive or now - t.seen > TERMINAL_IDLE_S]
             for n, _ in gone:
                 del self._terminals[n]
         for _, t in gone:
             t.close()
+
+    def _start_sweep(self) -> None:
+        """The sweep of idle terminals begun, once, while the platform is served (0.34.2; the review of 2026-11-21,
+        item 26): a page whose tab was closed stops reading without closing its terminal, and its login shell ran on
+        until another terminal request came, or the platform stopped. A one-shot app begins none."""
+        if self.once:
+            return
+        with self._lock:
+            if self._sweeper is not None and self._sweeper.is_alive():
+                return
+            done = self._swept = threading.Event()
+            self._sweeper = threading.Thread(target=self._sweep, args=(done,), name="platform-terminal-sweep",
+                                             daemon=True)
+            sweeper = self._sweeper
+        sweeper.start()
+
+    def _sweep(self, done) -> None:
+        """Every TERMINAL_SWEEP_S until `done` is set (stop): the idle terminals closed (_close_idle). One that cannot
+        be closed is logged and the sweep goes on."""
+        while not done.wait(TERMINAL_SWEEP_S):
+            try:
+                self._close_idle()
+            except Exception as e:  # noqa: BLE001 - the next sweep tries again
+                self.log(f"platform: idle terminals could not be closed: {type(e).__name__}: {e}")
+
+    def _end_sweep(self) -> None:
+        """The sweep ended and waited for (stop): nothing of it outlives the platform."""
+        with self._lock:
+            sweeper, done, self._sweeper, self._swept = self._sweeper, self._swept, None, None
+        if done is not None:
+            done.set()
+        if sweeper is not None and sweeper is not threading.current_thread():
+            sweeper.join(STOP_WAIT_S)
 
     def open_terminal(self, name: str) -> dict:
         """A login terminal into the plugin's system, or the one open already where it was. 0.31.0: under way as
@@ -1666,10 +1707,13 @@ class PlatformApp(App):
         return f"process:{program_name(None, list(getattr(term, 'argv', None) or [])) or 'terminal'}"
 
     def start(self, *args, **kwargs) -> str:
-        """The frame's start (its page served at its port); the asks and jobs a stop refused are taken again."""
+        """The frame's start (its page served at its port); the asks and jobs a stop refused are taken again, and
+        (0.34.2) idle terminals are swept while it is served."""
         with self._lock:
             self._stopping = False
-        return super().start(*args, **kwargs)
+        url = super().start(*args, **kwargs)
+        self._start_sweep()
+        return url
 
     def stop(self) -> None:
         """The terminals closed and the page ended (the frame's stop), then each machine plugin told that the platform
@@ -1682,6 +1726,7 @@ class PlatformApp(App):
         with self._lock:
             self._stopping = True  # nothing new is begun from now on, until it starts again
             terms, self._terminals = list(self._terminals.values()), {}
+        self._end_sweep()
         for t in terms:
             t.close()
         try:
@@ -1697,14 +1742,19 @@ class PlatformApp(App):
         asked to stop (an install's or a model's download, whose child would otherwise outlive the platform), then the
         asks under way (_under_way) and those jobs waited for, STOP_WAIT_S at the most in all. What is still under way
         then is logged, and the plugins are told all the same; a second stop finds nothing to wait for. A setup, a
-        packages' update and a job that runs to its end are not waited for: they end with the platform's process, as
-        before."""
+        packages' update and a job that runs to its end are not waited for: their threads end with the platform's
+        process, as before, and (0.34.2) each is named in the log as running on."""
         deadline = time.monotonic() + STOP_WAIT_S
         with self._lock:
             jobs = [(name, job) for name, job in self._setups.items() if job.running]
         asked = []
         for name, job in jobs:
             if not job.cancels:
+                # 0.34.2 (the review of 2026-11-21, item 26): said, not left unsaid. The programs it started (a
+                # setup's or an update's behind wsl.exe or sudo) are not this process's children to end: they may
+                # outlive the platform until the library's jobs take a cancel and end what they started
+                self.log(f"platform: {name}'s {job.action} runs on as the platform stops: it takes no cancel, and "
+                         "what it started may outlive the platform")
                 continue
             if not job.cancelling:  # one its page asked to stop already is waited for, not asked again
                 if not job.cancel():

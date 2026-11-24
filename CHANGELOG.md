@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.34.2 (2026-11-24)
+
+The review of 2026-11-21 (Monday list item 26), two P2s. A closed terminal tab left its login shell running: idle
+terminals (TERMINAL_IDLE_S, 120 s unread) were closed only when another terminal request came, and a page whose tab
+was closed stops reading without closing its terminal. While the platform is served, a light sweep now closes them
+every TERMINAL_SWEEP_S (15 s) with no request; it ends with the stop and is waited for, and a one-shot app begins
+none. At a stop, a setup, a packages' update or a hook's job that takes no cancel runs on, as before, and is now named
+in the log as running on: what it started (behind `wsl.exe` or `sudo`) may outlive the platform until liminal-libs'
+jobs take a cancel and end what they start.
+
 ## 0.34.1 (2026-11-24)
 
 The review of 2026-11-21 (Monday list item 26), a P1: `POST /api/machines/<name>/run` is gone. It handed any list of
