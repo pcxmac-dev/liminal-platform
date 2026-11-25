@@ -26,6 +26,13 @@ ROUTES = (
     ("GET", "/api/machines", "every machine plugin's status, as GET /api/machines/{name} gives each", "read", "client"),
     ("GET", "/api/instances", "the Docker instances: this machine's, its contexts', a host's and those the machine "
                               "plugins run", "read", "page"),
+    ("GET", "/api/databases/plugins", "the Databases section (0.36.0): every database plugin with its instances as its "
+                                      "page draws them, its External and Internal API, who is on this database and "
+                                      "whether a change is made here (writer: true on the platform)", "read", "page"),
+    ("POST", "/api/databases/instances", "one of a database plugin's forms {plugin, action, name, ...}: test, new, "
+                                         "connect, share, port, credentials or forget; a change only once confirmed "
+                                         "(confirm: true), a refusal with what accepts it (a server off this machine: "
+                                         "asked twice); a password never logged or echoed", "change", "page"),
     ("POST", "/api/plugins/{name}/settings", "a plugin's settings kept through the login {values, forget}: its own "
                                              "keys only, a value never shown back or logged", "change", "page"),
     ("POST", "/api/plugins/{name}/enabled", "a plugin enabled or disabled {on}: disabled, it is asked nothing and "

@@ -14,10 +14,12 @@ framework"; "it also has an icon just like the chart/login and integrator"). An 
   arriving as it runs.
 - The Docker instances the framework may use (`liminal_libs.docker.instances`): this machine's, its contexts,
   the machine plugins' engines.
-- The platform plugins attached (the machines and the AI assistants).
+- The platform plugins attached (the machines and the AI assistants), and from 0.36.0 the database plugins (SQLite,
+  DuckDB, MongoDB) with their instances: the Databases section.
 
 The list on the left has a heading for each kind of plugin, in this order: Machine plugins, Virtualization plugins,
-OS plugins and Cloud plugins (a machine plugin's own `SECTION`; each is drawn when it has plugins), then AI plugins
+OS plugins and Cloud plugins (a machine plugin's own `SECTION`; each is drawn when it has plugins), then Database
+plugins (0.36.0: the Databases section, below), then AI plugins
 (the user, 2026-11-16: "they will be classified as AI plugins"). Under AI plugins are four groups: Proprietary
 services (the AI assistants, a vendor's service each: "the other plugins are strictly proprietary service plugins"),
 Inference (the machine plugins that serve local models: llama.cpp, Ollama, vLLM), Harnesses (those that set up a
@@ -27,6 +29,16 @@ first). A machine plugin is drawn in one of the last three when its `SECTION` is
 `"inference"`, `"harness"` or `"protocol"`; one that names another group, like one that names a section the platform
 does not draw, is listed under Machine plugins. In the tray the machine plugins come first, then the assistants, then
 the inference plugins, the harnesses and the protocols, so the AI plugins' icons sit together.
+
+From 0.36.0 (Monday list item 30, step 2) the platform is built on liminal-libs' platform core
+(`liminal_libs.apps.platform.Platform`, 1.90.0), the base the charts and the integrator inherit too. Its Databases
+section lists the database plugins the registry finds (today `plugin-integrator-sqlite`, `-duckdb` and `-mongodb`;
+renamed `plugin-platform-*` in step 3), each a page with the tabs Main, External API and Internal API. Main lists its
+instances (its own and the ones you add) with Test and the forms New database, Connect, Share, Port, Sign-in and
+Forget. Every change is asked in the page first (Yes / No under the form), and a server off this machine is asked a
+second time. The platform is the one writer of instance settings, kept through its login: the other apps read them and
+ask the platform for a change through its liminal-net node, `platform-databases`, which `liminal-platform serve`
+serves beside the page. The database plugins have no switch: the other apps open their databases through them.
 
 Plugins can be disabled: a right click on a plugin's icon in the tray offers Disable, and the switch at the head
 of a plugin's page enables or disables it (disabled: asked nothing, out of the tray, detached; kept in the
@@ -98,6 +110,10 @@ shown on its own Internal API view:
 - `GET /api/status` (everything at once, for a client: every plugin asked, one after another), `GET /api/overview`
   (what the page draws at once: no plugin asked), `GET /api/assistants`, `GET /api/docker`, `GET /api/machines`,
   `GET /api/instances`.
+- `GET /api/databases/plugins` (0.36.0: the Databases section, every database plugin with its instances, its External
+  and Internal API, and `writer`) and `POST /api/databases/instances` (`{"plugin", "action", "name", ...}`: test, new,
+  connect, share, port, credentials or forget; a change only with `"confirm": true`; a refusal that names what accepts
+  it answers 400 with `accept`, for the page's second question). Both are liminal-libs' (`liminal_libs.apps.databases`).
 - `POST /api/plugins/<name>/settings` (its settings kept through the login), `/enabled` and `/hidden` (`{"on": ...}`).
 - `GET /api/machines/<name>` (its status; it and the plugin's row in the overview say its `section` and its `group`,
   the group empty outside AI plugins), `GET /api/machines/<name>/check` (its check of this machine).

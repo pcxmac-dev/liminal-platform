@@ -3,7 +3,8 @@
 // described as a list of details w/ the specifics in the right hand column, just like the charts had a right hand
 // column"; "active plugins, will be part of the tray on the very right side"; "use the black boundary (around the
 // icon) to serve as the tray border, it can stretch vertically to include more icons or plugins"):
-//   the list (this machine, its machine plugins, the virtualization, OS and cloud plugins, the AI plugins) | the
+//   the list (this machine, its machine plugins, the virtualization, OS and cloud plugins, the database plugins (0.36.0),
+//   the AI plugins) | the
 //   selected one's data | its specifics | the tray
 // The tray is the platform's chip, a divider, then an icon per active plugin, all in the one dark box. A right click
 // on a plugin's icon offers to disable it ("allow me to right click on the icons to disable them on the right icon
@@ -337,6 +338,7 @@
         return mine.length ? `<h4>${title}</h4>` + mine.map(drawn).join('') : '';
       }).join('')
         : '<h4>Machine plugins</h4><div class="muted small">None installed: WSL, firewall and admin plugins set this machine up.</div>')
+      + dbList(item, (p) => (popOf(p.name) || { cls: '' }).cls)  // 0.36.0: the Databases section
       + (assistants.length || ai.length ? '<h4>AI plugins</h4>'
         + (assistants.length ? '<h5 class="group">Proprietary services</h5>' + assistants.map(assistant).join('') : '')
         + AI_GROUPS.map(([g, title]) => {
@@ -344,6 +346,292 @@
           return mine.length ? `<h5 class="group">${title}</h5>` + mine.map(drawn).join('') : '';
         }).join('') : '');
   }
+
+  // -- the Databases section (0.36.0; Monday list item 30, step 2; the user, 2026-11-25: the instance forms move to the
+  // platform's Databases section, the platform the only writer of instance settings): the database plugins (SQLite's,
+  // DuckDB's, MongoDB's), each with its instances, as GET api/databases/plugins says them (liminal-libs 1.90.0's
+  // platform core, liminal_libs.apps.databases), asked once the overview is drawn, on its own. A plugin's page has its
+  // tabs as every plugin's: Main (its instances, Test and the forms: New database, Connect, Share, Port, Sign-in,
+  // Forget), External API and Internal API. A change is asked in the page first (Yes / No under the form: a native
+  // confirm is no question a touch screen or a test can answer), and asked a second time when the plugin's refusal
+  // names what accepts it (a server off this machine); only then POST api/databases/instances with confirm: true. The
+  // same rules as the charts' Databases view (liminal-charts' databases.js). A platform from before 0.36.0 answers 404:
+  // no section is drawn. -------------------------------------------------------------------------------------------------
+  const dbs = () => (st && st.databases && Array.isArray(st.databases.plugins) ? st.databases.plugins : []);
+  const dbOf = (name) => dbs().find((p) => p && p.name === name) || null;
+  let dbForm = null;  // the form open on a plugin's page: {plugin, kind, name}
+  let dbPending = null;  // a change waiting for a yes here: {plugin, body, words, second}
+  let dbSaid = null;  // what the last form's answer said: {plugin, ok, said, lines}
+  let dbBusy = false;  // a form is being answered
+  const dbCount = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  function dbState(p) {
+    if (p.error) return 'not read';
+    if (p.driver && !p.driver.ok) return 'no driver';
+    return dbCount((p.instances || []).length, 'instance');
+  }
+  function dbList(item, cls) {
+    const d = st.databases;
+    if (!d || d.absent) return '';  // a platform from before 0.36.0: no Databases section
+    const head = '<h4>Database plugins</h4>';
+    if (d.pending) return `${head}<div class="muted small">Loading…</div>`;
+    if (d.failed) return `${head}<div class="muted small">${esc(d.failed)}</div>`;
+    const left = (d.errors || []).map((why) => `<div class="small error">${esc(why)}</div>`).join('');
+    if (!dbs().length) return `${head}${left}<div class="muted small">None installed: the SQLite, DuckDB and MongoDB plugins hold the databases.</div>`;
+    return head + left + dbs().map((p) => item(p.name, p.icon || 'database', p.title || p.name, dbState(p), cls(p))).join('');
+  }
+  function dbTable() {  // this machine's page: the Databases section's plugins, as the other sections have theirs
+    if (!dbs().length) return '';
+    return '<h4>Database plugins</h4><div class="muted small">the database engines: the instances each holds, made, connected and shared from here</div>'
+      + '<table class="list"><thead><tr><th></th><th>Plugin</th><th>Version</th><th>Engine</th><th>What it holds</th></tr></thead><tbody>'
+      + dbs().map((p) => `<tr class="pick" data-select="${esc(p.name)}"><td>${icon(p.icon || 'database', 18)}</td><td>${esc(p.title || p.name)}</td>`
+        + `<td class="muted">${esc(p.version || '')}</td><td>${esc(p.engineTitle || p.engine || '')}</td><td>${esc(dbState(p))}</td></tr>`).join('')
+      + '</tbody></table>';
+  }
+  const dbStateHtml = (i) => {
+    const size = i.bytes != null ? ` · ${esc(i.bytes)} bytes${i.files != null ? ` in ${esc(dbCount(i.files, 'file'))}` : ''}` : '';
+    if (i.state === 'ready') return `ready${size}`;
+    if (i.state === 'listening') return `running${i.serverVersion ? ` (${esc(i.serverVersion)})` : ''}${size}`;
+    const soft = ['not running', 'not asked', 'empty', 'elsewhere'].includes(i.state);
+    return `<span${soft ? '' : ' class="error"'}>${esc(i.state || 'unknown')}</span>${size}${i.why ? `<div class="sub">${esc(i.why)}</div>` : ''}`;
+  };
+  const dbCan = (p, what) => !!(p.can && p.can[what]);
+  function dbRow(p, i) {
+    const kind = i.builtin ? 'its own' : i.made ? 'made here' : 'connected';
+    const how = [esc(i.methodTitle || i.method || ''), i.tls ? 'TLS' : '', i.remote ? 'off this machine' : '',
+      i.auth ? `signs in${i.role ? ` as ${esc(i.role)}` : ''}${i.signsIn === false ? ' <span class="error">(its sign-in is missing)</span>' : ''}` : '']
+      .filter(Boolean).join(' · ');
+    const act = (what, words, title) => `<button type="button" class="db-do" data-db-do="${what}" data-db="${esc(p.name)}" data-db-inst="${esc(i.name)}" title="${esc(title)}"${dbBusy ? ' disabled' : ''}>${words}</button>`;
+    const acts = [act('test', 'Test', 'Open it for reading and ask what it is')];
+    if (dbCan(p, 'share')) acts.push(act('share', 'Share…', 'Who else may attach to it, and how far'));
+    if (p.server && i.method === 'tcp' && dbCan(p, 'forget')) acts.push(act('port', 'Port…', 'Its port, its own'));
+    if (p.server && !i.builtin && dbCan(p, 'forget')) acts.push(act('signin', 'Sign-in…', 'The name and password it signs in with, kept through the login'));
+    if (!i.builtin && dbCan(p, 'forget')) acts.push(act('forget', 'Forget', 'Forget this instance: what it holds stays where it is'));
+    return `<tr><td><b>${esc(i.title || i.name)}</b><div class="sub">${esc(i.name)} · ${kind}</div></td>`
+      + `<td class="small">${(i.holds || []).map((h) => esc(h.name || h)).join(', ') || '<span class="muted">nothing yet</span>'}</td>`
+      + `<td class="small"><span class="mono">${esc(i.place || i.where || '')}</span><div class="sub">${how}</div></td>`
+      + `<td class="small">${esc(i.sharedWords || '')}</td><td class="small">${dbStateHtml(i)}</td><td class="db-acts">${acts.join('')}</td></tr>`;
+  }
+  const dbField = (words, input, note) => `<label class="db-field"><span>${words}</span>${input}${note ? `<small class="muted">${note}</small>` : ''}</label>`;
+  const dbText = (name, attrs = '', kind = 'plain') => `<input name="${name}" ${kb(kind)} ${attrs}>`;
+  const dbSecret = (name) => `<input name="${name}" type="password" ${kb('secret', { autocomplete: 'new-password' })}>`;
+  const dbPort = (value, required) => `<input name="port" type="number" min="1" max="65535"${required ? ' required' : ''} value="${esc(value ?? '')}" ${kb('number')}>`;
+  const dbHolds = (p) => `<fieldset class="db-field"><legend>Holds</legend>${(p.holds || []).map((h) => `<label class="db-check">`
+    + `<input type="checkbox" name="holds" value="${esc(h.name)}"> ${esc(h.title || h.name)}</label>`).join('')}</fieldset>`;
+  // a form's markup depends on which form is open, never on what is typed in it: drawn again, what was typed is put
+  // back (dbTyped, dbRetype in drawData)
+  function dbFormHtml(p) {
+    if (!dbForm || dbForm.plugin !== p.name) return '';
+    const i = (p.instances || []).find((x) => x.name === dbForm.name);
+    const open = (title, note) => `<form class="db-form" data-kind="${dbForm.kind}" data-db="${esc(p.name)}" autocomplete="off"><h4>${title}</h4><div class="muted small">${note}</div>`;
+    const end = (go) => `<div class="db-form-acts"><button type="submit" class="accent"${dbBusy ? ' disabled' : ''}>${go}</button><button type="button" class="db-do" data-db-do="cancel" data-db="${esc(p.name)}">Cancel</button></div></form>`;
+    const engine = esc(p.engineTitle || p.engine || '');
+    if (dbForm.kind === 'new' || dbForm.kind === 'connect') {
+      const making = dbForm.kind === 'new';
+      const name = dbField('Name', dbText('name', 'maxlength="32" required placeholder="archive"'), 'lowercase letters, digits and dashes');
+      const title = dbField('Title', dbText('title', 'maxlength="60"', 'name'), 'what the page calls it (it may be left empty)');
+      if (!p.server) {
+        const where = making
+          ? dbField('File', dbText('where', 'placeholder="left empty: instances/ in the data folder"'), 'or a whole path, in a folder that is there; never over a file')
+          : dbField('File', dbText('where', 'required placeholder="backups/…, or a whole path"'), 'a file that exists: its path in the data folder, or its whole path');
+        return `${open(making ? 'New database' : 'Connect a database', making ? `A new ${engine} file, made by the platform.` : `A ${engine} file that exists: kept only when it answers.`)}`
+          + `${name}${where}${title}${dbHolds(p)}${end(making ? 'Make it' : 'Connect it')}`;
+      }
+      const host = dbField('Server', dbText('where', 'value="127.0.0.1" required'), 'its host; off this machine only when you say so twice, over TLS and signed in');
+      const port = dbField('Port', dbPort(p.defaultPort, false), '');
+      const database = dbField('Database', dbText('database', making ? 'placeholder="left empty: its name"' : 'required'), making ? '' : 'the database on that server');
+      const tls = '<label class="db-check"><input type="checkbox" name="tls"> over TLS</label>';
+      const sign = making
+        ? dbField("The server's administrator", dbText('admin_user', '', 'username'), 'only where the server signs in: a role of its own is then made for this database')
+          + dbField("The administrator's password", dbSecret('admin_password'), 'asked once, not kept')
+        : dbField('Signs in as', dbText('user', '', 'username'), 'left empty where the server takes no sign-in')
+          + dbField('Password', dbSecret('password'), 'kept through the login, never shown again');
+      return `${open(making ? 'New database' : 'Connect a database', making ? `A new database on a ${engine} server that runs.` : `A database on a ${engine} server: kept only when it answers.`)}`
+        + `${name}${host}${port}${database}${sign}${title}${tls}${dbHolds(p)}${end(making ? 'Make it' : 'Connect it')}`;
+    }
+    if (!i) return '';
+    const d = st.databases || {};
+    if (dbForm.kind === 'share') {
+      const others = (d.suites || []).filter((s) => s !== d.me);
+      return `${open(`Share ${esc(i.name)}`, `Who else may attach to it, by the name its suite has on a database (this one is ${esc(d.me || '')}). Once a share is set on an instance, no other suite attaches to it.`)}`
+        + dbField('Suite', `${dbText('who', 'required list="dbSuites" placeholder="linux::Ubuntu"')}<datalist id="dbSuites">${others.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>`, '')
+        + dbField('May', '<select name="access"><option value="read">read only</option><option value="write">read and write</option><option value="none">not attach (its share taken away)</option></select>', '')
+        + end('Set it');
+    }
+    if (dbForm.kind === 'port') {
+      return `${open(`${esc(i.name)}'s port`, i.builtin ? 'The server here: changed while it is stopped; each app reads it when it starts.' : 'Kept only when the server answers at the new port.')}`
+        + `${dbField('Port', dbPort(i.port, true), '')}${end('Change it')}`;
+    }
+    if (dbForm.kind === 'signin') {
+      return `${open(`${esc(i.name)}'s sign-in`, 'Its name and password, kept through the login and never shown again. Both left empty: forgotten.')}`
+        + `${dbField('Signs in as', dbText('user', '', 'username'), '')}${dbField('Password', dbSecret('password'), '')}${end('Keep it')}`;
+    }
+    return '';
+  }
+  function dbAskHtml(p) {  // the change waiting for a yes here; a second time for a server off this machine
+    if (!dbPending || dbPending.plugin !== p.name) return '';
+    const busy = dbBusy ? ' disabled' : '';
+    return `<div class="db-ask${dbPending.second ? ' second' : ''}" role="alertdialog" aria-label="Confirm the change"><span>${esc(dbPending.words)}</span>`
+      + `<button type="button" class="db-do accent" data-db-do="yes" data-db="${esc(p.name)}"${busy}>${dbPending.second ? 'Yes, all the same' : 'Yes'}</button>`
+      + `<button type="button" class="db-do" data-db-do="no" data-db="${esc(p.name)}"${busy}>No</button></div>`;
+  }
+  function dbSaidHtml(p) {
+    if (!dbSaid || dbSaid.plugin !== p.name) return '';
+    return `<div class="db-said${dbSaid.ok ? '' : ' failed'}" role="status"><b>${esc(dbSaid.said)}</b>${(dbSaid.lines || []).length
+      ? `<ul>${dbSaid.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>`;
+  }
+  function dbMain(p) {
+    if (p.error) return `<p class="error">Not read: ${esc(p.error)}</p>`;
+    const lacks = p.driver && !p.driver.ok;
+    const notes = [p.problem, lacks ? p.driver.why : '', !lacks && p.can && p.can.why ? p.can.why : ''].filter(Boolean);
+    const add = [dbCan(p, 'new') ? `<button type="button" class="db-do" data-db-do="new" data-db="${esc(p.name)}">New database…</button>` : '',
+      dbCan(p, 'connect') ? `<button type="button" class="db-do" data-db-do="connect" data-db="${esc(p.name)}">Connect…</button>` : ''].join('');
+    return notes.map((n) => `<p class="error small">${esc(n)}</p>`).join('')
+      + '<h4>Instances</h4><table class="list db-instances"><thead><tr><th>Instance</th><th>Holds</th><th>Where</th><th>Shared with</th><th>State</th><th></th></tr></thead>'
+      + `<tbody>${(p.instances || []).map((i) => dbRow(p, i)).join('')}</tbody></table>`
+      + `<div class="db-add">${add}</div>${dbFormHtml(p)}${dbAskHtml(p)}${dbSaidHtml(p)}`;
+  }
+  function dbData(p) {
+    const head = `<div class="data-head"><h2>${esc(p.title || p.name)}</h2>${tabsRow(p)}</div><div class="muted small">${esc(p.about || '')}</div><p class="error" id="err-${esc(p.name)}"></p>`;
+    if (tabOf(p) === 'external') return head + apiCard(p);  // what it attaches to, as every plugin's
+    if (tabOf(p) === 'internal') return head + internalCard(p);  // what it shares with the platform, as every plugin's
+    return head + dbMain(p);
+  }
+  function dbSide(p) {
+    const d = st.databases || {};
+    const pairs = [['Engine', esc(p.engineTitle || p.engine || '')], ['Plugin', `${esc(p.name)}${p.version ? ` ${esc(p.version)}` : ''}`],
+      ['From', p.origin ? esc(p.origin) : ''], ['Contract', p.api ? `plugin API ${esc(p.api)}` : ''],
+      ['Driver', p.driver ? (!p.driver.name ? "Python's own" : p.driver.ok ? `${esc(p.driver.name)}, installed` : `<span class="error">${esc(p.driver.why)}</span>`) : ''],
+      ['Reached by', (p.methods || []).map((m) => `<b>${esc(m.title)}</b>: ${esc(m.about)}`).join('<br>')],
+      ['Can hold', (p.holds || []).map((h) => esc(h.title || h.name)).join('; ')],
+      ['Shares', p.shares ? 'kept to by the helper: a suite on another system attaches as its share says' : esc(p.sharedNote || '')],
+      ['Usual port', p.server && p.defaultPort ? esc(p.defaultPort) : ''],
+      ['What you add', p.variable ? `kept through the platform's login, as <span class="mono">${esc(p.variable)}</span>` : ''],
+      ['Data folder', p.dataFolder ? `<span class="mono">${esc(p.dataFolder)}</span>` : ''],
+      ['Changed', d.writer === false ? "on the platform's Databases section" : 'here: the platform is the one writer of instance settings']];
+    return `<h3>${icon(p.icon || 'database', 20)} ${esc(p.title || p.name)}</h3><div class="muted small">${esc(p.name)}${p.version ? ` · ${esc(p.version)}` : ''}</div>`
+      + `<p class="summary">${esc(dbState(p))}</p><dl class="facts">${pairs.filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`
+      + '<h4>How it is asked</h4><div class="muted small">Its instances are listed without opening them: a file\'s presence and size, and on this machine '
+      + 'alone whether a server listens. Test opens one for reading and asks what it is. A server is never started to be asked, and another machine is '
+      + 'asked only by a test you start. A change is made once you say yes to it here; a server off this machine once you say yes twice. Forgetting an '
+      + 'instance removes nothing of what it holds. The other apps (the charts, the integrator) ask the platform for a change.</div>';
+  }
+  function dbQuestion(body) {
+    const n = body.name;
+    if (body.action === 'new') return `Make the database ${n}${body.where ? ` at ${body.where}` : ''}?`;
+    if (body.action === 'connect') return `Keep ${body.where} as the instance ${n}?`;
+    if (body.action === 'share') {
+      return body.access === 'none' ? `Take ${body.who}'s share of ${n} away?`
+        : `Let ${body.who} ${body.access === 'write' ? 'read and write' : 'read'} ${n}? No suite without a share of it will attach to it.`;
+    }
+    if (body.action === 'port') return `Change ${n}'s port to ${body.port}?`;
+    if (body.action === 'credentials') return body.user ? `Keep this sign-in for ${n}?` : `Forget ${n}'s sign-in?`;
+    return `Forget ${n}? What it holds stays where it is.`;
+  }
+  function dbTyped() {  // what the open form holds, to put back once the page is drawn again
+    const f = data.querySelector('form.db-form');
+    if (!f) return null;
+    const els = [...f.elements].filter((x) => x.name);
+    const at = els.indexOf(document.activeElement);
+    return { kind: f.dataset.kind, values: els.map((x) => [x.name, x.value, x.checked]), focus: at };
+  }
+  function dbRetype(t) {
+    const f = t && data.querySelector(`form.db-form[data-kind="${t.kind}"]`);
+    if (!f) return;
+    const els = [...f.elements].filter((x) => x.name);
+    t.values.forEach(([name, value, checked]) => {
+      const x = els.find((y) => y.name === name && (y.type !== 'checkbox' || y.value === value));
+      if (!x) return;
+      if (x.type === 'checkbox') x.checked = checked; else x.value = value;
+    });
+    if (t.focus >= 0 && els[t.focus]) els[t.focus].focus({ preventScroll: true });
+  }
+  function dbLeft() {  // another page shown: the form, the question and the answer of the plugin left let go
+    const sel = selected();
+    if (dbForm && dbForm.plugin !== sel) dbForm = null;
+    if (dbPending && dbPending.plugin !== sel) dbPending = null;
+    if (dbSaid && dbSaid.plugin !== sel) dbSaid = null;
+  }
+  function dbRedraw() {
+    if (!st) return;
+    drawList();
+    if (dbOf(selected()) || selected() === 'machine') { drawData(); drawSide(); }
+  }
+  async function loadDatabases() {  // the section asked (GET api/databases/plugins); 404: a platform from before it
+    let got;
+    try { got = await api('GET', 'api/databases/plugins'); }
+    catch (e) { got = e.status === 404 ? { absent: true } : { failed: `The Databases section did not answer: ${e.message}` }; }
+    if (!st) return;
+    st.databases = got && typeof got === 'object' ? got : { failed: 'The Databases section said nothing.' };
+    dbRedraw();
+  }
+  // one form's answer: what the plugin said, shown under the instances; a refusal that names what accepts it becomes the
+  // page's second question (the same form sent again with that said); after a change the section is asked again
+  async function dbAnswer(p, body) {
+    dbBusy = true;
+    dbRedraw();
+    let out = null, err = null;
+    try { out = await api('POST', 'api/databases/instances', body); } catch (e) { err = e; }
+    dbBusy = false;
+    const accept = err && err.answer && err.answer.accept;
+    if (!err) {
+      dbSaid = { plugin: p.name, ok: !!out && out.ok !== false, said: (out && out.said) || 'Done.', lines: (out && out.lines) || [] };
+      dbPending = null;
+      if (body.action !== 'test') { dbForm = null; await loadDatabases(); return; }
+    } else if (dbPending && !dbPending.second && typeof accept === 'string' && /^[a-z_]+$/.test(accept)) {
+      dbPending = { plugin: p.name, body: { ...body, [accept]: true }, words: err.message || 'Refused. All the same?', second: true };
+    } else {
+      dbPending = null;
+      dbSaid = { plugin: p.name, ok: false, said: err.message || 'Refused.', lines: [] };
+    }
+    dbRedraw();
+  }
+  function dbDo(b) {  // a button of a database plugin's page
+    const p = dbOf(b.dataset.db);
+    if (!p || dbBusy) return;
+    const what = b.dataset.dbDo, name = b.dataset.dbInst || null;
+    if (what === 'yes') { if (dbPending) dbAnswer(p, { ...dbPending.body, confirm: true }); return; }
+    if (what === 'test') { dbSaid = null; dbPending = null; dbAnswer(p, { plugin: p.name, action: 'test', name }); return; }
+    if (what === 'cancel') { dbForm = null; dbPending = null; }
+    else if (what === 'no') dbPending = null;
+    else if (what === 'forget') {
+      const body = { plugin: p.name, action: 'forget', name };
+      dbForm = null; dbSaid = null;
+      dbPending = { plugin: p.name, body, words: dbQuestion(body) };
+    } else {  // a form opened: new, connect, share, port, signin
+      dbForm = { plugin: p.name, kind: what, name };
+      dbPending = null; dbSaid = null;
+    }
+    dbRedraw();
+    const f = data.querySelector('form.db-form');
+    if (f && what !== 'cancel' && what !== 'no') autofocus(f.querySelector('input, select'), { preventScroll: true });
+  }
+  // a form sent: what it holds becomes the change waiting for a yes (its question under the form); nothing is sent yet
+  function dbSubmit(f) {
+    const p = dbOf(f.dataset.db);
+    if (!p || !dbForm || dbForm.plugin !== p.name || dbBusy) return;
+    const fd = new FormData(f);
+    const v = (k) => String(fd.get(k) ?? '').trim();
+    const typed = (k) => String(fd.get(k) ?? '');  // a password as typed
+    const kind = dbForm.kind;
+    const body = { plugin: p.name, action: kind === 'signin' ? 'credentials' : kind, name: dbForm.name || v('name') };
+    if (kind === 'new' || kind === 'connect') {
+      Object.assign(body, { where: v('where'), title: v('title'), holds: fd.getAll('holds').map(String) });
+      if (p.server) Object.assign(body, { port: v('port') || null, database: v('database'), tls: fd.get('tls') === 'on' });
+      if (p.server && kind === 'connect' && v('user')) Object.assign(body, { user: v('user'), password: typed('password') });
+      if (p.server && kind === 'new' && v('admin_user')) Object.assign(body, { admin_user: v('admin_user'), admin_password: typed('admin_password') });
+    } else if (kind === 'share') Object.assign(body, { who: v('who'), access: v('access') });
+    else if (kind === 'port') body.port = v('port');
+    else if (kind === 'signin') Object.assign(body, { user: v('user'), password: typed('password') });
+    dbSaid = null;
+    dbPending = { plugin: p.name, body, words: dbQuestion(body) };
+    dbRedraw();
+  }
+  document.addEventListener('submit', (e) => {
+    const f = e.target.closest && e.target.closest('form.db-form[data-db]');
+    if (!f) return;
+    e.preventDefault();
+    dbSubmit(f);
+  });
 
   // -- the middle: the selected one's data ------------------------------------------------------------
   function instancesTable() {
@@ -368,7 +656,7 @@
       return mine.length ? `<h4>${title}</h4><div class="muted small">${esc(notes[s])}</div>${table(mine)}` : '';
     }).join('');
     return `<h2>${esc(st.machine.host)}</h2><div class="muted small">this machine, and the plugins that set it up for the framework</div>
-      ${sections}
+      ${sections}${dbTable()}
       ${instancesTable()}`;
   }
 
@@ -2647,8 +2935,12 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
     }
+    const db = mine || m || a ? null : dbOf(sel);  // 0.36.0: a database plugin's page (the Databases section)
+    const typed = dbTyped();  // a form of a database plugin's being filled: what it holds put back after
     const html = sel === 'machine' ? machineData() : sel === CONNECTIONS ? connectionsData() : mine ? ownData()
-      : m ? pluginData(m) : a ? assistantData(a) : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
+      : m ? pluginData(m) : a ? assistantData(a) : db ? dbData(db)
+        : st.databases && st.databases.pending ? '<p class="muted loading-words" role="status">Loading the Databases section…</p>'
+          : `<p class="muted">Nothing named ${esc(sel)} here.</p>`;
     // a terminal's panel shown stays where it is, the pane drawn anew around it (0.17.0): its box keeps the focus, the
     // on-screen keyboard stays up and a word being composed goes on; else the pane drawn anew and the panel put in its slot
     const panel = m && shells[m.name] ? shells[m.name].panel : null;
@@ -2660,6 +2952,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       }
     };
     if (own) keepFocus(put); else put();  // on one of its own tabs, a filter or a search being typed keeps the focus
+    if (db) dbRetype(typed);
     if (sel === CONNECTIONS) updateConnections(true);
     Charts.draw(data);
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
@@ -2749,7 +3042,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     if (sel === CONNECTIONS) { drawConnectionsSide(); return; }
     if (sel === CODEBASE && window.LiminalCodebase) return;  // drawn with its data (codebase.js)
     if (ownShown()) { side.innerHTML = ownSide(); return; }  // 0.32.0: before a plugin of its name, which it shadows
-    side.innerHTML = sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : '';
+    const db = m || a ? null : dbOf(sel);  // 0.36.0: a database plugin's specifics
+    side.innerHTML = sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : db ? dbSide(db) : '';
   }
 
   // 0.32.0: an address written before names the API tab (#name/api). It opens External API (tabOf) and is written
@@ -2767,6 +3061,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   function draw() {
     oldAddress();
     if (!st) return;
+    dbLeft();  // 0.36.0: a database plugin's form, question and answer go with its page
     drawRail();
     drawList();
     drawData();
@@ -2810,7 +3105,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     ov.plugins.filter((p) => p.kind === 'machine').forEach((p) => { machines[p.name] = was.machines[p.name] || blank(p); });
     const assistants = ov.plugins.filter((p) => p.kind === 'assistant').map((p) => (was.assistants || []).find((a) => a.name === p.name) || blank(p));
     return { app: ov.app, machine: ov.machine, machines, assistants, disabled: ov.disabled || [], active: (was.active || []).filter((n) => machines[n]),
-      docker: was.docker || { pending: true }, instances: was.instances || [], instancesPending: !was.instances || !!was.instancesPending };
+      docker: was.docker || { pending: true }, instances: was.instances || [], instancesPending: !was.instances || !!was.instancesPending,
+      databases: was.databases || { pending: true } };  // 0.36.0: the Databases section, as it was last said
   }
   const unanswered = () => !!st && (Object.values(st.machines).some(pending) || (st.assistants || []).some(pending) || !!st.instancesPending || !!(st.docker && st.docker.pending));
   const unanswering = (p, e) => ({ ...p, pending: false, state: 'invalid', valid: false, why: e.message, status: { present: false, problem: e.message } });
@@ -2885,6 +3181,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     };
     asks.push(rest('api/docker', (d) => { if (d) st.docker = d; else if (st.docker.pending) st.docker = { available: false, problem: 'the platform did not say' }; }));
     asks.push(rest('api/instances', (d) => { if (d) st.instances = d.instances || []; st.instancesPending = false; }));
+    asks.push(loadDatabases());  // 0.36.0: the Databases section, on its own (a form open keeps what is typed in it)
     await Promise.all(asks);
     if (g !== gen) return dropped();
     try { const t = await api('GET', 'api/tray'); if (g === gen) tray = t; } catch (e) { /* the tray as the answers made it */ }
@@ -3341,6 +3638,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       location.hash = tb.dataset.tab === 'main' ? tb.dataset.machine : `${tb.dataset.machine}/${tb.dataset.tab}`;
       return;
     }
+    const dd = e.target.closest('button.db-do[data-db-do]');  // 0.36.0: a database plugin's instance, form or question
+    if (dd) { if (!dd.disabled) dbDo(dd); return; }
     const pick = e.target.closest('[data-select]');
     if (pick) { location.hash = pick.dataset.select === 'machine' ? '' : pick.dataset.select; return; }
     const sp = e.target.closest('button[data-span]');

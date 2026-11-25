@@ -224,6 +224,11 @@ class Platform:
         self.signals, self.number = signals, number
         self.lines: list[str] = []
         self.stops, self.served = 0, None
+        self.nodes = 0  # 0.36.0: its Databases section served as a node before its page
+
+    def serve_databases(self):
+        assert self.served is None  # before the page
+        self.nodes += 1
 
     def log(self, line):
         self.lines.append(line)
@@ -268,6 +273,7 @@ def test_the_serve_command_ends_by_a_signal_and_stops_the_platform(monkeypatch, 
     port, browser, until_quiet, stop = platform.served
     assert (port, browser, until_quiet) == (8775, False, None) and isinstance(stop, cli.Ending)
     assert platform.stops == 1  # the serve's own stop; the command's sees it stopped (0.35.0: once)
+    assert platform.nodes == 1  # 0.36.0: the Databases section's node, once, before the page
     assert platform.lines == [said]
     assert quiet.calls == (1 if number == 1 else 0)
     # printed: only what came before the signal (after SIGHUP its terminal is gone)

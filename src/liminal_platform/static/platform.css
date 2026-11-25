@@ -397,3 +397,25 @@ html.touch .conn-picture .node circle.hit { pointer-events: all; }
   letter-spacing: .04em; }
 .term-head button.job-cancel { font-size: 12px; }
 .term-head button.job-cancel:disabled { opacity: .4; cursor: default; background: transparent; }
+/* 0.36.0: the Databases section's plugin pages (Monday list item 30, step 2): their instances, the forms and the
+   question asked before a change, as the charts' Databases view draws them */
+.db-acts { white-space: nowrap; }
+.db-acts button, .db-add button, .db-form-acts button, .db-ask button { margin-right: 4px; }
+.db-add { margin: 6px 0 10px; }
+.db-form { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+  display: grid; gap: 8px; max-width: 34em; }
+.db-form h4 { margin: 0; }
+.db-field { display: flex; flex-direction: column; gap: 3px; border: 0; padding: 0; margin: 0; }
+.db-field input, .db-field select { box-sizing: border-box; width: 100%; border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 8px; background: var(--bg); color: var(--text); }
+.db-field legend { padding: 0 0 3px; }
+.db-check { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+.db-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--accent); }
+.db-ask.second { border-color: var(--down); }
+.db-ask span { flex: 1 1 18em; overflow-wrap: anywhere; }
+.db-said { margin: 8px 0; overflow-wrap: anywhere; }
+.db-said.failed b { color: var(--down); }
+.db-said ul { margin: 4px 0; padding-left: 18px; font-size: 12px; }
+table.db-instances .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .db-acts { white-space: normal; } .db-form { max-width: none; } }

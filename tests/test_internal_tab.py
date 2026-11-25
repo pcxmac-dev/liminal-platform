@@ -345,7 +345,11 @@ PLUGIN_NAMES = {"m", "p", "a", "machine", "plugin"}  # the names the platform's 
 INDIRECT = {"instances": "liminal_libs.docker.instances asks each machine plugin", "api_facts": "sources.apis.facts_of",
             "attach": "the frame's attach", "detach": "the frame's detach",
             "rpc": "0.34.0's route: the plugin's own ask, by the name its RPC_HOOK gives",
-            "signal": "0.35.0's stop: liminal_libs.lifecycle.deliver_all tells each plugin attached here"}
+            "signal": "0.35.0's stop: liminal_libs.lifecycle.deliver_all tells each plugin attached here",
+            # 0.36.0: a database plugin's, through the library's Databases section (liminal_libs.apps.databases)
+            **{n: "liminal_libs.apps.databases: the section's overview and forms" for n in (
+                "test", "new_database", "connect_to", "share", "set_port", "set_credentials", "forget", "ENGINE",
+                "SERVER")}}
 
 
 def _plugin(node) -> bool:
@@ -397,7 +401,7 @@ def test_calls_and_attributes_are_what_the_platforms_code_does():
     the two are held to its source. Every name the code takes of a plugin is declared; every declared name is one the
     code takes, but the four it takes through another's code (INDIRECT); and each is declared as what it is: in CALLS
     a name its code calls, in ATTRIBUTES (read, never called) one it only reads or looks up."""
-    assert set(CALLS) == set(ATTRIBUTES) == {"machine", "assistant"}
+    assert set(CALLS) == set(ATTRIBUTES) == {"machine", "assistant", "database"}  # (0.36.0: the database plugins)
     calls = {n for kind in CALLS for n in CALLS[kind]}
     attributes = {n for kind in ATTRIBUTES for n in ATTRIBUTES[kind]}
     declared = calls | attributes

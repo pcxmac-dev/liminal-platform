@@ -151,12 +151,24 @@ def _app(log=print, once: bool = True) -> PlatformApp:
     return app
 
 
+def serve_databases(app) -> None:
+    """The platform's Databases section served as its liminal-net node (0.36.0, Monday list item 30, step 2: the
+    library's Platform.serve_databases, platform-databases), so the other apps ask it for a change; it ends with the
+    platform's page (Platform._end_server). One that cannot be served (liminal-net not installed, its scope not
+    reached) is logged and the platform is served all the same: its own page changes the instances still."""
+    try:
+        app.serve_databases()
+    except Exception as e:  # noqa: BLE001 - the page works without the node
+        app.log(f"platform: its Databases section is not served as a node: {type(e).__name__}: {e}")
+
+
 def cmd_serve(args) -> int:
     """The page served until Ctrl+C (or, 0.31.0, SIGTERM or SIGHUP on POSIX: end_on_signals), or until no page has
     been in touch for QUIET_SECONDS with --until-quiet; then the platform stopped, its plugins told."""
     folder = platform_dir()
     app = _app(Logger(folder / "logs" / "platform.log"), once=False)
     port = args.port if args.port is not None else app.port()
+    serve_databases(app)
     ending = Ending(log=app.log, name="platform")
     end_on_signals(ending)  # kept until the process ends: a signal while it stops changes nothing
     print(f"platform: its page at {app.url(port)} (Ctrl+C to stop)", flush=True)

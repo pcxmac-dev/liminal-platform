@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.36.0 (2026-11-25)
+
+The platform's Databases section (Monday list item 30, step 2; the user, 2026-11-24: "inheritance bro", "through the
+rust interface"; 2026-11-25: the instance forms move to the platform's Databases section, the platform the only writer
+of instance settings). Needs liminal-libs 1.90.0.
+- **On the platform core.** `PlatformApp` inherits liminal-libs' `Platform` (`apps/platform.py`), the base the charts
+  and the integrator inherit in steps 4 and 5. It declares `PLATFORM_NEEDS = ("database",)` (its machine plugins and
+  AI assistants stay its own, attached as before) and `PLATFORM_WRITER = True`: it is the one writer of instance
+  settings. `attach_plugins()` with the registry's plugins attaches the database plugins too (`attach_needs`).
+- **The Databases section.** A heading Database plugins in the list, after the four machine sections and before AI
+  plugins, and a table of them on this machine's page. Each plugin's page has its tabs, Main, External API and
+  Internal API, as every plugin's; Main has its instances with Test, and the forms New database, Connect, Share, Port,
+  Sign-in and Forget. Every change is asked in the page first, and a server off this machine a second time (the
+  refusal's `accept`, sent back with the same form), as the charts' Databases view does. What a form holds is kept
+  when the page is drawn again. Its specifics on the right; no icon in the tray and no switch (the other apps open
+  their databases through these plugins).
+- **Its routes.** `GET /api/databases/plugins` and `POST /api/databases/instances`, the platform's own (listed in
+  `routes.py`), answered by `liminal_libs.apps.databases`. Each plugin's row says its kind and section, its plugin API,
+  its hooks and its Internal API (`internal_card`). A refusal naming what accepts it answers 400 with `accept` (the
+  frame alone would drop it).
+- **Its node.** `liminal-platform serve` serves the section as the liminal-net node `platform-databases`
+  (`cli.serve_databases`: `Platform.serve_databases`), which ends with the platform's page; one that cannot be served
+  is logged and the page is served all the same.
+- **Its Internal API.** `CALLS` and `ATTRIBUTES` say what the platform calls and reads on a database plugin (through
+  the library's section), `call_words` how one is asked (its forms, never a hook by name), `known_plugins` lists those
+  attached, and a note says the one-writer rule.
+- Tests: `test_databases_section.py` (two stand-in engines and a stand-in node: the routes, the confirmations, a server
+  off this machine asked twice, the login the only place a setting is kept, the node served and ended, the page by its
+  text); the internal tab's and the serve command's tests know the database plugins and the node.
+
 ## 0.35.0 (2026-11-24)
 
 The platform ends within its deadline (Monday list item 38; the shutdown audit of 2026-11-24: it told its plugins one

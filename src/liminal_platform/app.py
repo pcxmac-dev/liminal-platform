@@ -6,7 +6,14 @@ instances and the plugins attached. 0.32.0: each plugin's status also says what 
 with (apis.py). 0.33.0: a firewall's globe loads its internet infrastructure layers through the platform's ask, as
 reads (READS: world_layer). 0.34.0: the AI plugins' fourth group, Protocols; the route a protocol plugin answers an
 agent's request on (POST, GET and DELETE /api/machines/{name}/rpc); and who may ask a hook: one only another plugin
-asks (PLUGIN_ONLY_HOOKS) is never asked over HTTP, one only its page asks (PAGE_ONLY_HOOKS) never by a plugin."""
+asks (PLUGIN_ONLY_HOOKS) is never asked over HTTP, one only its page asks (PAGE_ONLY_HOOKS) never by a plugin.
+0.36.0 (Monday list item 30, step 2; the user, 2026-11-24: "inheritance bro", "through the rust interface";
+2026-11-25: the instance forms move to the platform's Databases section, the platform the only writer of instance
+settings): PlatformApp is built on liminal-libs 1.90.0's platform core (apps/platform.py: Platform), which the charts
+and the integrator inherit too. It attaches the database plugins (PLATFORM_NEEDS), it is the one writer of their
+instance settings (PLATFORM_WRITER), it answers the Databases section's two routes (GET /api/databases/plugins, POST
+/api/databases/instances: liminal_libs.apps.databases) and, once served, serves the section as the liminal-net node
+platform-databases (cli.cmd_serve: serve_databases), which the other apps reach for a change."""
 from __future__ import annotations
 
 import contextlib
@@ -28,6 +35,8 @@ from pathlib import Path
 from liminal_libs import docker as docker_mod
 from liminal_libs import layout, lifecycle
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
+from liminal_libs.apps import databases as db_section  # the Databases section's overview and forms (liminal-libs 1.90.0)
+from liminal_libs.apps.platform import Platform  # the platform's core, the base the apps inherit (liminal-libs 1.90.0)
 from liminal_libs.machines.terminal import Output, Terminal
 from liminal_libs.web import WRITE_HEADER
 
@@ -198,7 +207,16 @@ SECTIONS = ("machine", "virtualization", "os", "cloud")  # the list's sections f
 # 0.34.0 (2026-11-18: "basically a protocol plugin that mediates MCP connections to resources by local AI agents"): a
 # fourth group, after the harnesses: the protocol plugins (liminal-libs 1.66.0's ProtocolPlugin; MCP's first)
 AI_SECTION = "ai"
-AI_GROUPS = ("inference", "harness", "protocol")  # a machine plugin's groups under AI, in the list's and tray's order
+AI_GROUPS = ("inference", "harness", "protocol")
+# 0.36.0 (Monday list item 30, step 2; the user, 2026-11-25: the instance forms move to the platform's Databases
+# section): the list's Databases section, its plugins the database plugins (liminal-libs 1.90.0's DatabasePlugin: KIND
+# "database", SECTION "databases"), held by the library's platform core and drawn beside the four sections and AI
+DATABASES_SECTION = "databases"
+DATABASE_TERMS = ("the forms of its page, one at a time: test, new, connect, share, port, credentials and forget "
+                  "(liminal_libs.apps.databases.ask); a change made only once confirmed on the page (confirm: true), "
+                  "a server off this machine only once confirmed a second time (the argument its refusal names as "
+                  "accepting it); a password never logged or echoed. The platform is the one writer of instance "
+                  "settings: the other apps ask it for a change through its node, platform-databases")  # a machine plugin's groups under AI, in the list's and tray's order
 
 
 def group_of(plugin) -> str:
@@ -687,7 +705,21 @@ CALLS = {
         "settings_changed": "after POST /api/plugins/{name}/settings kept them",
         "interface": "the hooks it answers: in GET /api/status's plugins while it is attached (the frame's plugins())",
         "api_facts": "what it learned of its APIs: with each status while it is enabled",
-        "attach": "while it is enabled and valid", "detach": "when it is disabled or not valid"}}
+        "attach": "while it is enabled and valid", "detach": "when it is disabled or not valid"},
+    # 0.36.0: a database plugin, through the library's Databases section (liminal_libs.apps.databases)
+    "database": {
+        "status": "its instances as its page draws them: GET /api/databases/plugins (databases.overview)",
+        "interface": "the hooks it answers: with each GET /api/databases/plugins",
+        "test": "POST /api/databases/instances {action: test}: an instance opened for reading and asked what it is",
+        "new_database": "POST /api/databases/instances {action: new, confirm: true}: a database made",
+        "connect_to": "POST /api/databases/instances {action: connect, confirm: true}: one that exists, kept",
+        "share": "POST /api/databases/instances {action: share, confirm: true}: who else may attach to it",
+        "set_port": "POST /api/databases/instances {action: port, confirm: true}: its port",
+        "set_credentials": "POST /api/databases/instances {action: credentials, confirm: true}: its sign-in",
+        "forget": "POST /api/databases/instances {action: forget, confirm: true}: forgotten, what it holds kept",
+        "api_facts": "what it learned of its APIs: with each GET /api/databases/plugins",
+        "attach": ("as the platform attaches its plugins, or at the section's first ask: the platform's login, "
+                   "through which the instances you add are kept")}}
 ATTRIBUTES = {  # read or looked up, never called (KIND: which of CALLS' kinds it is; chosen: whether it has installs to
     # choose from, looked up before an update, which it then checks itself; 0.34.0: RPC_HOOK, the hook its route's
     # requests are handed to, and the two words of who may ask a hook)
@@ -695,7 +727,9 @@ ATTRIBUTES = {  # read or looked up, never called (KIND: which of CALLS' kinds i
                 "keys", "apis", "api", "app", "login", "user", "distribution_name", "chosen", "GROUP",
                 "CANCEL_HOOKS", "RPC_HOOK", "PLUGIN_ONLY_HOOKS", "PAGE_ONLY_HOOKS"),
     "assistant": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "vendor", "default_model", "key_names",
-                  "keys", "apis", "api", "app")}
+                  "keys", "apis", "api", "app"),
+    "database": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "SECTION", "ENGINE", "SERVER", "TABS",
+                 "JOB_HOOKS", "apis", "api", "app", "login")}
 # the terms of the platform's ask (PlatformApp.ask; POST /api/machines/{name}/ask), as a plugin's Internal API says them
 ASK_TERMS = (f"the hooks a machine plugin answers (its tabs' too), while it is enabled, none of "
              f"{', '.join(NOT_ASKED[:-1])} and {NOT_ASKED[-1]} (routes of their own, or none); the arguments by "
@@ -744,7 +778,7 @@ def page_asks(status) -> list[str]:
     return list(found)
 
 
-class PlatformApp(App):
+class PlatformApp(Platform):
     NAME = "platform"
     TITLE = "Liminal Platform"
     ICON = "chip"  # the hardware (icons.js)
@@ -758,6 +792,13 @@ class PlatformApp(App):
     LOGIN_URL = "http://127.0.0.1:8796"
 
     ACTIVE_SECONDS = 60.0  # which plugins are active is asked again after this long (some ask WSL)
+
+    # 0.36.0 (Monday list item 30, step 2): the library's platform core (liminal_libs.apps.platform.Platform) under it.
+    # It attaches the database plugins (the machine plugins and the AI assistants are its own, as before: attach_plugins),
+    # and it is the running platform, the one writer of instance settings: a part of the platform included in another
+    # app's process reads them and asks this one for a change, through its node (serve_databases)
+    PLATFORM_NEEDS = ("database",)
+    PLATFORM_WRITER = True
 
     SETTINGS_SECONDS = 30.0  # the app's settings (the assistants' keys and plans) are read again after this long
 
@@ -795,17 +836,22 @@ class PlatformApp(App):
         "and its page is never offered it.",
         "A hook its PAGE_ONLY_HOOKS names is asked only from its page: a plugin's ask of it is refused (403); over "
         "HTTP it is asked when the login says you are there (App.present: today, a browser signed in to the "
-        "platform), else refused (401), or when the platform holds no login. The page is its asker, in a job too.")
+        "platform), else refused (401), or when the platform holds no login. The page is its asker, in a job too.",
+        "The Databases section (0.36.0) is liminal-libs' platform core: its plugins attached with the platform's login, "
+        "their instances' forms answered by GET /api/databases/plugins and POST /api/databases/instances, a change "
+        "only once confirmed. The platform is the one writer of instance settings, and serves the section as the "
+        "node platform-databases, which the other apps ask for a change.")
 
     def __init__(self, log=print, login=None, machines: dict | None = None, state: Path | None = None,
-                 assistants: dict | None = None, settings=None, terminal=None, once: bool = False):
+                 assistants: dict | None = None, settings=None, terminal=None, once: bool = False, node_factory=None):
         # its login: the user's environment variables, those saved after it started too (a setting entered on a page
         # holds across a restart), until the login app holds them (Login.save keeps one); a scratch preview's
         # (LIMINAL_PLATFORM_LOGIN=memory, 0.11.0): a copy of this process's, what the page saves kept in it alone
         if login is None:
             memory = os.environ.get(LOGIN_VAR, "").strip().lower() == "memory"
             login = EnvironmentLogin(env=dict(os.environ)) if memory else EnvironmentLogin(saved=saved_variables)
-        super().__init__(log, login)
+        # (0.36.0: node_factory, liminal_net.Node unless a test's stand-in, for the Databases section's node)
+        super().__init__(log, login, node_factory=node_factory)
         # a one-shot app (0.20.1): the command line's status and machine commands, answering and ending; a plugin it
         # attaches starts no background work of its own (a cloud's account reads, Dynamic DNS passes)
         self.once = bool(once)
@@ -1208,8 +1254,11 @@ class PlatformApp(App):
 
     def attach_plugins(self, plugins=None) -> list[str]:
         """Every platform plugin the registry loaded (the machines, the AI assistants; or `plugins`), attached
-        here but those disabled and those another app holds; returns the names attached."""
+        here but those disabled and those another app holds; returns the names attached. 0.36.0: with the registry's,
+        the database plugins too (Platform.attach_needs: the kinds it needs), which no switch disables: the other apps
+        open their databases through them."""
         self._attaching = True
+        needs = plugins is None
         if plugins is None:
             from liminal_libs.sources.registry import assistants, machines
 
@@ -1220,6 +1269,8 @@ class PlatformApp(App):
                 continue
             self.attach(p)
             out.append(p.name)
+        if needs:
+            out += [name for name in self.attach_needs() if name not in out]
         return out
 
     def instances(self) -> list[dict]:
@@ -1256,6 +1307,22 @@ class PlatformApp(App):
         return {"app": self.describe(), "machine": facts(), "disabled": sorted(off),
                 "plugins": [*(row(n, m, "machine", "chip") for n, m in self.machines().items()),
                             *(row(n, p, "assistant", "analysis") for n, p in self.assistant_plugins().items())]}
+
+    def databases_overview(self) -> dict:
+        """The Databases section as its page draws it (0.36.0): the library's overview (GET /api/databases/plugins:
+        every database plugin with its instances, `writer` true here), each plugin's row with its kind and section, the
+        plugin API it is written for, the hooks it answers and what it shares with the platform (its Internal API tab,
+        as every plugin's: internal_card); its External API is the library's (apis, apiFacts)."""
+        out = super().databases_overview()
+        held = self.database_plugins()
+        for row in out.get("plugins") or ():
+            row.update({"kind": "database", "section": DATABASES_SECTION, "pluginApi": str(row.get("api") or "")})
+            row.setdefault("icon", "database")
+            p = held.get(row.get("name"))
+            if p is not None and "error" not in row:
+                row["hooks"] = self.hooks(p)
+                row.update(self.internal_card(p, row))
+        return out
 
     def _tray_follows(self, name: str, active: bool) -> None:
         """The tray's active plugins kept in step with one plugin's state just read (0.21.0): the page asks each plugin on
@@ -1367,8 +1434,9 @@ class PlatformApp(App):
 
     def known_plugins(self) -> list:
         """Every plugin of the platform, attached or not (what a plugin asks of another, and who asks a plugin, are
-        said from them): the machine plugins, then the AI assistants."""
-        return [*self.machines().values(), *self.assistant_plugins().values()]
+        said from them): the machine plugins, then the AI assistants; then (0.36.0) the database plugins attached here
+        (the registry is not asked for them here: they are attached as the platform attaches its plugins)."""
+        return [*self.machines().values(), *self.assistant_plugins().values(), *self.section(DATABASES_SECTION).values()]
 
     def call_words(self, p) -> dict:
         """How the platform is asked one of a plugin's hooks, in words, for its Internal API's "How it is called": by
@@ -1376,9 +1444,13 @@ class PlatformApp(App):
         (ASK_TERMS). Over HTTP as the frame takes a write: from this machine (the platform listens on 127.0.0.1 and
         answers only a request addressed to it), with the write header (WRITE_HEADER: 1; without it, 403). An AI
         assistant is asked nothing by name here."""
+        header = f"with the header {WRITE_HEADER}: 1, from this machine"
+        if getattr(p, "KIND", "") == "database":  # 0.36.0: through its page's forms, never by a hook's name
+            return {"clients": (f'POST /api/databases/instances {{"plugin": {p.name!r}, "action": action, "name": '
+                                f'instance, ..., "confirm": true}} {header}'), "terms": DATABASE_TERMS}
         if not self._machine_kind(p):
             return {"terms": "the platform asks an AI assistant nothing by name"}
-        name, header = p.name, f"with the header {WRITE_HEADER}: 1, from this machine"
+        name = p.name
         return {"plugins": f"self.app.ask({name!r}, hook, [arguments])",
                 "clients": f'POST /api/machines/{name}/ask {{"hook": hook, "args": [arguments]}} {header}',
                 "jobs": (f'POST /api/machines/{name}/job {{"action": "hook", "hook": hook, "args": [arguments]}} '
@@ -1916,6 +1988,13 @@ class PlatformApp(App):
             return 200, {"machines": [self.machine_status(m) for m in self.machines().values()]}
         if method == "GET" and path == "/api/instances":
             return 200, {"instances": self.instances()}
+        if method == "GET" and path == "/api/databases/plugins":  # 0.36.0: the Databases section (the library's)
+            return 200, self.databases_overview()
+        if method == "POST" and path == "/api/databases/instances":
+            try:
+                return 200, self.instances_asked(body)
+            except db_section.Asked as e:  # the plugin's words, and what accepts its refusal (a second confirmation)
+                return e.status, e.answer()
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/settings"):
             return 200, self.save_settings(path[len("/api/plugins/"):-len("/settings")], body)
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/enabled"):
