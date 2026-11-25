@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.35.0 (2026-11-24)
+
+The platform ends within its deadline (Monday list item 38; the shutdown audit of 2026-11-24: it told its plugins one
+after another, about 54 s and more, and an ordinary end told each twice), on liminal-libs 1.87.0's lifecycle:
+- **Its plugins are told together, once.** `stop()` ends its page, then runs the library's `App.terminate` once within
+  `stop_timeout` (10 s): its login, then its parts (`parts()`: the job runner, then the plugins), then what it
+  started. The plugins are told through `lifecycle.deliver_all`: under one deadline (`PLUGINS_DEADLINE_S`, 10 s at the
+  most, no later than the stop's) and the library's grace (`App.STOP_GRACE_S`, 2.5 s); one attached here through its
+  own `signal` (its `app_stopping`, then what the library started for it), any other through its `app_stopping`,
+  enabled or not, as before. One still at it then is logged as late and what was started for it is killed with its
+  trees; one that raises is logged as before, the log in the registry's order.
+- **Its job runner is a part.** The jobs that take a cancel are asked to stop and, with the asks under way, waited
+  for (`STOP_WAIT_S`, and no later than the stop's deadline) before any plugin is told, as the frame's first part.
+- **Once.** A second stop finds the first's end and tells nobody again; `cmd_serve` stops it only when serve's own end
+  did not (until now the serve's stop and the command's both told every plugin).
+- The Internal API names `signal` among what the platform's code has called on a machine plugin (through
+  `lifecycle.deliver_all`).
+- Left: the plugins' own executors (Docker's and Kubernetes' reads: `ThreadPoolExecutor` workers, which the
+  interpreter joins at exit) are theirs to make daemon threads; the platform owns none.
+- Tests: `test_stop_deadline.py` (two stand-ins that meet only when told together, a third that ignores the stop with a
+  stand-in process killed at the deadline, the whole stop within it; a second stop telling nobody); the stop hook's,
+  the signals' and the Internal API's tests say "together" and "once".
+
 ## 0.34.4 (2026-11-24)
 
 The plugins switched off and hidden from the dock are a preference of the platform's signed-in user (Monday list item

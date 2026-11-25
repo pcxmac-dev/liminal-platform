@@ -26,7 +26,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from liminal_libs import docker as docker_mod
-from liminal_libs import layout
+from liminal_libs import layout, lifecycle
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
 from liminal_libs.machines.terminal import Output, Terminal
 from liminal_libs.web import WRITE_HEADER
@@ -83,6 +83,10 @@ JOB_REFUSAL_S = 1.0
 # 0.31.0: as the platform stops, the asks of its plugins still under way (a Start clicked as it stops) and the jobs it
 # asked to stop are waited for this long at most in all, before each plugin is told that it stops
 STOP_WAIT_S = 5.0
+# 0.35.0 (Monday list item 38; the shutdown audit of 2026-11-24: told one after another, its plugins took about 54 s
+# and more): its plugins are told together, under one deadline of this long at the most, and the library's grace
+# (App.STOP_GRACE_S) more; one still at it then is late, and what was started for it is killed with its trees
+PLUGINS_DEADLINE_S = lifecycle.PLUGINS_DEADLINE_S
 STOPPING = "the platform is stopping: its plugins are asked nothing new"  # an ask or a job refused meanwhile (503)
 # 0.34.0 (the user, 2026-11-18: "now i need an MCP plugin for platform, basically a protocol plugin that mediates MCP
 # connections to resources by local AI agents"): POST, GET and DELETE /api/machines/{name}/rpc, the platform's own port
@@ -282,6 +286,29 @@ def tabs_of(plugin) -> list[dict]:
 def tab_hooks(plugin) -> list[str]:
     """The hooks of the tabs a machine plugin declares (tabs_of), each once: reads the page asks while a tab is shown."""
     return list(dict.fromkeys(t["hook"] for t in tabs_of(plugin)))
+
+
+class _Part:
+    """One of the platform's parts (PlatformApp.parts, 0.35.0): told a signal by the frame's terminate before its
+    plugins, its work done within the deadline given."""
+
+    def __init__(self, name: str, work: Callable):
+        self.name, self._work = name, work
+
+    def signal(self, sig, deadline: float, sender=None) -> dict:  # noqa: ARG002 - the lifecycle's signature
+        self._work(sig, deadline)
+        return {"name": self.name, "signal": lifecycle.Signal.of(sig).value}
+
+
+class _Told:
+    """A plugin not attached here, told that the platform stops by its `app_stopping` alone (lifecycle.deliver's way
+    for an object with no signal of its own): it answers its own app's signal only, and this is not its app."""
+
+    def __init__(self, name: str, stopping: Callable[[], object]):
+        self.name, self._stopping = name, stopping
+
+    def app_stopping(self) -> None:
+        self._stopping()
 
 
 def cancel_hooks(plugin) -> tuple[str, ...]:
@@ -631,7 +658,9 @@ CALLS = {
         "detach": "when it is disabled or not valid",
         "app_stopping": ("when the platform stops, once the asks and the jobs that take a cancel under way are "
                          "waited for (STOP_WAIT_S at the most): each machine plugin that has it, enabled or "
-                         "not, attached or not"),
+                         "not, not attached here; all told together (0.35.0), PLUGINS_DEADLINE_S at the most"),
+        "signal": ("when the platform stops (0.35.0), each machine plugin attached here: TERM, its app_stopping "
+                   "then what was started for it; all told together (liminal_libs.lifecycle.deliver_all)"),
         "ask": ("any other hook by name: POST /api/machines/{name}/ask, and /job {action: hook} for one of its "
                 "JOB_HOOKS"),
         "rpc": ("POST, GET and DELETE /api/machines/{name}/rpc (0.34.0): the hook its RPC_HOOK names, through its "
@@ -1749,13 +1778,17 @@ class PlatformApp(App):
         return url
 
     def stop(self) -> None:
-        """The terminals closed and the page ended (the frame's stop), then each machine plugin told that the platform
-        stops (0.31.0; the user, 2026-11-16: "the plugins manage the services"; a server a plugin started by a click
-        stops when the platform stops, unless it starts at boot): its `app_stopping()` when it has one (liminal-libs
-        1.62.0's AiPlugin), one plugin after another, enabled or not, attached or not. One that raises is logged and
-        the rest are still told; they are told when the frame's stop raises, too. An ordinary end stops twice
-        (cli.cmd_serve: serve's own stop, then the command's), so the hook bears a second call. Before they are told,
-        nothing new is begun (_refuse_stopping) and what is under way is wound down (_wind_down)."""
+        """The terminals closed and the page ended, then the frame's end in good order (0.35.0: the library's
+        App.terminate, once, within stop_timeout): the login it includes, then its parts (parts: the jobs wound down,
+        then every machine plugin told that the platform stops, together), then what it started. Each plugin is told
+        (0.31.0; the user, 2026-11-16: "the plugins manage the services"; a server a plugin started by a click stops
+        when the platform stops, unless it starts at boot) through its `signal` when it is attached here (its
+        `app_stopping()`, then what was started for it ended), else its `app_stopping()` when it has one (liminal-libs
+        1.62.0's AiPlugin), enabled or not, attached or not. One that raises is logged and the rest are still told;
+        they are told when the page does not end cleanly, too. Until 0.35.0 they were told one after another, and an
+        ordinary end (cli.cmd_serve: serve's own stop, then the command's) told each twice; a second stop now finds
+        the first's end. Before they are told, nothing new is begun (_refuse_stopping) and what is under way is wound
+        down (_wind_down)."""
         with self._lock:
             self._stopping = True  # nothing new is begun from now on, until it starts again
             terms, self._terminals = list(self._terminals.values()), {}
@@ -1763,21 +1796,27 @@ class PlatformApp(App):
         for t in terms:
             t.close()
         try:
-            super().stop()
+            self._end_server()  # the page first, as before 0.35.0: nothing new comes while the rest ends
         finally:
-            try:
-                self._wind_down()
-            finally:
-                self._tell_stopping()
+            report = self.terminate(lifecycle.Signal.TERM, self.stop_timeout, plugins=False)
+            for r in report.get("objects", ()):
+                if r.get("how") == "failed" and r.get("name") in ("jobs", "plugins"):
+                    self.log(f"platform: its {r['name']} could not be ended: {r.get('why')}")
 
-    def _wind_down(self) -> None:
+    def parts(self) -> tuple:
+        """What the platform includes besides its login and its plugins, told before them in the frame's terminate
+        (0.35.0): its job runner (the jobs that take a cancel asked to stop and, with the asks under way, waited for:
+        what they start is there to be stopped), then its plugins, told together (_tell_stopping)."""
+        return (_Part("jobs", self._wind_down), _Part("plugins", self._tell_stopping))
+
+    def _wind_down(self, sig=None, deadline: float | None = None) -> None:
         """What is under way as the platform stops (0.31.0), before each plugin is told: each job that takes a cancel
         asked to stop (an install's or a model's download, whose child would otherwise outlive the platform), then the
         asks under way (_under_way) and those jobs waited for, STOP_WAIT_S at the most in all. What is still under way
         then is logged, and the plugins are told all the same; a second stop finds nothing to wait for. A setup, a
         packages' update and a job that runs to its end are not waited for: their threads end with the platform's
         process, as before, and (0.34.2) each is named in the log as running on."""
-        deadline = time.monotonic() + STOP_WAIT_S
+        deadline = min(time.monotonic() + STOP_WAIT_S, deadline if deadline is not None else math.inf)
         with self._lock:
             jobs = [(name, job) for name, job in self._setups.items() if job.running]
         asked = []
@@ -1808,20 +1847,45 @@ class PlatformApp(App):
             if job.running:
                 self.log(f"platform: {name}'s {job.action} has not ended {STOP_WAIT_S:g} s after it was asked to stop")
 
-    def _tell_stopping(self) -> None:
-        """Each machine plugin that has an `app_stopping` told that the platform stops, in the registry's order."""
+    def _tell_stopping(self, sig=lifecycle.Signal.TERM, deadline: float | None = None) -> list[dict]:
+        """Each machine plugin told that the platform stops (0.35.0: together, lifecycle.deliver_all): one attached
+        here through its `signal` (its `app_stopping`, then what the library started for it), any other through its
+        `app_stopping` when it has one; all under one deadline, PLUGINS_DEADLINE_S at the most (and no later than
+        `deadline`), and the library's grace more. One that raises is logged; one still at it then is logged as late
+        and what was started for it killed with its trees. What each came to, in the registry's order."""
         try:
             machines = self.machines()
         except Exception as e:  # noqa: BLE001 - a registry that cannot say: the platform ends all the same
             self.log(f"platform: its plugins could not be told that it stops: {type(e).__name__}: {e}")
-            return
+            return []
+        sig = lifecycle.Signal.of(sig)
+        items = []
+        from liminal_libs.sources.plugin import Plugin
+
         for name, m in machines.items():
             try:
+                if isinstance(m, Plugin) and getattr(m, "app", None) is self:
+                    items.append((name, m))  # its own signal: its app_stopping, then what was started for it
+                    continue
                 stopping = getattr(m, "app_stopping", None)
                 if callable(stopping):
-                    stopping()
-            except Exception as e:  # noqa: BLE001 - the rest are still told
+                    items.append((name, _Told(name, lambda stopping=stopping: stopping())))
+            except Exception as e:  # noqa: BLE001 - one that cannot even say: logged, the rest are still told
                 self.log(f"platform: {name} did not stop cleanly: {type(e).__name__}: {e}")
+        if not items:
+            return []
+        together = lifecycle.deadline_in(PLUGINS_DEADLINE_S)
+        if deadline is not None:
+            together = min(together, deadline)
+        out = lifecycle.deliver_all(items, sig, together, sender=self,
+                                    grace=0.0 if sig is lifecycle.Signal.KILL else self.STOP_GRACE_S)
+        for r in out:
+            if r.get("how") in ("failed", "refused"):
+                self.log(f"platform: {r['name']} did not stop cleanly: {r.get('why')}")
+            elif r.get("how") == "late":
+                self.log(f"platform: {r['name']} did not stop within {PLUGINS_DEADLINE_S:g} s and its grace: "
+                         f"{r.get('why')}")
+        return out
 
     def api(self, handler, method: str, path: str, query: dict, body: dict | None):
         body = body or {}

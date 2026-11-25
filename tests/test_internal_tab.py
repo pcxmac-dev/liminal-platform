@@ -344,7 +344,8 @@ def test_a_hook_said_to_only_read_is_asked_as_one(monkeypatch):
 PLUGIN_NAMES = {"m", "p", "a", "machine", "plugin"}  # the names the platform's code gives a plugin object
 INDIRECT = {"instances": "liminal_libs.docker.instances asks each machine plugin", "api_facts": "sources.apis.facts_of",
             "attach": "the frame's attach", "detach": "the frame's detach",
-            "rpc": "0.34.0's route: the plugin's own ask, by the name its RPC_HOOK gives"}
+            "rpc": "0.34.0's route: the plugin's own ask, by the name its RPC_HOOK gives",
+            "signal": "0.35.0's stop: liminal_libs.lifecycle.deliver_all tells each plugin attached here"}
 
 
 def _plugin(node) -> bool:

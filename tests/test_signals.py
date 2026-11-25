@@ -248,6 +248,10 @@ class Platform:
     def stop(self):
         self.stops += 1
 
+    @property
+    def stopping(self):
+        return self.stops > 0
+
 
 @pytest.mark.parametrize("number, said", [
     (15, "platform: SIGTERM came (asked to end): the server ends"),
@@ -263,7 +267,7 @@ def test_the_serve_command_ends_by_a_signal_and_stops_the_platform(monkeypatch, 
     assert cli.main(["serve", "--no-browser"]) == 0
     port, browser, until_quiet, stop = platform.served
     assert (port, browser, until_quiet) == (8775, False, None) and isinstance(stop, cli.Ending)
-    assert platform.stops == 2  # the serve's own stop, then the command's
+    assert platform.stops == 1  # the serve's own stop; the command's sees it stopped (0.35.0: once)
     assert platform.lines == [said]
     assert quiet.calls == (1 if number == 1 else 0)
     # printed: only what came before the signal (after SIGHUP its terminal is gone)

@@ -164,7 +164,8 @@ def cmd_serve(args) -> int:
         app.serve(port, open_browser=not args.no_browser, until_quiet=QUIET_SECONDS if args.until_quiet else None,
                   stop=ending)
     finally:
-        app.stop()
+        if not app.stopping:  # 0.35.0: serve's own end stopped it already (once): only a serve that never began
+            app.stop()
     return 0
 
 

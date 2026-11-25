@@ -1,9 +1,9 @@
 """0.31.0 (the user, 2026-11-16: "the plugins manage the services, the app can be started @ boot like a service"): a
 server a plugin started by a click stops when the platform stops, so the platform tells each machine plugin that it
-stops: the plugin's `app_stopping()` when it has one (liminal-libs 1.62.0's AiPlugin), after the page has ended, one
-plugin after another in the registry's order, enabled or not, attached or not. One that raises is logged and the rest
-are still told. An ordinary end stops the platform twice (the serve's own stop, then the command's): each stop tells
-each plugin once, and the hook bears the second. Before they are told, nothing new is begun (an ask or a job: 503), a
+stops: the plugin's `app_stopping()` when it has one (liminal-libs 1.62.0's AiPlugin), after the page has ended,
+enabled or not, attached or not; 0.35.0: all together under one deadline (test_stop_deadline.py), logged in the
+registry's order. One that raises is logged and the rest are still told. A second stop (the command's, after the
+serve's own) finds the first's end and tells nobody again. Before they are told, nothing new is begun (an ask or a job: 503), a
 job under way that takes a cancel is asked to stop, and those jobs and the asks under way (a Start clicked as the
 platform stops) are waited for, STOP_WAIT_S at most, so what they start is there to be stopped.
 
@@ -56,11 +56,13 @@ class Unsaid(Box):
 
 def test_each_plugin_is_told_once_that_the_platform_stops_after_its_page_has_ended(monkeypatch):
     told, lines = [], []
-    monkeypatch.setattr(App, "stop", lambda self: told.append("the page ended"))  # the frame's stop, noted in its place
+    monkeypatch.setattr(App, "_end_server",  # noted in its place, once (a second end of no server does nothing)
+                        lambda self: "the page ended" in told or told.append("the page ended"))
     machines = {"served": Served(told), "box": Box(), "other": Other(told)}  # the box: a plugin with no such hook
     app = PlatformApp(log=lines.append, machines=machines, assistants={})
     app.stop()
-    assert told == ["the page ended", "served", "other"] and lines == []  # the registry's order; nothing to say
+    assert told[0] == "the page ended" and sorted(told[1:]) == ["other", "served"]  # told together (0.35.0)
+    assert lines == []  # nothing to say
 
 
 def test_one_that_raises_is_logged_and_the_rest_are_still_told():
@@ -68,18 +70,20 @@ def test_one_that_raises_is_logged_and_the_rest_are_still_told():
     machines = {"faulty": Faulty(told), "worded": Worded(), "unsaid": Unsaid(), "served": Served(told)}
     app = PlatformApp(log=lines.append, machines=machines, assistants={})
     app.stop()
-    assert told == ["faulty", "served"]
-    assert lines == ["platform: faulty did not stop cleanly: RuntimeError: its server would not end",
-                     "platform: unsaid did not stop cleanly: OSError: it cannot say"]
+    assert sorted(told) == ["faulty", "served"]
+    assert sorted(lines) == ["platform: faulty did not stop cleanly: RuntimeError: its server would not end",
+                             "platform: unsaid did not stop cleanly: OSError: it cannot say"]
 
 
-def test_stopping_twice_tells_each_plugin_once_each_time():
+def test_stopping_twice_tells_each_plugin_once():
+    """0.35.0: the second stop of an ordinary end finds the first's (the frame's terminate, once); until then each
+    plugin was told twice."""
     told, lines = [], []
     app = PlatformApp(log=lines.append, machines={"served": Served(told), "faulty": Faulty(told)}, assistants={})
     app.stop()  # as the serve ends
-    app.stop()  # and again as its command ends (cli.cmd_serve)
-    assert told == ["served", "faulty", "served", "faulty"]
-    assert lines == ["platform: faulty did not stop cleanly: RuntimeError: its server would not end"] * 2
+    app.stop()  # and again, as a command that stops it would
+    assert sorted(told) == ["faulty", "served"]
+    assert lines == ["platform: faulty did not stop cleanly: RuntimeError: its server would not end"]
 
 
 def test_a_plugin_is_told_whether_it_is_enabled_or_attached_or_neither():
@@ -89,7 +93,7 @@ def test_a_plugin_is_told_whether_it_is_enabled_or_attached_or_neither():
     assert app.attach_plugins([served]) == ["served"] and other.app is None  # one attached, one never
     assert app.set_enabled("other", False)["state"] == "disabled"
     app.stop()
-    assert told == ["served", "other"]  # what a disabled one may still run ends with the platform too
+    assert sorted(told) == ["other", "served"]  # what a disabled one may still run ends with the platform too
 
 
 def test_the_plugins_are_told_even_when_the_page_does_not_end_cleanly(monkeypatch):
@@ -98,7 +102,7 @@ def test_the_plugins_are_told_even_when_the_page_does_not_end_cleanly(monkeypatc
     def broken(self):
         raise OSError("the server would not close")
 
-    monkeypatch.setattr(App, "stop", broken)
+    monkeypatch.setattr(App, "_end_server", broken)
     app = PlatformApp(log=lambda m: None, machines={"served": Served(told)}, assistants={})
     with pytest.raises(OSError, match="the server would not close"):
         app.stop()
@@ -170,6 +174,14 @@ class Puller(Starter):
         return {"said": "built", "ok": True}
 
 
+def _a_new_life(self, port=None, open_browser=False):
+    """The frame's start as far as its end goes (liminal-libs 1.86.0's App.start: a new life after an end), and no
+    page served."""
+    with self._term_lock:
+        self._terminating, self._terminated = False, None
+    return "its page"
+
+
 def _start(app, name="default"):
     return _api(app, "POST", "/api/machines/starter/ask", {"hook": "start", "args": [name]})
 
@@ -189,8 +201,8 @@ def test_a_job_that_takes_a_cancel_is_asked_to_stop_and_waited_for_before_the_pl
         done = _api(app, "GET", "/api/machines/puller/job")[1]
         assert (done["running"], done["cancelling"], done["cancelled"], done["ok"]) == (False, True, True, False)
         assert "pull asked to stop" in [r["what"] for r in app.traffic.recent() if r["to"] == "puller"]
-        app.stop()  # the second stop of an ordinary end: nothing left to ask or to wait for
-        assert events == ["a model: stopped as asked", "told", "told"] and len(lines) == 2
+        app.stop()  # a second stop: the first's end (0.35.0), nothing asked, waited for or told again
+        assert events == ["a model: stopped as asked", "told"] and len(lines) == 2
     finally:
         puller.go.set()
 
@@ -400,7 +412,7 @@ def test_once_it_stops_no_terminal_is_opened_and_no_command_run_until_it_starts_
     refused = (503, {"error": STOPPING})
     assert _api(app, "POST", "/api/machines/shell/terminal") == refused
     assert not shell.inside.is_set() and made == [] and events == ["told"] and lines == []
-    monkeypatch.setattr(App, "start", lambda self, port=None, open_browser=False: "its page")  # nothing is served
+    monkeypatch.setattr(App, "start", _a_new_life)  # nothing is served
     assert app.start(0) == "its page"
     assert _api(app, "POST", "/api/machines/shell/terminal")[0] == 200 and app.terminal_of("shell") is made[0]
     app.stop()
