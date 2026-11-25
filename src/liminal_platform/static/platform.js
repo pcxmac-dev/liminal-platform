@@ -298,7 +298,9 @@
   // system's (WSL's distributions, the administration and the firewalls), "cloud" for a cloud provider's account. Each
   // section is drawn when it has plugins, in this order. A server older than 0.25.0 sends no section, and one older than
   // 0.26.0 says "machine" for the virtualization and OS plugins: they stay under Machine plugins there, as before.
-  const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins']];
+  // 0.38.0 (Monday list item 34; the user, 2026-11-22: "we will classify them as continuous integration"): after Cloud,
+  // the Continuous Integration servers (Jenkins, GoCD, Buildbot), each drawn with its maker's mark (the library's icons)
+  const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins']];
   // 0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform"; "i also need 3
   // harness plugins for the platform"; "they will be classified as AI plugins"; "the other plugins are strictly
   // proprietary service plugins"): a machine plugin whose section is "ai" and whose group is one of these is drawn
@@ -649,7 +651,8 @@
     const notes = {  // a section's line under its heading (0.26.0); Machine plugins is drawn even with none
       virtualization: 'the hypervisors and container engines: their virtual machines, containers and clusters',
       os: "the operating systems: WSL's distributions, and this machine's own administration and firewall",
-      cloud: 'the cloud accounts the platform reads, each with its own key' };
+      cloud: 'the cloud accounts the platform reads, each with its own key',
+      ci: 'the Continuous Integration servers, each run in a container through the plugin you pick' };
     const sections = SECTIONS.map(([s, title]) => {
       const mine = inSection(all, s);
       if (s === 'machine') return `<h4>${title}</h4>${mine.length ? table(mine) : '<div class="muted small">None installed.</div>'}`;

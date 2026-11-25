@@ -40,6 +40,15 @@ class Distro(Box):
     SECTION = "os"
 
 
+class Builds(Box):
+    """A stand-in Continuous Integration server's plugin (0.38.0)."""
+
+    name = "builds"
+    title = "A CI server"
+    ICON = "jenkins"
+    SECTION = "ci"
+
+
 class Odd(Box):
     """A plugin naming a section the platform does not draw."""
 
@@ -49,9 +58,9 @@ class Odd(Box):
 
 
 def test_a_plugin_says_its_section_and_anything_else_is_a_machine_plugin():
-    assert SECTIONS == ("machine", "virtualization", "os", "cloud")
-    assert ([section_of(p) for p in (Cloudy(), Hyper(), Distro(), Box(), Wall(), Odd())]
-            == ["cloud", "virtualization", "os", "machine", "machine", "machine"])
+    assert SECTIONS == ("machine", "virtualization", "os", "cloud", "ci")
+    assert ([section_of(p) for p in (Cloudy(), Hyper(), Distro(), Box(), Wall(), Odd(), Builds())]
+            == ["cloud", "virtualization", "os", "machine", "machine", "machine", "ci"])
     assert section_of(object()) == "machine"  # an older library's plugin, with no SECTION at all
 
 
@@ -80,7 +89,7 @@ def test_the_page_draws_each_section_in_order_and_falls_back_without_one():
     js = (PlatformApp.STATIC / "platform.js").read_bytes()
     # the sections, in the list's order: the machine's own, virtualization, OS, cloud (then the AI plugins)
     assert (b"const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], "
-            b"['os', 'OS plugins'], ['cloud', 'Cloud plugins']];") in js
+            b"['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins']];") in js
     # a section the page does not know, or none from an older server: Machine plugins
     assert (b"const sectionOf = (m) => (isAi(m) ? 'ai' : SECTIONS.some(([s]) => s === m.section) ? m.section "
             b": 'machine');") in js
@@ -91,6 +100,6 @@ def test_the_page_draws_each_section_in_order_and_falls_back_without_one():
     page = js[js.index(b"function machineData()"):js.index(b"function tables(m)")]
     assert b"SECTIONS.map(" in page and b"None installed." in page and page.index(b"SECTIONS.map(") < page.index(b"instancesTable()")
     for note in (b"the hypervisors and container engines", b"the operating systems: WSL's distributions",
-                 b"the cloud accounts the platform reads"):
+                 b"the cloud accounts the platform reads", b"the Continuous Integration servers"):
         assert note in page, note
     assert b"isCloud" not in js  # the one section of 0.25.0 is one of four now

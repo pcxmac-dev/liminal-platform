@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.38.0 (2026-11-25)
+
+The Continuous Integration section (Monday list item 34; the user, 2026-11-22: "we will classify them as continuous
+integration", "the top 3 continous integration services that are open source"). Its plugins are Jenkins, GoCD and
+Buildbot 0.2.0, on liminal-libs 1.94.0's ContainedService (their servers in containers, through the container plugin
+you pick, each plan approved in 0.37.0's dialog).
+- `SECTIONS` gains `"ci"` after Cloud, in app.py and platform.js ("Continuous Integration plugins", with its line on
+  this machine's page). Each plugin is drawn with its maker's mark (its ICON: the library's icons.js draws jenkins,
+  gocd and buildbot). A server or a library older than this keeps them under Machine plugins, as an unknown section.
+- Tests: test_sections.py (a stand-in CI plugin's section, the page's order and line), test_ai_page.py and
+  test_ai_section.py (the five sections).
+
 ## 0.37.0 (2026-11-25)
 
 The approval dialog for a service's plans (Monday list items 34 and 35's foundation; liminal-libs 1.93.0's one "run a

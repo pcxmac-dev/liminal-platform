@@ -100,7 +100,7 @@ def _tray(app) -> list[tuple[str, str]]:
 
 def test_an_ai_plugin_says_its_group_and_ai_without_one_is_a_machine_plugin():
     assert AI_SECTION == "ai" and AI_GROUPS == ("inference", "harness", "protocol")
-    assert SECTIONS == ("machine", "virtualization", "os", "cloud")  # the four stay: AI is no fifth among them
+    assert SECTIONS == ("machine", "virtualization", "os", "cloud", "ci")  # AI is none among them (0.38.0: ci is)
     said = [(section_of(p), group_of(p))
             for p in (Server(), Second(), Coder(), Gateway(), Stray(), Bare(), Grouped(), Box())]
     assert said == [("ai", "inference"), ("ai", "inference"), ("ai", "harness"), ("ai", "protocol"), ("machine", ""),
