@@ -877,6 +877,7 @@ class PlatformApp(Platform):
         self._lock = threading.Lock()
         self._active: tuple[float, list[str]] | None = None
         self._states: dict[str, str] = {}  # each plugin's state when last asked: active | disabled | invalid (Connections)
+        self._whys: dict[str, str] = {}  # why, when last asked (0.37.0: plugin_state)
         # 0.31.0: set while it stops (_refuse_stopping), and the asks under way counted for the stop (_under_way)
         self._stopping = False
         self._asking = 0
@@ -1356,6 +1357,7 @@ class PlatformApp(Platform):
         with self._lock:
             (self._invalid.add if state == "invalid" else self._invalid.discard)(m.name)
             self._states[m.name] = state
+            self._whys[m.name] = why if state == "invalid" else ("turned off on its page or in the tray" if not on else "")
         self._tray_follows(m.name, state == "active")
         self._settle(m, state == "active")
         with self._lock:
@@ -1431,6 +1433,19 @@ class PlatformApp(Platform):
         machine plugin's `asks`, what POST /api/machines/{name}/ask and PlatformApp.ask take while it is enabled; none
         of an AI assistant's (ask takes machine plugins only)."""
         return set(self.asks(p)) if self._machine_kind(p) else set()
+
+    def plugin_state(self, name: str) -> dict:
+        """The platform's last word on a plugin (0.37.0; service-containers-design §3.10), asked nothing: its state
+        (active, disabled, invalid; unknown before its first look; not installed) and why, and where its page is. A
+        service plugin says with it why a container plugin it lists is not active."""
+        key = str(name or "")
+        with self._lock:
+            state, why = self._states.get(key), self._whys.get(key, "")
+        known = key in self.machines()
+        if state is None:
+            state = ("disabled" if not self.enabled(key) else "unknown") if known else "not installed"
+            why = why or ("turned off on its page or in the tray" if state == "disabled" else "")
+        return {"name": key, "state": state, "why": why, "page": f"#{key}" if known else ""}
 
     def known_plugins(self) -> list:
         """Every plugin of the platform, attached or not (what a plugin asks of another, and who asks a plugin, are

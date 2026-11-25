@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.37.0 (2026-11-25)
+
+The approval dialog for a service's plans (Monday list items 34 and 35's foundation; liminal-libs 1.93.0's one "run a
+service" interface; service-containers-design §3.10 and the networking design's §8.5; the user, 2026-11-23: "please more
+approvals"). Nothing needs it to work: on 0.36.0 a plan is approved on the container plugin's own page.
+- **The dialog.** A form's answer holding `approve` (the plans to approve, in order: a container plugin's, then a
+  firewall's) and `then` (the job of the plugin that answered) is not done yet. For each plan the page asks its plugin's
+  `plan_words`, draws "<its title> asks you to confirm" in that plugin's own words and steps, asks each accept the plan
+  names in turn (a second confirmation each), then sends `approve_plan` as the page, its accepts in the order
+  `plan_words` gives them (`approve_args`). Then it starts `then` as a job, its lines in its panel. Decline… declines that
+  plan and the ones left; Not now leaves them waiting on their plugins' pages. Asked only of a plugin whose asks list
+  `approve_plan`; any other answer is drawn as its words, as before. A refusal (an expired plan, one used) is said in its
+  plugin's words.
+- **`plugin_state(name)`**: the platform's last word on a plugin (active, disabled, invalid, unknown, not installed, and
+  why), asking it nothing: a service plugin says with it why a container plugin it lists is not active.
+- `approve_plan` itself is a hook only its page asks (each container and firewall plugin's PAGE_ONLY_HOOKS): the platform
+  refuses it to every plugin (403), as since 0.34.0.
+- Tests: `test_approval_dialog.py` (the library's stand-in container plugin, firewall and service plugin on a
+  PlatformApp: a plan approved from the page and refused to a plugin; plugin_state; the dialog's script by its text).
+
 ## 0.36.0 (2026-11-25)
 
 The platform's Databases section (Monday list item 30, step 2; the user, 2026-11-24: "inheritance bro", "through the

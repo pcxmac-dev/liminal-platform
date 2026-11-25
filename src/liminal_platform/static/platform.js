@@ -1232,6 +1232,8 @@
       else if (what === 'back') { dlg.step = 'fill'; dlg.accepted = []; drawDialog(); focusStep(); }  // a changed change: accepted again
       else if (what === 'yes') send();
       else if (what === 'accept') { if (typedAgain()) { dlg.accepted.push(dlg.accept); send(); } }  // a password again
+      else if (what === 'plan-yes') planYes(dlg);  // 0.37.0: the plan approved, or its next accept asked
+      else if (what === 'plan-decline') planDecline(dlg);
     });
     document.body.appendChild(el);
     return el;
@@ -1341,6 +1343,8 @@
         + (dlg.busy ? valuesList(f, values) : valuesList(f, values, true) + secretFields(f, values)) + asking
         + `<div class="row end buttons">${btn('close', 'Cancel')}${back}`
         + `${btn('accept', x.yes || 'Go on anyway', 'danger')}</div>`;
+    } else if (step === 'approve') {  // 0.37.0: a plan in its own plugin's words, then each accept it needs in turn
+      html = approvalHtml(head, btn);
     } else if (step === 'done') {
       const fault = !!(dlg.answer && typeof dlg.answer === 'object' && dlg.answer.ok === false);
       html = head(fault ? 'Done, with a fault' : 'Done') + answerHtml(dlg.answer) + `<div class="row end buttons">${btn('close', 'Done', 'accent')}</div>`;
@@ -1466,6 +1470,10 @@
       follow(d.name, 'hook', [], what, out.job.startedAt);  // 0.31.0: the job it began, which its Cancel names
       return;
     }
+    if (!err && approvable(out && out.answer)) {  // 0.37.0: a plan waits for your approval first
+      approvals(d, out.answer);
+      return;
+    }
     if (!err) {
       d.step = 'done';
       d.answer = out && out.answer;
@@ -1484,6 +1492,128 @@
       askTabNow(d.name);  // 0.27.0: a form of one of its own tabs: that tab's page asked again at once
       render();
     }
+  }
+
+  // 0.37.0, the approval dialog (liminal-libs 1.93.0's one "run a service" interface; the user, 2026-11-23: "please more
+  // approvals"): a form's answer holding `approve` (the plans to approve, in order: a container plugin's, then a
+  // firewall's) and `then` (the job of the plugin that answered, which carries them out once approved) is not done yet.
+  // For each plan the page asks its plugin's plan_words, draws "<its title> asks you to confirm" in that plugin's own
+  // words, asks each accept the plan names in turn (a second confirmation each), then sends approve_plan as the page,
+  // its accepts in the order its plan_words says (approve_args). Then it starts `then` as a job, its lines in its panel.
+  // Decline… declines that plan and the ones left. Asked only of a plugin whose asks list approve_plan (a hook only its
+  // page asks: the platform refuses it to every plugin); any other answer is drawn as words, its `said`, as before.
+  const arrayOf = (x) => (Array.isArray(x) ? x : []);  // a list as it came (strings too), [] for anything else
+  const approvable = (a) => !!a && typeof a === 'object' && Array.isArray(a.approve) && a.approve.length > 0
+    && a.approve.every((x) => x && typeof x.plugin === 'string' && typeof x.plan === 'string'
+      && arrayOf((pluginOf(x.plugin) || {}).asks).includes('approve_plan'));
+  async function approvals(d, answer) {
+    d.approval = { items: answer.approve.map((x) => ({ plugin: x.plugin, plan: x.plan })), i: 0, words: null, k: -1,
+      accepted: [], then: answer.then && typeof answer.then === 'object' ? answer.then : null, done: [] };
+    await planWords(d);
+  }
+  async function planWords(d) {  // the plan's own words, asked of its plugin as the page
+    const a = d.approval, item = a.items[a.i];
+    d.busy = true;
+    drawDialog();
+    try {
+      const got = await api('POST', `api/machines/${enc(item.plugin)}/ask`, { hook: 'plan_words', args: [item.plan] });
+      a.words = (got && got.answer) || {};
+      a.k = -1;
+      a.accepted = [];
+      d.step = Array.isArray(a.words.approve_args) ? 'approve' : 'refused';
+      d.words = d.step === 'refused' ? `${item.plugin} says no order for its approval's accepts: approve it on its own page` : '';
+    } catch (e) {  // expired, used, or declined since: said in its words
+      d.step = 'refused';
+      d.words = refusalWords(e);
+    }
+    d.busy = false;
+    if (dlg !== d) return;
+    drawDialog();
+    focusStep();
+  }
+  function approvalHtml(head, btn) {
+    const a = dlg.approval, w = a.words || {}, item = a.items[a.i];
+    const who = (pluginOf(item.plugin) || {}).title || item.plugin;
+    const accepts = listOf(w.accepts).filter((x) => x && typeof x.name === 'string');
+    const many = a.items.length > 1 ? ` <span class="muted small">(${a.i + 1} of ${a.items.length})</span>` : '';
+    const asking = `<p class="muted small" role="status">${dlg.busy ? `Asked: waiting for ${esc(who)}…` : ''}</p>`;
+    const buttons = (yes, danger) => `<div class="row end buttons">${btn('close', 'Not now')}${btn('plan-decline', 'Decline…')}`
+      + `${btn('plan-yes', yes, danger ? 'danger' : 'accent')}</div>`;
+    if (a.k >= 0 && a.k < accepts.length) {  // a second confirmation: one accept the plan needs
+      const x = accepts[a.k];
+      return head(x.title || 'Accept it?') + `<p class="muted small">${esc(who)} · ${esc(w.title || '')}${many}</p>`
+        + `<p class="words">${esc(x.words || '')}</p>` + asking + buttons(x.yes || 'Accept', true);
+    }
+    const steps = arrayOf(w.steps).filter((s) => typeof s === 'string' && s);
+    return head(`${who} asks you to confirm`) + `<p class="said">${esc(w.title || item.plan)}${many}</p>`
+      + `<p class="words">${esc(w.words || '')}</p>`
+      + (steps.length ? `<ul class="lines">${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '')
+      + (accepts.length ? `<p class="muted small">Then ${accepts.length} more confirmation${accepts.length === 1 ? '' : 's'}: `
+        + `${esc(accepts.map((x) => x.title || x.name).join('; '))}</p>` : '')
+      + `<p class="muted small">Approved once, for ten minutes: it is carried out by the plugin that asked for it.</p>`
+      + asking + buttons(accepts.length ? 'Go on' : 'Approve', !!w.danger);
+  }
+  async function planYes(d) {  // the next accept asked, or the plan approved as the page
+    const a = d.approval, w = a.words || {}, accepts = listOf(w.accepts).filter((x) => x && typeof x.name === 'string');
+    if (a.k < accepts.length) {
+      if (a.k >= 0) a.accepted.push(accepts[a.k].name);
+      a.k += 1;
+      if (a.k < accepts.length) { drawDialog(); focusStep(); return; }
+    }
+    const item = a.items[a.i];
+    const args = [item.plan, ...arrayOf(w.approve_args).map((n) => a.accepted.includes(n))];
+    d.busy = true;
+    drawDialog();
+    try {
+      await api('POST', `api/machines/${enc(item.plugin)}/ask`, { hook: 'approve_plan', args });
+      a.done.push(item);
+    } catch (e) {
+      d.busy = false;
+      d.step = 'refused';
+      d.words = refusalWords(e);
+      if (dlg === d) { drawDialog(); focusStep(); }
+      return;
+    }
+    d.busy = false;
+    a.i += 1;
+    if (a.i < a.items.length) { await planWords(d); return; }
+    await planThen(d);
+  }
+  async function planThen(d) {  // every plan approved: the job that carries them out, begun
+    const a = d.approval, then = a.then;
+    if (!then || typeof then.hook !== 'string' || !then.hook) {
+      d.step = 'done';
+      d.answer = { said: 'approved: its plugin carries it out', ok: true };
+      if (dlg === d) { drawDialog(); focusStep(); }
+      return;
+    }
+    d.busy = true;
+    drawDialog();
+    try {
+      const job = await api('POST', `api/machines/${enc(d.name)}/job`, { action: 'hook', hook: then.hook, args: arrayOf(then.args) });
+      const what = (a.words && a.words.title) || then.hook;
+      const el = $('formDialog');
+      if (el && el.open) el.close();
+      follow(d.name, 'hook', [], what, job && job.startedAt);
+    } catch (e) {
+      d.busy = false;
+      d.step = 'refused';
+      d.words = refusalWords(e);
+      if (dlg === d) { drawDialog(); focusStep(); }
+    }
+  }
+  async function planDecline(d) {  // this plan and the ones left declined: nothing is done
+    const a = d.approval;
+    d.busy = true;
+    drawDialog();
+    for (const item of a.items.slice(a.i)) {
+      try { await api('POST', `api/machines/${enc(item.plugin)}/ask`, { hook: 'decline_plan', args: [item.plan] }); }
+      catch (e) { /* expired already: nothing to decline */ }
+    }
+    d.busy = false;
+    d.step = 'done';
+    d.answer = { said: 'declined: nothing was done', ok: true };
+    if (dlg === d) { drawDialog(); focusStep(); }
   }
 
   function closed() {  // the focus back on the button that opened it, or the same one drawn again
