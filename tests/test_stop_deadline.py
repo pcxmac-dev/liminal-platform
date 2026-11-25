@@ -55,7 +55,7 @@ class Stubborn(Together):
         self.released.wait(30)
 
 
-def test_the_plugins_are_told_together_and_one_that_ignores_the_stop_is_killed_at_its_deadline(monkeypatch):
+def test_the_plugins_are_told_together_and_one_that_ignores_the_stop_is_asked_again_and_left(monkeypatch):
     monkeypatch.setattr(app_module, "PLUGINS_DEADLINE_S", 0.5)
     met, told, lines = threading.Barrier(2, timeout=5), [], []
     released = threading.Event()
@@ -84,7 +84,8 @@ def test_the_plugins_are_told_together_and_one_that_ignores_the_stop_is_killed_a
             stopper.join(10)
     assert sorted(told) == ["first", "second"]  # together: each met the other while being told
     assert took < app.stop_timeout + 1.0  # within the whole stop's deadline (and a test's margin)
-    assert (pid, "KILL") in table.sent and pid not in table.rows  # killed at its deadline
+    # all shutdowns clean (liminal-libs 1.88.4): asked again at its deadline and left, never killed, and reported
+    assert (pid, "KILL") not in table.sent and (pid, "TERM") in table.sent and pid in table.rows
     assert any(line.startswith("platform: stubborn did not stop within 0.5 s and its grace") for line in lines)
     assert not any("did not stop" in line and ("first" in line or "second" in line) for line in lines)  # ended cleanly
 
