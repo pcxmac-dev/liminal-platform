@@ -422,8 +422,23 @@ def _asked_by(who):
 
 def _handed(target):
     """`target` carrying the asker of this moment into the thread that runs it (asking.handed: a job's hand-over, read
-    where the job is started, set in its own thread); `target` itself with an older library."""
-    return asking_mod.handed(target) if asking_mod is not None else target
+    where the job is started, set in its own thread); `target` itself with an older library. The asking person's login
+    goes with it too (item 21, liminal-libs 1.88.0: it is each thread's own, so a job's thread would otherwise keep, or
+    record a licence accepted in its hook as, the platform's own login, not the person who started it)."""
+    handed = asking_mod.handed(target) if asking_mod is not None else target
+    try:
+        from liminal_libs.apps import as_user, asking_login
+    except ImportError:  # a library before 1.88.0: nothing per person to carry
+        return handed
+    login = asking_login()
+    if login is None:
+        return handed
+
+    def run(*args, **kwargs):
+        with as_user(login):
+            return handed(*args, **kwargs)
+
+    return run
 
 
 def rpc_headers(handler) -> dict[str, str]:
