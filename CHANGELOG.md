@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.34.4 (2026-11-24)
+
+The plugins switched off and hidden from the dock are a preference of the platform's signed-in user (Monday list item
+21; the user, 2026-11-19: "preferences, keys, licenses all get stored in the individual's login db"; liminal-libs
+1.88.0): the pair `platform-plugins` of their login's store when the platform's login keeps them, read once and kept
+there whole under the lock as before. With an EnvironmentLogin (today's), or a store that refuses or cannot be
+reached, plugins.json as before. A store holding none yet is given plugins.json's switches the first time, once, and
+the file is left as it was. They are the platform's login's, not a browser's: a plugin switched off is off for the
+whole process. With a library before 1.88.0, plugins.json alone. The UI's theme the Preferences plugin sets from the
+page is the asking browser's user's through the library (its frame names the asking person's login).
+
 ## 0.34.3 (2026-11-24)
 
 The review of 2026-11-21 (Monday list item 26), a P3. Enabling or disabling plugins, or hiding them from the dock, at

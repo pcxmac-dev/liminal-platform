@@ -48,6 +48,11 @@ try:  # who asks a hook, handed over in so many words (liminal-libs 1.66.0's app
 except ImportError:  # an older library hands no asker over: the platform's own gates read the two words themselves
     asking_mod = None
 PAGE = getattr(asking_mod, "PAGE", "page")  # the asker of a request from the page, and of a job it started
+try:  # a preference read and kept through the login, the file the fallback (liminal-libs 1.88.0; Monday list item 21)
+    from liminal_libs.apps.authorization import keep as keep_setting, recall as recall_setting
+except ImportError:  # an older library: plugins.json alone, as before
+    keep_setting = recall_setting = None
+PLUGINS_PAIR = "platform-plugins"  # the plugins switched off and hidden, as a preference pair of the user's login store
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
@@ -844,14 +849,40 @@ class PlatformApp(App):
     def state_dir(self) -> Path:
         return self._state if self._state is not None else platform_dir()
 
+    def _plugins_file(self) -> dict | None:
+        """The folder's plugins.json as it is kept ({"disabled": [...], "hidden": [...]}), None when there is none or
+        it cannot be read."""
+        try:
+            saved = json.loads((self.state_dir / PLUGINS_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return saved if isinstance(saved, dict) else None
+
+    def _write_plugins_file(self, value: dict) -> None:
+        folder = self.state_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        part = folder / f"{PLUGINS_FILE}.{os.getpid()}.part"
+        part.write_text(json.dumps(value, indent=1), encoding="utf-8")
+        os.replace(part, folder / PLUGINS_FILE)
+
     def _saved(self) -> None:
-        """The folder's plugins.json, read once (the lock held): the plugins disabled, and those hidden from the dock."""
+        """The plugins disabled, and those hidden from the dock, read once (the lock held). 0.34.4 (Monday list item 21;
+        the user, 2026-11-19: "preferences, keys, licenses all get stored in the individual's login db"): they are a
+        preference of the platform's signed-in user, the pair PLUGINS_PAIR of their login's store, when its login keeps
+        them; else, and with an EnvironmentLogin as today, the folder's plugins.json. A store holding none yet is given
+        the file's, once (liminal-libs' recall), and the file is left as it was. They are the platform's login's, not a
+        browser's: a plugin switched off is off for the whole process."""
         if self._disabled is None:
+            if recall_setting is not None:
+                saved = recall_setting(self.login_for(self.NAME), PLUGINS_PAIR, self._plugins_file,
+                                       label="the platform's plugins switched off and hidden")
+            else:
+                saved = self._plugins_file()
+            saved = saved if isinstance(saved, dict) else {}
             try:
-                saved = json.loads((self.state_dir / PLUGINS_FILE).read_text(encoding="utf-8"))
                 self._disabled = {n for n in saved.get("disabled", []) if isinstance(n, str)}
                 self._hidden = {n for n in saved.get("hidden", []) if isinstance(n, str)}
-            except (OSError, ValueError, AttributeError):
+            except TypeError:  # a list that is not one
                 self._disabled, self._hidden = set(), set()
 
     def disabled(self) -> set[str]:
@@ -872,16 +903,18 @@ class PlatformApp(App):
         `change` leaves them (it changes the two sets in place). Until 0.34.3 the sets were read, changed and written
         outside the lock, through one shared plugins.json.part (the review of 2026-11-21, item 26): two switches at
         once could lose one's change, and the second rename found the part file gone. The whole read-change-write is
-        now one step under the lock, through a part file of this process's own."""
+        now one step under the lock, through a part file of this process's own. 0.34.4: kept in the login's store when
+        it keeps them (`_saved`), the file otherwise, or when the store refuses or cannot be reached."""
         with self._lock:
             self._saved()
             disabled, hidden = set(self._disabled), set(self._hidden or ())
             change(disabled, hidden)
-            folder = self.state_dir
-            folder.mkdir(parents=True, exist_ok=True)
-            part = folder / f"{PLUGINS_FILE}.{os.getpid()}.part"
-            part.write_text(json.dumps({"disabled": sorted(disabled), "hidden": sorted(hidden)}, indent=1), encoding="utf-8")
-            os.replace(part, folder / PLUGINS_FILE)
+            value = {"disabled": sorted(disabled), "hidden": sorted(hidden)}
+            if keep_setting is not None:
+                keep_setting(self.login_for(self.NAME), PLUGINS_PAIR, value, self._write_plugins_file,
+                             label="the platform's plugins switched off and hidden")
+            else:
+                self._write_plugins_file(value)
             self._disabled, self._hidden = disabled, hidden
 
     def enabled(self, name: str) -> bool:
