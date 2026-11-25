@@ -40,7 +40,7 @@ def test_the_list_draws_the_ai_plugins_under_one_heading_in_four_groups():
             ": 'machine');") in js
     # the four sections stay the machine plugins' own: this machine's page lists no AI plugin, as it lists no assistant
     assert ("const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], "
-            "['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins']];") in js
+            "['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins'], ['scm', 'Source Control plugins']];") in js
     draw = _part(js, "function drawList()", "function instancesTable()")
     assert "const assistants = st.assistants || [], ai = all.filter(isAi);" in draw
     # the heading when there is an assistant or an AI machine plugin; a group's name only over plugins of its own

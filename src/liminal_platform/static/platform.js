@@ -300,7 +300,9 @@
   // 0.26.0 says "machine" for the virtualization and OS plugins: they stay under Machine plugins there, as before.
   // 0.38.0 (Monday list item 34; the user, 2026-11-22: "we will classify them as continuous integration"): after Cloud,
   // the Continuous Integration servers (Jenkins, GoCD, Buildbot), each drawn with its maker's mark (the library's icons)
-  const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins']];
+  // 0.39.0 (Monday list item 35; the user, 2026-11-22: "another class of plugins for platform, classified source
+  // control"): after it, the source control plugins (Git, GitHub, GitLab, Subversion, Mercurial), with their makers' marks
+  const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], ['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins'], ['scm', 'Source Control plugins']];
   // 0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform"; "i also need 3
   // harness plugins for the platform"; "they will be classified as AI plugins"; "the other plugins are strictly
   // proprietary service plugins"): a machine plugin whose section is "ai" and whose group is one of these is drawn
@@ -652,7 +654,8 @@
       virtualization: 'the hypervisors and container engines: their virtual machines, containers and clusters',
       os: "the operating systems: WSL's distributions, and this machine's own administration and firewall",
       cloud: 'the cloud accounts the platform reads, each with its own key',
-      ci: 'the Continuous Integration servers, each run in a container through the plugin you pick' };
+      ci: 'the Continuous Integration servers, each run in a container through the plugin you pick',
+      scm: 'the version control systems: their clients and repositories here, the hosted services, and servers run in a container' };
     const sections = SECTIONS.map(([s, title]) => {
       const mine = inSection(all, s);
       if (s === 'machine') return `<h4>${title}</h4>${mine.length ? table(mine) : '<div class="muted small">None installed.</div>'}`;

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.39.0 (2026-11-25)
+
+The Source Control section (Monday list item 35; the user, 2026-11-22: "another class of plugins for platform,
+classified source control"). Its plugins are Git, GitHub, GitLab, Subversion and Mercurial 0.1.0: each client's
+version and the repositories under the folders you name; GitHub and GitLab's hosted services; the Git server, GitLab
+CE, svnserve and hg serve on liminal-libs 1.94.0's ContainedService (in containers alone, through the container
+plugin you pick).
+- `SECTIONS` gains `"scm"` after Continuous Integration, in app.py and platform.js ("Source Control plugins", with
+  its line on this machine's page). Each plugin names its maker's mark as its ICON (git, github, gitlab, subversion,
+  mercurial): the library's icons.js draws none of the five yet, so the tray shows no mark for them until it does.
+  A server or a library older than this keeps them under Machine plugins, as an unknown section.
+- Tests: test_sections.py (a stand-in source control plugin's section, the page's order and line), test_ai_page.py
+  and test_ai_section.py (the six sections).
+
 ## 0.38.0 (2026-11-25)
 
 The Continuous Integration section (Monday list item 34; the user, 2026-11-22: "we will classify them as continuous

@@ -199,8 +199,10 @@ def _accepting(e: Exception) -> str | None:
 
 
 # the list's sections for machine plugins, in its order (0.25.0, 0.26.0); 0.38.0 (Monday list item 34; the user,
-# 2026-11-22: "we will classify them as continuous integration"): "ci" after Cloud, Jenkins, GoCD and Buildbot's
-SECTIONS = ("machine", "virtualization", "os", "cloud", "ci")
+# 2026-11-22: "we will classify them as continuous integration"): "ci" after Cloud, Jenkins, GoCD and Buildbot's;
+# 0.39.0 (Monday list item 35; the user, 2026-11-22: "another class of plugins for platform, classified source
+# control"): "scm" after it, Git, GitHub, GitLab, Subversion and Mercurial's
+SECTIONS = ("machine", "virtualization", "os", "cloud", "ci", "scm")
 # 0.31.0 (the user, 2026-11-16: "i need 3 plugins for inference serving local models on the platform, :: lama.cpp,
 # ollama and vLLM, i also need 3 harness plugins for the platform :: OpenCode, Aider, and Continue"; "they will be
 # classified as AI plugins"; "the other plugins are strictly proprietary service plugins"): the list's AI section. The
@@ -239,7 +241,8 @@ def section_of(plugin) -> str:
     1.51.0's `MachinePlugin.SECTION`: "virtualization" for a hypervisor's or a container engine's (Hyper-V, libvirt, LXD,
     Docker, Kubernetes, Windows containers), "os" for an operating system's (WSL's distributions, the Windows and Linux
     administration and firewalls), "cloud" for a cloud provider's account, and from 0.38.0 "ci" for a Continuous
-    Integration server's (Jenkins, GoCD, Buildbot: liminal-libs 1.94.0's ContainedService). 0.31.0 (2026-11-16: "they will be classified
+    Integration server's (Jenkins, GoCD, Buildbot: liminal-libs 1.94.0's ContainedService), and from 0.39.0 "scm" for
+    a source control system's (Git, GitHub, GitLab, Subversion, Mercurial). 0.31.0 (2026-11-16: "they will be classified
     as AI plugins"): "ai" for a model server's, a harness's or (0.34.0) a protocol plugin's, which says its group beside
     it (group_of). Anything else ("ai" with no group the platform draws too), or none from an older library or plugin,
     is "machine"."""
