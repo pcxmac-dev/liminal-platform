@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.40.0 (2026-11-26, provisional: renumbered when it lands)
+## 0.40.0 (2026-11-26)
 
 What each plugin needs of this machine (Monday list item 19, part two, release 1; the user, 2026-11-18: every plugin
 has a "needs" requirement, the operating system, the hardware platform, GPUs, the internet; a plugin whose needs this
