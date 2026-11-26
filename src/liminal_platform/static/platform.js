@@ -932,6 +932,7 @@
     else box.innerHTML = tables(m) + statTables(m);
     const again = focus ? box.querySelector(focus) : null;
     if (again) again.focus({ preventScroll: true });
+    sideRows();  // 0.39.2: the rows drawn again marked, the pick told anew
   }
   const pickSel = (cls, el, extra) => `${cls}[data-table="${CSS.escape(el.dataset.table)}"]${extra || ''}`;
   function toggleGroup(el) {  // as drawn: an open one closed, a closed one opened (a heading open at first, closed: kept closed)
@@ -3421,12 +3422,26 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     return `database:${sel}/${tab}`;
   }
   // a row's key: what its table's details name it, else its table and the words of its first cells that are not
-  // counts (a count changes from answer to answer, what the row is does not)
+  // counts (a count changes from answer to answer, what the row is does not); where those words are another row's
+  // too (two programs listening on one address, told apart by their ports), every cell's words, the counts with them
   const cellWords = (c) => (c && typeof c === 'object' ? String(c.text ?? c.title ?? '') : String(c ?? ''));
+  const wordsKey = (t, r) => r.filter((c, j) => !(t.columns[j] && t.columns[j].num)).slice(0, 3).map(cellWords).join('|');
+  const sharedWords = new WeakMap();  // a table answered: the word keys more than one of its rows has
+  function wordsShared(t) {
+    let s = sharedWords.get(t);
+    if (!s) {
+      const seen = new Set();
+      s = new Set();
+      (t.rows || []).forEach((r) => { const w = wordsKey(t, r); if (seen.has(w)) s.add(w); seen.add(w); });
+      sharedWords.set(t, s);
+    }
+    return s;
+  }
   function rowKey(t, r, i) {
     const d = Array.isArray(t.details) ? t.details[i] : null;
     if (d && typeof d === 'object' && d.key) return `${t.title || ''}|${d.key}`;
-    return `${t.title || ''}|${r.filter((c, j) => !(t.columns[j] && t.columns[j].num)).slice(0, 3).map(cellWords).join('|')}`;
+    const w = wordsKey(t, r);
+    return `${t.title || ''}|${wordsShared(t).has(w) ? r.map(cellWords).join('|') : w}`;
   }
   // what the middle picked tells: a globe's item from the globe drawn now, a row from its table's details, else its cells
   function pickFind(key) {
@@ -3702,6 +3717,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     if (ac) redrawKept(ac, apiInner(m), drawnApis, m.name);  // what it learned of its APIs
     if (ic) redrawKept(ic, internalInner(m), drawnInternal, m.name);  // 0.32.0: what it shares (its page's asks follow)
     drawSide();
+    sideRows();  // 0.39.2: the tables drawn again from this answer: their rows marked, the pick told anew
     const sub = list.querySelector(`.item[data-select="${CSS.escape(m.name)}"] .sub`);
     if (sub) sub.textContent = stateLine(m);
   }

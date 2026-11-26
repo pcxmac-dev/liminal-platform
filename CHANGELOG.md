@@ -15,6 +15,9 @@ every page of the platform's.
   places, hosts and routers), else by its cells under their headings. A row is keyed by what it is, not where it is, so
   the pick stays on a port as the busiest ports reorder, told anew with every answer, and marked when its row has gone.
   A table marked `pick: false` (the GeoIP sources' buttons) picks nothing.
+  Rows whose first words are alike (two programs listening on one address) are keyed by all their cells, so each
+  is picked on its own. Tables drawn again by a status answer or a group opened or closed are marked again (reached
+  by Tab, the pick highlighted) and the pick told anew from them.
 - The globe's place, home, router or feature picked (a click, a tap, Enter) is told there too, sharing the one pick with
   the rows.
 - Connections: the part picked is told under the tool (its links among its facts), Unpick or Escape letting it go.

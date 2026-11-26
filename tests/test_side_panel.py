@@ -54,7 +54,8 @@ def test_a_tab_pages_rows_carry_their_keys_and_details():
     assert "pickSpecs.clear();" in st and "if (d && typeof d === 'object') pickSpecs.set(key, d);" in st
     assert "t.rows.map((r, ri) => `<tr${pickAttr(t, r, ri)}>" in st
     key = body("function rowKey(t, r, i) {")
-    assert "if (d && typeof d === 'object' && d.key) return" in key and "!(t.columns[j] && t.columns[j].num)" in key
+    assert "if (d && typeof d === 'object' && d.key) return" in key and "wordsShared(t).has(w) ? r.map(cellWords)" in key
+    assert "!(t.columns[j] && t.columns[j].num)" in JS
     tables = body("function pageTables(p) {")
     assert "details: kept.map(([, d]) => d)" in tables  # a row left out takes its details with it
 
@@ -88,3 +89,17 @@ def test_connections_part_is_told_under_the_tool():
 
 def test_codebase_is_mounted_with_the_panel():
     assert "panel: sidePanel, scope: 'codebase' });" in JS
+
+
+def test_rows_alike_in_their_words_are_told_apart_by_every_cell():
+    """Two programs listening on one address (tcp 135 and tcp 5040, both svchost.exe): their first words are alike,
+    so each is keyed by all its cells, the ports with them; a row alone in its words keeps the key a count cannot move."""
+    shared = body("function wordsShared(t) {")
+    assert "if (seen.has(w)) s.add(w); seen.add(w);" in shared and "sharedWords.set(t, s);" in shared
+
+
+def test_the_tables_redrawn_by_an_answer_or_a_group_are_marked_again():
+    """A status answer redraws a Main tab's tables (redrawShown) and a group opened or closed redraws them too
+    (redrawTables): the new rows are marked (tabindex, .picked) and the pick told anew from them."""
+    assert "sideRows();  // 0.39.2: the tables drawn again from this answer" in body("function redrawShown(m) {")
+    assert "sideRows();  // 0.39.2: the rows drawn again marked" in body("function redrawTables(name, focus) {")
