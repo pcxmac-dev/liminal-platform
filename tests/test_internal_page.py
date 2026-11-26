@@ -160,7 +160,7 @@ def test_the_platforms_own_two_views_are_an_entry_under_this_machine():
     assert "const mine = ownShown();" in data and first in data
     assert data.index("mine ? ownData()") < data.index("m ? pluginData(m)")
     side = _between(js, "function drawSide() {", "function oldAddress() {")
-    assert side.index("if (ownShown()) { side.innerHTML = ownSide(); return; }") < side.index("m ? pluginSide(m)")
+    assert side.index("if (ownShown()) { setSide(sideScope(), ownSide()); return; }") < side.index("m ? pluginSide(m)")
 
 
 def test_the_own_entrys_side_counts_its_plugins_as_the_drawing_does():
