@@ -419,3 +419,31 @@ html.touch .conn-picture .node circle.hit { pointer-events: all; }
 .db-said ul { margin: 4px 0; padding-left: 18px; font-size: 12px; }
 table.db-instances .sub { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 @media (max-width: 700px) { .db-acts { white-space: normal; } .db-form { max-width: none; } }
+
+/* 0.40.0: the plugins' needs (Monday list item 19, part two): the list's Not listed line, the Plugins tab of Connections,
+   the Needs list on the right. needs.js (liminal-libs 1.103.0) adds its own .nd-* rules; these hold without it too.
+   Shaded is "not for this machine" alone, red "not met now" (said in words as well: never colour alone) */
+.not-listed { margin: 8px 0 0; }
+.app-list .item.unlisted { opacity: .55; }
+button.linklike { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; text-decoration: underline; }
+.nd-cannot { opacity: .45; }
+.needs-list { margin: 0 0 6px; padding: 0; list-style: none; font-size: 12px; }
+.needs-list li { margin: 3px 0; padding-left: 6px; overflow-wrap: anywhere; }
+.needs-list li.nd-now { border-left: 3px solid var(--down); }
+.needs-list li.nd-now .muted { color: var(--down); }
+.needs-list .mark { display: inline-block; width: 1.2em; text-align: center; }
+.needs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.needs-switch { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.needs-switch button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+table.needs-table { table-layout: fixed; width: 100%; }
+table.needs-table td { vertical-align: top; overflow-wrap: anywhere; }
+table.needs-table .needs-icon { width: 26px; }
+table.needs-table tr.nd-now td:first-child { box-shadow: inset 3px 0 0 var(--down); }
+table.needs-table tr.nd-now .chip { color: var(--down); }
+table.needs-table tr.picked td { background: var(--hover); }
+.data-head .tabs .conn-tab { white-space: nowrap; }
+@media (max-width: 700px) {
+  table.needs-table .needs-icon { display: none; }
+  table.needs-table th:nth-child(3), table.needs-table td:nth-child(3) { width: 30%; }
+  .needs-head { flex-direction: column; align-items: flex-start; }
+}

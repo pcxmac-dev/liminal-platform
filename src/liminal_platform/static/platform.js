@@ -199,13 +199,36 @@
   // a plugin's state (the user: "if a plugin is not in a valid state it has to be disabled, and thus shaded out on the left
   // side"): disabled by the user (the switch, the tray's right click), or not valid (set up for Liminal: its own word, why),
   // disabled until it is; both shaded in the list and out of the tray
+  // -- what the plugins need of this machine (0.40.0; Monday list item 19, part two, release 1; the user, 2026-11-18: "a
+  // plugin whose needs this machine cannot meet is not shown in the left-most list", and Connections gets a tab of all of
+  // the plugins, "red for those that could but do not meet current conditions, shaded for those that never can here"):
+  // each plugin's needs as the platform judged them, its status's own (`needs`) or GET api/needs's (liminal-libs 1.103.0's
+  // frame route, the platform's report: asked every NEEDS_EVERY s while the page is shown, NEEDS_TAB_EVERY s while the
+  // Plugins tab is), drawn with the library's needs.js where it is there and plainly where it is not. One whose needs say
+  // met: false is out of the list and the tray, switch on or off (the user's answer 6). The older mixes: a platform or a
+  // liminal-libs from before it answers 404 (the list then leaves out what its status says is not for this machine, the
+  // page says to start it again and asks no more until a reload); a platform process from before 0.40.0 on the new
+  // library answers with held: false (the list filtered by the route, no switch drawn, the words under the list); an
+  // older page draws this server's new state as not valid (valid: false; of the machine, applies: false) ---------------
+  const NEEDS_EVERY = 30, NEEDS_TAB_EVERY = 15;
+  const NEEDS_OLDER = 'This platform, or the liminal-libs it runs on, was started before it judged its plugins’ needs: start it again to see them.';
+  const NEEDS_UNHELD = 'This platform judges its plugins’ needs but does not hold them by them yet: start it again.';
+  const NEEDS_NO_SWITCH = 'This platform does not take the internet switch yet: start it again.';
+  let needsAnswer = null, needsGone = false, needsTimer = null, needsAsking = false, needsAt = 0, needsPicked = '';
+  const ND = () => window.LiminalNeeds || null;  // the library's drawing (needs.js); without it, the plain one below
+  const needsRow = (name) => ((needsAnswer && Array.isArray(needsAnswer.plugins) ? needsAnswer.plugins : []).find((p) => p && p.name === name)) || null;
+  const needsOf = (m) => (m && m.needs && typeof m.needs === 'object' ? m.needs : ((m && needsRow(m.name)) || {}).needs) || null;
+  const unmetMachine = (m) => { const n = needsOf(m); return !!n && n.met === false && n.sort === 'machine'; };
+  const unmetNow = (m) => { const n = needsOf(m); return !!n && n.met === false && n.sort !== 'machine'; };
+  const unlisted = (m) => !!m && (unmetMachine(m) || unmetNow(m) || notHere(m));  // out of the list, the tray and This machine's tables
   const userOff = (m) => m.enabled === false;
-  const invalid = (m) => !userOff(m) && (m.state === 'invalid' || m.valid === false);
+  const invalid = (m) => !userOff(m) && (m.state === 'invalid' || m.state === 'unmet' || m.valid === false);
   const off = (m) => userOff(m) || invalid(m);
-  const whyOf = (m) => m.why || 'not valid';
-  const notHere = (m) => invalid(m) && !!(m.status && m.status.applies === false);  // not for this machine at all: no setup offered
-  const chipOf = (m) => (pending(m) ? '<span class="chip wait">loading</span>' : off(m) ? '<span class="chip">disabled</span>' : '<span class="chip up">active</span>');
-  const stateLine = (m) => (pending(m) ? 'loading…' : userOff(m) ? 'disabled' : notHere(m) ? `not for this machine: ${whyOf(m)}` : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
+  const whyOf = (m) => m.why || (unmetMachine(m) || unmetNow(m) ? needsOf(m).why : '') || 'not valid';
+  // not for this machine at all: no setup offered (0.40.0: its needs say so too, before its status is in)
+  const notHere = (m) => (invalid(m) && !!(m.status && m.status.applies === false)) || (!userOff(m) && unmetMachine(m));
+  const chipOf = (m) => (pending(m) ? '<span class="chip wait">loading</span>' : !userOff(m) && unmetNow(m) ? '<span class="chip">not met now</span>' : off(m) ? '<span class="chip">disabled</span>' : '<span class="chip up">active</span>');
+  const stateLine = (m) => (pending(m) && !unmetMachine(m) && !unmetNow(m) ? 'loading…' : userOff(m) ? 'disabled' : notHere(m) ? `not for this machine: ${whyOf(m)}` : unmetNow(m) ? `not met now: ${whyOf(m)}` : invalid(m) ? `disabled: ${whyOf(m)}` : (m.status && m.status.summary) || 'active');
   function say(name, text) {  // a plugin's trouble, at the head of its page
     const el = $(`err-${name}`);
     if (el) el.textContent = text || '';
@@ -217,7 +240,7 @@
   // protocols)
   function drawRail() {
     const sel = selected();
-    const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden)); });
+    const items = ((tray && tray.items) || []).filter((i) => { const p = i.kind === 'plugin' && st ? pluginOf(i.id) : null; return i.kind === 'plugin' && !(p && (off(p) || p.hidden || unlisted(p))); });
     // a plugin's icon: its name and the right click in its tooltip; a long press (menu.js, 0.17.0) opens the same menu,
     // headed by its name alone (its data-tip)
     rail.innerHTML = `<button type="button" id="railChip" class="master${sel === 'machine' ? ' active' : ''}" data-select="machine" title="${esc((tray && tray.title) || 'Platform')}: this machine">${icon('chip', 30)}</button>`
@@ -319,7 +342,7 @@
     const item = (id, ic, title, sub, cls = '', more = '') => `<button type="button" class="item${sel === id ? ' active' : ''}${cls}"${more} data-select="${esc(id)}">${icon(ic, 20)}
       <span class="what"><span>${esc(title)}</span><span class="sub">${esc(sub)}</span></span></button>`;
     const f = st.machine;
-    const all = Object.values(st.machines);
+    const everyone = Object.values(st.machines), all = everyone.filter((m) => !unlisted(m));  // 0.40.0: what can run here
     // one not answered yet (0.21.0) keeps its place, dimmed; the one whose answer just came pops in
     const cls = (p) => (pending(p) ? ' pending' : off(p) ? ' off' : '') + (popOf(p.name) || { cls: '' }).cls;
     const more = (p) => (popOf(p.name) || { style: '' }).style;
@@ -327,7 +350,7 @@
     // 0.31.0: every AI plugin under the one heading, each in its group: the assistants (a vendor's service each), then
     // the machine plugins that serve local models, then the harnesses, then (0.34.0) the protocols. A group is drawn
     // when it has plugins
-    const assistants = st.assistants || [], ai = all.filter(isAi);
+    const assistants = (st.assistants || []).filter((a) => !unlisted(a)), ai = all.filter(isAi);
     const assistant = (a) => item(a.name, a.icon || 'analysis', a.title,
       pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a));
     list.innerHTML = `<h2>Platform</h2><div class="muted small">the software and hardware under the framework</div>${loadingLine()}`
@@ -337,7 +360,7 @@
       + (window.LiminalInternal ? item(OWN, 'sort', st.app.title || 'Platform', 'its own External and Internal API')
         : '')
       // the four sections' plugins; none but AI plugins (0.31.0: drawn below), the line saying that none is installed
-      + (all.some((m) => !isAi(m)) ? SECTIONS.map(([s, title]) => {
+      + (everyone.some((m) => !isAi(m)) ? SECTIONS.map(([s, title]) => {
         const mine = inSection(all, s);
         return mine.length ? `<h4>${title}</h4>` + mine.map(drawn).join('') : '';
       }).join('')
@@ -348,7 +371,21 @@
         + AI_GROUPS.map(([g, title]) => {
           const mine = ai.filter((m) => m.group === g);
           return mine.length ? `<h5 class="group">${title}</h5>` + mine.map(drawn).join('') : '';
-        }).join('') : '');
+        }).join('') : '')
+      + notListed(item);  // 0.40.0: how many are not listed, and the one shown by its address
+  }
+
+  // 0.40.0: under the sections, how many plugins the list leaves out and where all of them are; a platform from before
+  // it said in so many words; and the one shown by its address that is not listed, at the foot, dimmed, while shown
+  function notListed(item) {
+    const out = [...Object.values(st.machines), ...(st.assistants || [])].filter(unlisted);
+    const cannot = out.filter((p) => unmetMachine(p) || notHere(p)).length, now = out.length - cannot;
+    const parts = [cannot ? `${cannot} not for this machine` : '', now ? `${now} not met now` : ''].filter(Boolean);
+    const older = needsGone ? NEEDS_OLDER : needsAnswer && needsAnswer.held === false ? NEEDS_UNHELD : '';
+    const here = out.find((p) => p.name === selected());
+    return (parts.length ? `<div class="muted small not-listed">Not listed: ${parts.join(', ')}. <button type="button" class="linklike" data-select="${CONNECTIONS}/plugins">Connections, Plugins</button> lists them all.</div>` : '')
+      + (older ? `<div class="muted small not-listed">${esc(older)}</div>` : '')
+      + (here ? item(here.name, here.icon || 'chip', here.title, stateLine(here), ' off unlisted') : '');
   }
 
   // -- the Databases section (0.36.0; Monday list item 30, step 2; the user, 2026-11-25: the instance forms move to the
@@ -646,7 +683,7 @@
   }
 
   function machineData() {
-    const all = Object.values(st.machines);
+    const all = Object.values(st.machines).filter((m) => !unlisted(m));  // 0.40.0: what the list lists
     const rows = (list) => list.map((m) => `<tr class="pick" data-select="${esc(m.name)}"><td>${icon(m.icon || 'chip', 18)}</td>
       <td>${esc(m.title)}</td><td class="muted">${esc(m.version || '')}</td><td>${chipOf(m)}</td><td>${esc(stateLine(m))}</td></tr>`).join('');
     const table = (list) => `<table class="list"><thead><tr><th></th><th>Plugin</th><th>Version</th><th>State</th><th>What it says</th></tr></thead><tbody>${rows(list)}</tbody></table>`;
@@ -663,7 +700,33 @@
     }).join('');
     return `<h2>${esc(st.machine.host)}</h2><div class="muted small">this machine, and the plugins that set it up for the framework</div>
       ${sections}${dbTable()}
-      ${instancesTable()}`;
+      ${instancesTable()}${needsFacts()}`;
+  }
+
+  // 0.40.0: what the plugins' needs are read against, this machine as the platform read it (GET api/needs's facts)
+  function needsFacts() {
+    if (needsGone) return '';
+    const head = '<h4>What the plugins’ needs are read against</h4><div class="muted small">this machine as the platform read it, nothing sent '
+      + '<button type="button" data-needs="again">Read again</button></div><p class="error" id="err-needs-facts"></p>';
+    const f = needsAnswer && needsAnswer.facts;
+    if (!f || typeof f !== 'object') return `${head}<div class="muted small">Asking the platform…</div>`;
+    const o = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+    const yes = (v) => (v === true ? 'yes' : v === false ? 'no' : 'not known here');
+    const gib = (n) => (typeof n === 'number' && n > 0 ? `${(n / 2 ** 30).toFixed(n >= 10 * 2 ** 30 ? 0 : 1)} GiB` : 'not known here');
+    const k = o(f.kernel), w = o(f.windows), v = o(f.virtualization), mem = o(f.memory), net = o(f.internet), disk = o(f.disk);
+    const feats = Object.entries(o(w.features)).map(([n, s]) => `${n} ${s === 1 ? 'on' : s === 2 ? 'off' : s === 3 ? 'absent' : String(s)}`);
+    const flags = Object.entries(o(f.cpu)).filter(([, x]) => x === true).map(([n]) => n);
+    const rows = [['Kernel', k.words || [k.name, k.release].filter(Boolean).join(' ')], ['Architecture', f.architecture],
+      ...(f.system === 'windows' ? [['Windows', [w.product, w.display, w.build ? `build ${w.build}${w.ubr ? `.${w.ubr}` : ''}` : ''].filter(Boolean).join(' · ')],
+        ['Windows features', feats.join(', ') || (w.featuresRead ? 'none asked' : 'being read')]] : []),
+      ['Virtualization', `extensions ${yes(v.extensions)}, SLAT ${yes(v.slat)}, firmware ${yes(v.firmware)}, hypervisor ${yes(v.hypervisor)}${v.vm ? `; a virtual machine (${v.vm})` : ''}`],
+      ['Processor features', flags.join(', ') || 'none read'], ['Memory', `${gib(mem.installed)} installed, ${gib(mem.usable)} usable`],
+      ...(f.system === 'linux' ? [['WSL', f.wsl], ['Init', f.init || 'not known here'], ['Container', f.container || 'none']] : []),
+      ['The internet', `${net.state || 'not known here'}${net.by ? ` (${net.by})` : ''}${net.why ? `: ${net.why}` : ''}`],
+      ['Free on the data folder', disk.free ? `${gib(disk.free)} (${disk.path || ''})` : 'not read'], ['Read', f.read || '']];
+    const unknown = Object.entries(o(f.why)).map(([n, why]) => `<dt>${esc(n)}</dt><dd class="muted">${esc(why)}</dd>`).join('');
+    return `${head}<dl class="facts">${rows.filter(([, x]) => x !== undefined && x !== '').map(([n, x]) => `<dt>${esc(n)}</dt><dd>${esc(x)}</dd>`).join('')}</dl>`
+      + (unknown ? `<h5 class="group">Not known here</h5><dl class="facts">${unknown}</dl>` : '');
   }
 
   function tables(m) {
@@ -1644,8 +1707,10 @@
   }
 
   function switchRow(m) {
-    const on = !off(m), held = invalid(m);  // not valid: off until it is, whatever the switch says
-    const enable = `<label class="switch-row"${held ? ` title="${esc(notHere(m) ? `Not for this machine: ${whyOf(m)}` : `Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? (notHere(m) ? 'Disabled: not for this machine' : 'Disabled: not valid') : 'Disabled'}</label>`;
+    // not valid: off until it is, whatever the switch says; 0.40.0: its needs unmet, held too (switch on or off), its
+    // kept value unchanged
+    const on = !off(m) && !unlisted(m), held = invalid(m) || unlisted(m), now = !notHere(m) && unmetNow(m);
+    const enable = `<label class="switch-row"${held ? ` title="${esc(notHere(m) ? `Not for this machine: ${whyOf(m)}` : now ? `Not met now: ${whyOf(m)}` : `Disabled while not valid: ${whyOf(m)}`)}"` : ''}><button type="button" class="switch" role="switch" aria-checked="${on}" aria-label="${esc(m.title)}" data-toggle="${esc(m.name)}"${held ? ' disabled' : ''}></button>${on ? 'Enabled' : held ? (notHere(m) ? 'Disabled: not for this machine' : now ? 'Disabled: not met now' : 'Disabled: not valid') : 'Disabled'}</label>`;
     // 0.10.2 (the user: "all plugins need a hide switch next to enable for the dock on the right"); 0.10.3 (the user: "the
     // dock hidden visible switch literally needs to say hidden (not lit) and visible (lit)"; "just hidden / visible"): lit,
     // its icon is on the right once the plugin is active; not lit, hidden while the plugin is as it was
@@ -1791,7 +1856,11 @@
       // about startup"): what it would do where it applies, in its own tables (the Linux admin plugin's sections, the unit it
       // installs at boot), read only: a plugin not valid here is asked nothing, so no button is drawn
       return `${head}<p class="muted">Not for this machine: ${esc(whyOf(m))}. It stays disabled here; no setup is offered, since none can make it valid on this machine.</p>`
-        + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '');
+        + needsTable(m) + `<div id="tables-${esc(m.name)}">${statTables(m)}</div>` + (m.setup || jobs[m.name] ? setupLog(m) : '');
+    }
+    if (unmetNow(m)) {  // 0.40.0: a need of the moment: asked nothing until it is met, each unmet one with what would meet it
+      return `${head}<p class="muted">Not met now: ${esc(whyOf(m))}. It is asked again once its needs are met.</p>`
+        + needsTable(m) + (m.setup || jobs[m.name] ? setupLog(m) : '');
     }
     if (invalid(m)) {
       // 0.29.0 (the user: "still need linux firewall"): its own tables too, read only, as one not for this machine has
@@ -1805,6 +1874,34 @@
     drawnPaths[m.name] = pathsHtml(m);
     return head + settingsButton(m) + actionsHtml(m) + optionsHtml(m) + chartsBlock(m) + installHtml(m) + `<div id="paths-${esc(m.name)}">${drawnPaths[m.name]}</div>`
       + `<div id="tables-${esc(m.name)}">${tables(m)}${statTables(m)}</div>` + (logged || jobs[m.name] ? setupLog(m) : '');
+  }
+
+  // 0.40.0: a plugin's needs on its Main: the library's table (needs.js), else its unmet ones plainly, each with its words
+  function needsTable(m) {
+    const n = needsOf(m);
+    if (!n) return '';
+    if (ND()) return `<div class="plugin-needs">${ND().table(n)}</div>`;
+    const rows = (Array.isArray(n.rows) ? n.rows : []).filter((r) => r && r.state === 'unmet');
+    return `<ul class="needs-list">${rows.map((r) => `<li class="${r.sort === 'machine' ? 'nd-cannot' : 'nd-now'}">${esc(r.sort === 'machine' ? 'not for this machine' : 'not met now')}: ${esc(r.said || '')}${r.words ? ` (${esc(r.words)})` : ''}${r.how ? `; ${esc(r.how)}` : ''}</li>`).join('')}</ul>`;
+  }
+
+  // 0.40.0: the right column's Needs list: each required one ✓, ✗ or ? with its words, then its parts' and what it
+  // prefers; or that it needs nothing, or has not said
+  function needsList(m) {
+    const n = needsOf(m);
+    if (!n) return '';
+    const rows = (Array.isArray(n.rows) ? n.rows : []).filter((r) => r && typeof r === 'object');
+    const marks = { met: ['✓', 'met'], unmet: ['✗', ''], unknown: ['?', 'not known here'], na: ['–', 'not this system’s'] };
+    const li = (r) => {
+      const [mark, said] = marks[r.state] || marks.unknown;
+      const state = r.state === 'unmet' ? (r.sort === 'machine' ? 'not for this machine' : 'not met now') : said;
+      return `<li class="${r.state === 'unmet' ? (r.sort === 'machine' ? 'nd-cannot' : 'nd-now') : `nd-${esc(r.state || 'unknown')}`}"><span class="mark" aria-hidden="true">${mark}</span> `
+        + `${esc(r.words || [r.attribute, r.value].filter(Boolean).join(' ') || 'its own check')} <span class="muted">(${esc(state)}${r.state === 'unmet' && r.said ? `: ${esc(r.said)}` : ''}${r.state === 'unmet' && r.how ? `; ${esc(r.how)}` : ''})</span></li>`;
+    };
+    const group = (title, s) => { const mine = rows.filter((r) => (r.strength || 'required') === s); return mine.length ? `<h5 class="group">${title}</h5><ul class="needs-list">${mine.map(li).join('')}</ul>` : ''; };
+    const body = rows.length ? group('It needs', 'required') + group('For its parts', 'part') + group('It prefers', 'preferred')
+      : `<div class="small muted">${esc(n.declared === false ? 'It has not said what it needs yet' : 'It needs nothing of this machine')}</div>`;
+    return `<h4>Needs</h4>${body}`;
   }
 
   function assistantData(a) {
@@ -2508,7 +2605,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       const keep = new Set([...outside].sort((a, b) => (lastOf.get(b.id) || 0) - (lastOf.get(a.id) || 0)).slice(0, 16).map((n) => n.id));
       outside = outside.filter((n) => keep.has(n.id));
     }
-    const KIND = { app: 0, process: 1, host: 2 }, STATE = { active: 0, attached: 0, unknown: 1, invalid: 2, disabled: 3 };
+    const KIND = { app: 0, process: 1, host: 2 }, STATE = { active: 0, attached: 0, unknown: 1, invalid: 2, unmet: 3, disabled: 4 };
     outside.sort((a, b) => (KIND[a.kind] ?? 3) - (KIND[b.kind] ?? 3) || a.title.localeCompare(b.title));
     const plugins = nodes.filter((n) => n.role === 'plugin').sort((a, b) => (STATE[a.state] ?? 1) - (STATE[b.state] ?? 1) || a.title.localeCompare(b.title));
     const callers = nodes.filter((n) => n.role === 'caller').sort((a, b) => (a.id === 'page' ? -1 : b.id === 'page' ? 1 : a.title.localeCompare(b.title)));
@@ -2700,7 +2797,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   }
 
   function sphereModel(t) {  // every part in its place on its shell, the links between the parts drawn
-    const STATE = { active: 0, attached: 0, unknown: 1, invalid: 2, disabled: 3 };
+    const STATE = { active: 0, attached: 0, unknown: 1, invalid: 2, unmet: 3, disabled: 4 };
     const all = [...(t.nodes || []), ...(t.quiet || []).map((n) => ({ ...n, quiet: true }))].map((n) => ({ ...n, title: String(n.title || n.id) }));
     const byId = new Map(all.map((n) => [n.id, n]));
     const app = all.find((n) => n.role === 'app'), login = all.find((n) => n.role === 'login');
@@ -2961,7 +3058,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       + `<button type="button" class="conn-zoom" data-zoom="out" title="Farther (the − key, or the wheel)" aria-label="Zoom out"${sphere.zoom <= ZOOM[0] ? ' disabled' : ''}>−</button>`
       + `<button type="button" class="conn-zoom level" data-zoom="whole" id="conn-zoom-level" title="The whole sphere again (the 0 key)" aria-label="The whole sphere again">${Math.round(sphere.zoom * 100)}%</button>`
       + `<button type="button" class="conn-zoom" data-zoom="in" title="Nearer (the + key, or the wheel)" aria-label="Zoom in"${sphere.zoom >= ZOOM[1] ? ' disabled' : ''}>+</button></span>`;
-    return `<div class="data-head"><h2>Connections</h2><span class="conn-tools">${zoom}<span class="conn-views" role="group" aria-label="How the picture is drawn">`
+    if (connTab() === 'plugins') return pluginsTab();  // 0.40.0: its second tab
+    return `<div class="data-head"><h2>Connections</h2>${connTabs()}<span class="conn-tools">${zoom}<span class="conn-views" role="group" aria-label="How the picture is drawn">`
       + `${view('sphere', 'Sphere', 'The platform at the centre, the interfaces round it, the plugins on the sphere')}${view('columns', 'Columns', 'Who asks, the platform, its plugins, what they reach: in four columns')}</span>`
       + `<button type="button" class="conn-pause" aria-pressed="${trafficPaused}">${trafficPaused ? 'Resume' : 'Pause'}</button></span></div>
       <div class="muted small">who talks to whom on this platform, as it happens: a line for each kind of interaction between two parts</div>
@@ -2972,6 +3070,83 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       <h4>Latest</h4><div class="muted small">the newest first; the same thing said again within 30 s is one row, counted</div>
       <table class="list conn-rows"><thead><tr><th>At</th><th>From → to</th><th>Class</th><th>What</th><th class="num">Times</th><th class="num">Took</th></tr></thead>
       <tbody id="conn-rows" aria-live="off"></tbody></table>`;
+  }
+
+  // 0.40.0 (the user's answer 8, 2026-11-25: "Two tabs"): Connections' two tabs beside its title, each at its address:
+  // Who talks to whom (#connections, Sphere and Columns inside) and Plugins (#connections/plugins)
+  const connTab = () => (selected() === CONNECTIONS && hashParts()[1] === 'plugins' ? 'plugins' : 'who');
+  const onPluginsTab = () => connTab() === 'plugins';
+  const connTabs = () => '<nav class="tabs" role="tablist" aria-label="Connections: its views">'
+    + [['who', 'Who talks to whom', CONNECTIONS], ['plugins', 'Plugins', `${CONNECTIONS}/plugins`]].map(([id, words, to]) =>
+      `<button type="button" role="tab" class="tab conn-tab" aria-selected="${connTab() === id}" data-select="${to}">${words}</button>`).join('') + '</nav>';
+  const NEEDS_SECTIONS = [...SECTIONS, ['databases', 'Database plugins'], ['ai', 'AI plugins']];
+  const needsSection = (p) => (p.kind === 'assistant' || p.section === 'ai' ? 'ai' : NEEDS_SECTIONS.some(([s]) => s === p.section) ? p.section : 'machine');
+  function needsStateWords(p) {
+    const n = p.needs || {};
+    if (p.state === 'disabled') return 'disabled';
+    if (n.met === false) return n.sort === 'machine' ? 'not for this machine' : 'not met now';
+    if (p.state === 'invalid') return `not valid${p.why ? `: ${p.why}` : ''}`;
+    return p.state === 'active' || p.state === 'attached' ? 'active' : p.state || 'not asked yet';
+  }
+  function needsLine(n) {
+    if (ND()) return ND().line(n);
+    const words = !n || n.declared === false ? 'It has not said what it needs yet' : n.met === false ? `${n.sort === 'machine' ? 'Not for this machine' : 'Not met now'}: ${n.why || ''}`
+      : n.met === true ? ((n.rows || []).length ? 'Every need met' : 'It needs nothing of this machine') : 'Some of its needs are not known here';
+    return `<p class="nd-line">${esc(words)}</p>`;
+  }
+  function needsCounts() {
+    const all = (needsAnswer && Array.isArray(needsAnswer.plugins) ? needsAnswer.plugins : []).filter((p) => p && typeof p === 'object');
+    const cannot = all.filter((p) => p.needs && p.needs.met === false && p.needs.sort === 'machine').length;
+    const now = all.filter((p) => p.needs && p.needs.met === false && p.needs.sort !== 'machine').length;
+    return { all, cannot, now, listed: all.length - cannot - now };
+  }
+  // the Plugins tab (r2 3.7; S10): every plugin of the platform by section, the AI ones included; shading means "not for
+  // this machine" only (nd-cannot), red "not met now" (nd-now, said in words too); disabled and not valid at full strength,
+  // their chip muted
+  function pluginsTab() {
+    const head = `<div class="data-head"><h2>Connections</h2>${connTabs()}</div><div class="muted small">every plugin of the platform and what it needs of this machine: red, not met now; shaded, not for this machine</div><p class="error" id="err-needs"></p>`;
+    if (needsGone) return `${head}<p class="muted">${esc(NEEDS_OLDER)}</p>`;
+    if (!needsAnswer) return `${head}<p class="muted loading-words" role="status">Asking the platform…</p>`;
+    const c = needsCounts(), net = needsAnswer.internet && typeof needsAnswer.internet === 'object' ? needsAnswer.internet : {};
+    const rule = net.rule === 'there' ? 'there' : 'system';
+    const sw = needsAnswer.switch ? `<span class="needs-switch" role="group" aria-label="The internet">The internet: `
+      + `<button type="button" data-needs="system" aria-pressed="${rule === 'system'}">as this system judges it</button>`
+      + `<button type="button" data-needs="there" aria-pressed="${rule === 'there'}">taken as there</button></span>`
+      + `<span class="muted small"> ${net.kept ? 'kept in your login' : 'held until the platform restarts'}</span>` : '';
+    const how = net.offline ? `Liminal is set offline (${net.offline}): nothing is sent, every internet need is unmet`
+      : `Read on this machine, nothing sent: the internet ${net.by ? `as ${net.by} judges it` : 'is not known here'}`;
+    const row = (p) => {
+      const n = p.needs || {}, cls = n.met === false ? (n.sort === 'machine' ? 'nd-cannot' : 'nd-now') : '';
+      const unmet = (Array.isArray(n.rows) ? n.rows : []).filter((r) => r && r.state === 'unmet' && (r.strength || 'required') === 'required');
+      const detail = unmet.map((r) => `<div class="small">${esc(r.said || '')}${r.words && r.words !== r.said ? `: ${esc(r.words)}` : ''}${r.how ? ` <span class="muted">(${esc(r.how)})</span>` : ''}</div>`).join('');
+      const unknown = (Array.isArray(n.rows) ? n.rows : []).filter((r) => r && r.state === 'unknown').length;
+      return `<tr class="needs-row ${cls}${needsPicked === p.name ? ' picked' : ''}"><td class="needs-icon">${icon(p.icon || 'chip', 18)}</td>`
+        + `<td><button type="button" class="linklike" data-needs-pick="${esc(p.name)}">${esc(p.title || p.name)}</button></td>`
+        + `<td><span class="chip${needsStateWords(p) === 'active' ? ' up' : ''}">${esc(needsStateWords(p))}</span></td>`
+        + `<td>${n.met === false ? detail || needsLine(n) : needsLine(n)}${unknown && n.met !== false ? `<div class="small muted">${unknown} not known here</div>` : ''}</td>`
+        + `<td><button type="button" data-select="${esc(p.name)}">Its page</button></td></tr>`;
+    };
+    const sections = NEEDS_SECTIONS.map(([s, title]) => {
+      const mine = c.all.filter((p) => needsSection(p) === s);
+      return mine.length ? `<h4>${title}</h4><table class="list needs-table"><thead><tr><th></th><th>Plugin</th><th>State</th><th>Its needs</th><th></th></tr></thead><tbody>${mine.map(row).join('')}</tbody></table>` : '';
+    }).join('');
+    return `${head}<div class="needs-head"><span>${c.listed} listed · ${c.now} not met now · ${c.cannot} not for this machine</span>`
+      + `<button type="button" data-needs="again">Read again</button>${sw}</div>`
+      + `<div class="muted small">${esc(how)}.${needsAnswer.held === false ? ` ${esc(NEEDS_UNHELD)}` : ''}</div>${sections}`;
+  }
+  function pluginsSide() {  // M28: the picked row's Needs list; none picked, the counts and what red and shading mean
+    const p = needsPicked ? needsRow(needsPicked) : null;
+    if (p) {
+      return `<h3>${icon(p.icon || 'chip', 20)} ${esc(p.title || p.name)}</h3><div class="muted small">${esc(p.name)} · ${esc(needsStateWords(p))}</div>`
+        + `${needsList({ name: p.name, needs: p.needs })}<div class="row"><button type="button" data-select="${esc(p.name)}">Its page</button> `
+        + '<button type="button" data-needs-pick="">Every plugin</button></div>';
+    }
+    const c = needsCounts();
+    return `<h3>${icon('plug', 20)} Plugins</h3><div class="muted small">what each plugin needs of this machine</div>`
+      + (needsAnswer ? `<dl class="facts"><dt>Listed</dt><dd>${c.listed}</dd><dt>Not met now</dt><dd>${c.now}</dd><dt>Not for this machine</dt><dd>${c.cannot}</dd></dl>` : '')
+      + '<h4>Reading it</h4><p class="small">A row in red, said “not met now”, is a plugin this machine could run once something changes: a Windows feature turned on, the internet back, a newer Windows. '
+      + 'A shaded row, “not for this machine”, never can here: another system, another processor. Neither is in the list on the left or in the tray; '
+      + 'each one’s page says why and what would meet it. A need that cannot be read never hides a plugin: it is “not known here”. Pick a plugin to see its needs.</p>';
   }
 
   function connectionsSide(t) {
@@ -3006,6 +3181,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   }
 
   function drawConnectionsSide() {  // drawn again with every answer; the legend's button that had the focus keeps it
+    if (onPluginsTab()) return;  // 0.40.0: the Plugins tab's own
     const a = document.activeElement, kind = a && side.contains(a) ? a.dataset.kind || (a.classList.contains('conn-unpick') ? '*' : '') : '';
     side.innerHTML = connectionsSide(traffic);
     const again = kind === '*' ? side.querySelector('.conn-unpick') : kind ? side.querySelector(`[data-kind="${kind}"]`) : null;
@@ -3037,7 +3213,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   async function loadTraffic() {  // asked every 2 s while Connections is shown (one ask at a time)
     clearTimeout(trafficTimer);
     const g = ++trafficGen;
-    if (selected() !== CONNECTIONS || trafficPaused || document.hidden) return;
+    if (selected() !== CONNECTIONS || trafficPaused || document.hidden || onPluginsTab()) return;  // 0.40.0: not while Plugins is shown
     try {
       const t = await api('GET', 'api/traffic?last=200');
       if (g !== trafficGen || selected() !== CONNECTIONS) return;
@@ -3050,7 +3226,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       const err = $('err-connections');
       if (err) err.textContent = e.message;
     }
-    if (g === trafficGen && selected() === CONNECTIONS && !trafficPaused && !document.hidden) trafficTimer = setTimeout(loadTraffic, 2000);
+    if (g === trafficGen && selected() === CONNECTIONS && !trafficPaused && !document.hidden && !onPluginsTab()) trafficTimer = setTimeout(loadTraffic, 2000);
   }
 
   function pickNode(id) {
@@ -3067,7 +3243,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     const m = mine ? null : st.machines[sel], a = mine ? null : (st.assistants || []).find((x) => x.name === sel);
     const scrolled = data.scrollTop;
     const own = m && !pending(m) ? ownTabOf(m) : null;  // 0.27.0: one of its own tabs shown
-    if (m && hasHook(m, 'check') && !userOff(m) && !own) {  // its check of this PC: asked when shown, again after a minute
+    if (m && hasHook(m, 'check') && !userOff(m) && !unlisted(m) && !own) {  // its check of this PC: asked when shown, again after a minute (0.40.0: not while its needs are unmet)
       const c = checks[m.name];
       if (!c || (!c.loading && Date.now() - c.at > 60000)) setTimeout(() => loadCheck(m.name), 0);
     }
@@ -3089,7 +3265,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     };
     if (own) keepFocus(put); else put();  // on one of its own tabs, a filter or a search being typed keeps the focus
     if (db) dbRetype(typed);
-    if (sel === CONNECTIONS) updateConnections(true);
+    if (sel === CONNECTIONS && !onPluginsTab()) updateConnections(true);
     Charts.draw(data);
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
     Object.values(shells).forEach((sh) => { if (sh.panel && !sh.panel.isConnected) sh.term.attach(null); });  // not shown: not drawn
@@ -3151,15 +3327,15 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   function pluginSide(m) {
     if (pending(m)) return pendingSide(m, 'chip');
     const head = `<h3>${icon(m.icon || 'chip', 20)} ${esc(m.title)} ${chipOf(m)}</h3><div class="muted small">${esc(m.name)}${m.version ? ` · ${esc(m.version)}` : ''}</div>`;
-    if (userOff(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>`;
+    if (userOff(m)) return `${head}<p class="summary">Disabled: enable it with the switch on its page.</p>${needsList(m)}`;
     const running = m.setup && m.setup.running;
-    const steps = notHere(m) ? [] : m.steps || [];  // not for this machine: nothing to set up
-    const said = notHere(m) ? `Not for this machine: ${whyOf(m)}` : invalid(m) ? `Disabled while not valid: ${whyOf(m)}` : stateLine(m);
+    const steps = unlisted(m) ? [] : m.steps || [];  // not for this machine (0.40.0: or not met now): nothing to set up
+    const said = notHere(m) ? `Not for this machine: ${whyOf(m)}` : unmetNow(m) ? `Not met now: ${whyOf(m)}` : invalid(m) ? `Disabled while not valid: ${whyOf(m)}` : stateLine(m);
     const c = hasHook(m, 'check') ? checks[m.name] : null;  // a plugin that checks this PC: its install locked until it passes
     const locked = c !== null && !(c && c.data && (c.data.ready || c.data.installed));
     const off_ = (s) => running || (locked && !PREPARING.includes(s));
     return `${head}<p class="summary">${esc(said)}</p>${m.status && m.status.problem && !invalid(m) ? `<p class="error">${esc(m.status.problem)}</p>` : ''}
-      ${notHere(m) ? '' : facts(m.status)}
+      ${unlisted(m) ? '' : facts(m.status)}${needsList(m)}
       ${steps.length ? `<h4>Set up</h4><div class="steps"><button type="button" class="setup accent" data-machine="${esc(m.name)}" ${off_('everything') ? 'disabled' : ''}>Everything</button>
         ${steps.map((s) => `<button type="button" class="step" data-machine="${esc(m.name)}" data-step="${esc(s)}" ${off_(s) ? 'disabled' : ''}>${esc(s)}</button>`).join('')}</div>
         <div class="muted small">${running ? 'Running: its output is in the middle.' : locked ? `The install is locked until this PC meets what it needs (${PREPARING.join(', ')} prepare it).` : 'Each step\'s output shows in the middle as it runs.'}</div>` : ''}`;
@@ -3168,14 +3344,14 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   function assistantSide(a) {
     if (pending(a)) return pendingSide(a, 'analysis');
     return `<h3>${icon(a.icon || 'analysis', 20)} ${esc(a.title)} ${chipOf(a)}</h3><div class="muted small">${esc(a.name)}${a.version ? ` · ${esc(a.version)}` : ''}</div>
-      <p class="summary">${esc(userOff(a) ? 'Disabled: enable it with the switch on its page.' : invalid(a) ? `Disabled while not valid: ${whyOf(a)}` : 'active')}</p>
-      <dl class="facts"><dt>vendor</dt><dd>${esc(a.vendor || '')}</dd><dt>model</dt><dd>${esc(a.model || '')}</dd></dl>`;
+      <p class="summary">${esc(userOff(a) ? 'Disabled: enable it with the switch on its page.' : unmetNow(a) ? `Not met now: ${whyOf(a)}` : notHere(a) ? `Not for this machine: ${whyOf(a)}` : invalid(a) ? `Disabled while not valid: ${whyOf(a)}` : 'active')}</p>
+      <dl class="facts"><dt>vendor</dt><dd>${esc(a.vendor || '')}</dd><dt>model</dt><dd>${esc(a.model || '')}</dd></dl>${needsList(a)}`;
   }
 
   function drawSide() {
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
-    if (sel === CONNECTIONS) { drawConnectionsSide(); return; }
+    if (sel === CONNECTIONS) { if (onPluginsTab()) side.innerHTML = pluginsSide(); else drawConnectionsSide(); return; }
     if (sel === CODEBASE && window.LiminalCodebase) return;  // drawn with its data (codebase.js)
     if (ownShown()) { side.innerHTML = ownSide(); return; }  // 0.32.0: before a plugin of its name, which it shadows
     const db = m || a ? null : dbOf(sel);  // 0.36.0: a database plugin's specifics
@@ -3203,8 +3379,9 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     drawData();
     drawSide();
     schedule();
-    if (selected() === CONNECTIONS) loadTraffic();
+    if (selected() === CONNECTIONS && !onPluginsTab()) loadTraffic();
     else { clearTimeout(trafficTimer); trafficGen += 1; }
+    if (onPluginsTab() && !needsGone && Date.now() - needsAt > NEEDS_TAB_EVERY * 1000) loadNeeds(false);  // 0.40.0
     if (ownShown()) loadOwn();  // 0.32.0: the platform's own two views, asked while shown (again once a minute old)
   }
 
@@ -3236,6 +3413,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     const was = st || { machines: {}, assistants: [] };
     const blank = (p) => ({ name: p.name, title: p.title, about: p.about, version: p.version, icon: p.icon,
       section: p.section, group: p.group, enabled: p.enabled, hidden: p.hidden,  // 0.31.0: its group under AI plugins
+      needs: p.needs || null,  // 0.40.0: its needs, judged by the overview: one unmet leaves the list before its status comes
       state: p.enabled ? 'loading' : 'disabled', valid: null, why: '', pending: true, status: {}, hooks: [], asks: [], steps: [], settings: [], setup: null });
     const machines = {};
     ov.plugins.filter((p) => p.kind === 'machine').forEach((p) => { machines[p.name] = was.machines[p.name] || blank(p); });
@@ -3279,6 +3457,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     }
     if (g !== gen) return dropped();
     st = held(ov);
+    if (!needsAsking && !needsGone && Date.now() - needsAt > 5000) loadNeeds(false);  // 0.40.0: on its own, beside the plugins
     if (!tray) tray = { app: ov.app.app, icon: ov.app.icon, title: ov.app.title, items: [] };  // the server's once every answer is in
     const names = Object.keys(st.machines);
     job = { first: unanswered(), total: names.length + st.assistants.length, done: 0 };
@@ -3639,6 +3818,72 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     }
   }
 
+  // 0.40.0: GET api/needs, every NEEDS_EVERY s while the page is shown (NEEDS_TAB_EVERY s while the Plugins tab is),
+  // one ask at a time; `fresh`: this machine read again (Read again). A 404 (a platform or a liminal-libs from before it)
+  // stops the asks until a reload. A plugin whose needs changed is asked its status at once
+  async function loadNeeds(fresh) {
+    clearTimeout(needsTimer);
+    if (needsGone) return;
+    const again = () => { if (!needsGone) needsTimer = setTimeout(() => loadNeeds(false), (onPluginsTab() ? NEEDS_TAB_EVERY : NEEDS_EVERY) * 1000); };
+    if (!fresh && !pageShown()) { again(); return; }
+    if (needsAsking) return;
+    needsAsking = true;
+    const before = needsAnswer, err = (words) => ['err-needs', 'err-needs-facts'].forEach((id) => { const el = $(id); if (el) el.textContent = words; });
+    try {
+      needsAnswer = await api('GET', `api/needs${fresh ? '?fresh=1' : ''}`);
+      err('');
+    } catch (e) {
+      if (e.status === 404) { needsGone = true; needsAnswer = null; } else err(e.message);
+    } finally {
+      needsAsking = false;
+      needsAt = Date.now();
+    }
+    if (st) {
+      needsChanged(before);
+      drawRail();
+      drawList();
+      const sel = selected();
+      if (sel === 'machine' || sel === CONNECTIONS) { drawData(); drawSide(); }
+    }
+    again();
+  }
+  function needsChanged(before) {
+    if (!before || !needsAnswer || !st) return;
+    const was = (name) => { const r = (Array.isArray(before.plugins) ? before.plugins : []).find((p) => p && p.name === name); return r && r.needs ? `${r.needs.met}/${r.needs.sort}` : null; };
+    const moved = (Array.isArray(needsAnswer.plugins) ? needsAnswer.plugins : []).filter((p) => p && p.needs && was(p.name) !== null && was(p.name) !== `${p.needs.met}/${p.needs.sort}`);
+    const g = gen;
+    moved.forEach((p) => {
+      if (st.machines[p.name]) {
+        api('GET', `api/machines/${enc(p.name)}`).then((m) => {
+          if (g !== gen || !st.machines[p.name]) return;
+          st.machines[p.name] = m;
+          trayFollows(p.name, !off(m) && !unlisted(m));
+          drawRail();
+          drawList();
+          if (selected() === p.name) { drawData(); drawSide(); }
+        }).catch(() => { /* asked again with the next */ });
+      }
+    });
+    if (moved.some((p) => (st.assistants || []).some((a) => a.name === p.name))) {
+      api('GET', 'api/assistants').then((got) => {
+        if (g !== gen) return;
+        st.assistants = got.assistants || st.assistants;
+        drawRail();
+        drawList();
+      }).catch(() => { /* asked again with the next */ });
+    }
+  }
+  async function setInternet(rule) {  // the switch at the Plugins tab's head (the user's answer 3)
+    try {
+      await api('POST', 'api/needs/internet', { rule });
+    } catch (e) {
+      const el = $('err-needs');
+      if (el) el.textContent = e.status === 404 ? NEEDS_NO_SWITCH : e.message;
+      return;
+    }
+    await loadNeeds(false);
+  }
+
   async function loadCheck(name, fresh) {
     const c = checks[name];
     if (c && (c.loading || (!fresh && Date.now() - c.at < 60000))) return;
@@ -3774,6 +4019,10 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       location.hash = tb.dataset.tab === 'main' ? tb.dataset.machine : `${tb.dataset.machine}/${tb.dataset.tab}`;
       return;
     }
+    const needsAsk = e.target.closest('button[data-needs]');  // 0.40.0: Read again, the internet switch
+    if (needsAsk) { if (needsAsk.dataset.needs === 'again') loadNeeds(true); else setInternet(needsAsk.dataset.needs); return; }
+    const needsPick = e.target.closest('button[data-needs-pick]');  // a plugin of the Plugins tab picked: its needs on the right
+    if (needsPick) { needsPicked = needsPicked === needsPick.dataset.needsPick ? '' : needsPick.dataset.needsPick; drawData(); drawSide(); return; }
     const dd = e.target.closest('button.db-do[data-db-do]');  // 0.36.0: a database plugin's instance, form or question
     if (dd) { if (!dd.disabled) dbDo(dd); return; }
     const pick = e.target.closest('[data-select]');

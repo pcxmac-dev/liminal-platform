@@ -55,6 +55,7 @@ GATED = (
     ("POST", "/api/plugins/distro/enabled", {"on": False}, "A plugin is enabled or disabled"),
     ("POST", "/api/machines/distro/enabled", {"on": False}, "A plugin is enabled or disabled"),
     ("POST", "/api/plugins/distro/hidden", {"on": True}, "A plugin's icon is hidden or shown"),
+    ("POST", "/api/needs/internet", {"rule": "there"}, "The internet switch is set"),  # 0.40.0
     ("POST", "/api/machines/distro/setup", {}, "A plugin's setup is started"),
     ("POST", "/api/machines/distro/job", {"action": "install"}, "A plugin's install or its packages' update is started"),
     ("POST", "/api/machines/distro/job", {"action": "update"}, "A plugin's install or its packages' update is started"),
@@ -171,6 +172,7 @@ def test_each_is_refused_when_the_login_says_you_are_not_there_and_nothing_is_do
         assert seen == [REQUEST] * len(GATED)  # the login was shown each request, once
         assert kept == {"DISTRO_DDNS_HOSTS": "home.example.com"} and distro.changed == 0  # kept as it was, the plugin not told
         assert app.enabled("distro") and "distro" not in app.hidden()  # switched neither off nor out of the dock
+        assert app.internet_rule() == "system"  # 0.40.0: the internet switch not set
         assert distro.setups == [] and distro.updates == 0 and "distro" not in app._setups  # no job begun
         assert distro.terminals == 1 and len(shells) == 1  # the plugin asked for no terminal, none made
         assert (shell.typed, shell.reads, shell.closed) == ("", reads, False)  # yours neither typed into, read nor closed

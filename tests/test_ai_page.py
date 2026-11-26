@@ -42,7 +42,8 @@ def test_the_list_draws_the_ai_plugins_under_one_heading_in_four_groups():
     assert ("const SECTIONS = [['machine', 'Machine plugins'], ['virtualization', 'Virtualization plugins'], "
             "['os', 'OS plugins'], ['cloud', 'Cloud plugins'], ['ci', 'Continuous Integration plugins'], ['scm', 'Source Control plugins']];") in js
     draw = _part(js, "function drawList()", "function instancesTable()")
-    assert "const assistants = st.assistants || [], ai = all.filter(isAi);" in draw
+    # (0.40.0: those whose needs this machine does not meet left out: tests/test_needs_page.py)
+    assert "const assistants = (st.assistants || []).filter((a) => !unlisted(a)), ai = all.filter(isAi);" in draw
     # the heading when there is an assistant or an AI machine plugin; a group's name only over plugins of its own
     assert "(assistants.length || ai.length ? '<h4>AI plugins</h4>'" in draw
     assert ("(assistants.length ? '<h5 class=\"group\">Proprietary services</h5>' + assistants.map(assistant).join('')"
@@ -57,7 +58,7 @@ def test_the_list_draws_the_ai_plugins_under_one_heading_in_four_groups():
     assert "pending(a) || off(a) ? stateLine(a) : (a.vendor || a.about), cls(a), more(a));" in draw
     # with no machine plugin but AI ones (Ollama alone), the line that none is installed is still drawn above them, as
     # this machine's page says it: the four sections are drawn when a plugin is not an AI plugin
-    assert "+ (all.some((m) => !isAi(m)) ? SECTIONS.map(([s, title]) => {" in draw
+    assert "+ (everyone.some((m) => !isAi(m)) ? SECTIONS.map(([s, title]) => {" in draw  # (0.40.0: all, listed or not)
     assert "(all.length ? SECTIONS.map(" not in draw
     assert "AI assistants</h4>" not in js  # the heading it replaces is gone
     assert (".app-list h5.group { margin: 8px 0 2px 8px; font-size: 10px; font-weight: 600; color: var(--muted); "
