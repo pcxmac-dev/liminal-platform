@@ -13,7 +13,15 @@ settings): PlatformApp is built on liminal-libs 1.90.0's platform core (apps/pla
 and the integrator inherit too. It attaches the database plugins (PLATFORM_NEEDS), it is the one writer of their
 instance settings (PLATFORM_WRITER), it answers the Databases section's two routes (GET /api/databases/plugins, POST
 /api/databases/instances: liminal_libs.apps.databases) and, once served, serves the section as the liminal-net node
-platform-databases (cli.cmd_serve: serve_databases), which the other apps reach for a change."""
+platform-databases (cli.cmd_serve: serve_databases), which the other apps reach for a change.
+0.40.0 (Monday list item 19, part two, release 1; the user, 2026-11-18: every plugin has a "needs" requirement, and a
+plugin whose needs this machine cannot meet is not shown in the left-most list): each plugin's needs (its NEEDS, judged
+by liminal-libs 1.103.0's needs.py against this machine's facts, read by its facts.py without sending anything) come
+before its status. One whose required needs are unmet is in the state "unmet": out of the list and the tray, asked
+nothing new (409), never attached while unmet, held (not let go) while the internet alone is missing, and let go only
+once no job of it runs and nothing it started is in the ledger. GET /api/needs (the frame's route) answers every plugin
+with its judgement; POST /api/needs/internet sets the internet switch. The kinds it attaches are PLATFORM_KINDS (the
+user's "Rename it")."""
 from __future__ import annotations
 
 import contextlib
@@ -34,6 +42,8 @@ from pathlib import Path
 
 from liminal_libs import docker as docker_mod
 from liminal_libs import layout, lifecycle
+from liminal_libs import facts as facts_mod  # this machine's facts, read without sending anything (liminal-libs 1.103.0)
+from liminal_libs import needs as needs_mod  # what a plugin needs of the machine, and its judgement (1.103.0)
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
 from liminal_libs.apps import databases as db_section  # the Databases section's overview and forms (liminal-libs 1.90.0)
 from liminal_libs.apps.platform import Platform  # the platform's core, the base the apps inherit (liminal-libs 1.90.0)
@@ -58,10 +68,16 @@ except ImportError:  # an older library hands no asker over: the platform's own 
     asking_mod = None
 PAGE = getattr(asking_mod, "PAGE", "page")  # the asker of a request from the page, and of a job it started
 try:  # a preference read and kept through the login, the file the fallback (liminal-libs 1.88.0; Monday list item 21)
-    from liminal_libs.apps.authorization import keep as keep_setting, recall as recall_setting
+    from liminal_libs.apps.authorization import keep as keep_setting, keeps as keeps_settings, recall as recall_setting
 except ImportError:  # an older library: plugins.json alone, as before
-    keep_setting = recall_setting = None
+    keep_setting = keeps_settings = recall_setting = None
 PLUGINS_PAIR = "platform-plugins"  # the plugins switched off and hidden, as a preference pair of the user's login store
+# 0.40.0: the internet switch (the user's answer 3, 2026-11-25: "A switch at the Plugins tab's head, kept in the user's own
+# login store"): its rule held in memory, each judgement reading it from there; kept as this preference pair of the
+# signed-in person's own store, and brought back from it once, when a signed-in page first asks GET /api/needs
+INTERNET_PAIR = "platform-internet"
+INTERNET_RULES = ("system", "there")  # as this system judges it (NCSI, NetworkManager), or taken as there
+NEEDS_PATH = "/api/needs"  # the frame's route (liminal-libs 1.103.0), the platform's report (PlatformApp.needs_report)
 
 PORT = 8775
 NOT_ASKED = ("setup", "settings", "scan", "run")  # a machine's hooks the page asks through its own routes, or not at all
@@ -129,10 +145,26 @@ def platform_dir() -> Path:
 
 
 def facts() -> dict:
-    """What this machine is: the system, the processor, the memory, the Python, the host name."""
-    return {"system": py_platform.system(), "release": py_platform.release(), "version": py_platform.version(),
-            "machine": py_platform.machine(), "processor": py_platform.processor(), "cpus": os.cpu_count() or 0,
-            "memoryMb": memory_mb(), "python": py_platform.python_version(), "host": py_platform.node()}
+    """What this machine is: the system, the processor, the memory, the Python, the host name. 0.40.0: the processor's
+    architecture (`machine`, in the needs reader's words: x86-64, arm64) and the memory (`memoryMb` usable,
+    `memoryInstalledMb` installed) from liminal-libs' one reading of this machine (liminal_libs.facts, which the plugins'
+    needs are judged against), when it reads them; else as before."""
+    out = {"system": py_platform.system(), "release": py_platform.release(), "version": py_platform.version(),
+           "machine": py_platform.machine(), "processor": py_platform.processor(), "cpus": os.cpu_count() or 0,
+           "memoryMb": memory_mb(), "python": py_platform.python_version(), "host": py_platform.node()}
+    try:
+        read = facts_mod.reader().read({"architecture", "memory"})
+    except Exception:  # noqa: BLE001 - a reading that fails: the facts as before
+        return out
+    if isinstance(read.get("architecture"), str) and read["architecture"]:
+        out["machine"] = read["architecture"]
+    memory = read.get("memory") if isinstance(read.get("memory"), dict) else {}
+    usable, installed = memory.get("usable"), memory.get("installed")
+    if isinstance(usable, int) and not isinstance(usable, bool) and usable > 0:
+        out["memoryMb"] = usable // (1024 * 1024)
+    if isinstance(installed, int) and not isinstance(installed, bool) and installed > 0:
+        out["memoryInstalledMb"] = installed // (1024 * 1024)
+    return out
 
 
 def memory_mb() -> int:
@@ -681,10 +713,15 @@ class Setup:
 # asked through liminal_libs.docker; `api_facts`, through facts_of; `attach` and `detach`, which the frame calls).
 CALLS = {
     "machine": {
-        "present": "whether it is there: for the tray, at most once a minute",
-        "status": "its state: each GET /api/machines/{name}, /api/machines and /api/status, while it is enabled",
-        "instances": ("its Docker instances: GET /api/instances and /api/status, while it is enabled "
-                      "(liminal_libs.docker.instances)"),
+        "not_for_here": ("why it is not for this machine, in its own words (0.40.0): asked before its status, by the "
+                         "overview and by GET /api/needs, one more unmet need of the machine when it gives words; by "
+                         "contract it asks nothing"),
+        "present": "whether it is there: for the tray, at most once a minute, while it is enabled and its needs are met",
+        "status": ("its state: each GET /api/machines/{name}, /api/machines and /api/status, while it is enabled and "
+                   "its needs are met (and, not for this machine, while its not_for_here() gives words: its tables of "
+                   "elsewhere)"),
+        "instances": ("its Docker instances: GET /api/instances and /api/status, while it is enabled and its needs are "
+                      "met (liminal_libs.docker.instances)"),
         "interface": "the hooks it answers: with each status and each ask",
         "setup": "POST /api/machines/{name}/setup and /job {action: install}: its steps, as a job",
         "update_packages": "POST /api/machines/{name}/job {action: update}, as a job",
@@ -692,9 +729,11 @@ CALLS = {
         "terminal": "POST /api/machines/{name}/terminal: the command its login terminal runs",
         "terminal_title": "its terminal's title (else its user and distribution_name)",
         "settings_changed": "after POST /api/plugins/{name}/settings kept them",
-        "api_facts": "what it learned of its APIs: with each status while it is enabled",
-        "attach": "while it is enabled and valid: the platform and a login that notes what it reads and keeps",
-        "detach": "when it is disabled or not valid",
+        "api_facts": "what it learned of its APIs: with each status while it is enabled and its needs are met",
+        "attach": ("while it is enabled, its needs met and valid: the platform and a login that notes what it reads "
+                   "and keeps"),
+        "detach": ("when it is disabled, or not valid or its needs unmet once no job of it runs and nothing it started "
+                   "is in the ledger (never for the internet alone: it is held)"),
         "app_stopping": ("when the platform stops, once the asks and the jobs that take a cancel under way are "
                          "waited for (STOP_WAIT_S at the most): each machine plugin that has it, enabled or "
                          "not, not attached here; all told together (0.35.0), PLUGINS_DEADLINE_S at the most"),
@@ -705,13 +744,16 @@ CALLS = {
         "rpc": ("POST, GET and DELETE /api/machines/{name}/rpc (0.34.0): the hook its RPC_HOOK names, through its "
                 "ask, handed an agent's request whole (method, the allow-listed headers, body, gone); never by name")},
     "assistant": {
-        "served": "whether its key and its plan serve: with each status",
+        "not_for_here": ("why it is not for this machine, in its own words (0.40.0): asked before its status; by "
+                         "contract it asks nothing"),
+        "served": "whether its key and its plan serve: with each status, while its needs are met",
         "keys_set": "whether its key is set, when it does not serve",
         "free_note": "why its plan has no API access",
         "settings_changed": "after POST /api/plugins/{name}/settings kept them",
         "interface": "the hooks it answers: in GET /api/status's plugins while it is attached (the frame's plugins())",
-        "api_facts": "what it learned of its APIs: with each status while it is enabled",
-        "attach": "while it is enabled and valid", "detach": "when it is disabled or not valid"},
+        "api_facts": "what it learned of its APIs: with each status while it is enabled and its needs are met",
+        "attach": "while it is enabled, its needs met and valid",
+        "detach": "when it is disabled, not valid, or its needs unmet (never for the internet alone: it is held)"},
     # 0.36.0: a database plugin, through the library's Databases section (liminal_libs.apps.databases)
     "database": {
         "status": "its instances as its page draws them: GET /api/databases/plugins (databases.overview)",
@@ -731,11 +773,11 @@ ATTRIBUTES = {  # read or looked up, never called (KIND: which of CALLS' kinds i
     # requests are handed to, and the two words of who may ask a hook)
     "machine": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "SECTION", "STEPS", "TABS", "JOB_HOOKS",
                 "keys", "apis", "api", "app", "login", "user", "distribution_name", "chosen", "GROUP",
-                "CANCEL_HOOKS", "RPC_HOOK", "PLUGIN_ONLY_HOOKS", "PAGE_ONLY_HOOKS"),
+                "CANCEL_HOOKS", "RPC_HOOK", "PLUGIN_ONLY_HOOKS", "PAGE_ONLY_HOOKS", "NEEDS"),
     "assistant": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "vendor", "default_model", "key_names",
-                  "keys", "apis", "api", "app"),
+                  "keys", "apis", "api", "app", "NEEDS"),
     "database": ("KIND", "name", "title", "about", "version", "SYSTEM", "ICON", "SECTION", "ENGINE", "SERVER", "TABS",
-                 "JOB_HOOKS", "apis", "api", "app", "login")}
+                 "JOB_HOOKS", "apis", "api", "app", "login", "NEEDS")}
 # the terms of the platform's ask (PlatformApp.ask; POST /api/machines/{name}/ask), as a plugin's Internal API says them
 ASK_TERMS = (f"the hooks a machine plugin answers (its tabs' too), while it is enabled, none of "
              f"{', '.join(NOT_ASKED[:-1])} and {NOT_ASKED[-1]} (routes of their own, or none); the arguments by "
@@ -802,8 +844,10 @@ class PlatformApp(Platform):
     # 0.36.0 (Monday list item 30, step 2): the library's platform core (liminal_libs.apps.platform.Platform) under it.
     # It attaches the database plugins (the machine plugins and the AI assistants are its own, as before: attach_plugins),
     # and it is the running platform, the one writer of instance settings: a part of the platform included in another
-    # app's process reads them and asks this one for a change, through its node (serve_databases)
-    PLATFORM_NEEDS = ("database",)
+    # app's process reads them and asks this one for a change, through its node (serve_databases). 0.40.0: the kinds it
+    # attaches are PLATFORM_KINDS (liminal-libs 1.103.0; the user's "Rename it": "needs" is what a plugin needs of the
+    # machine), the old PLATFORM_NEEDS left to the library, which reads it one release more for the apps that set it
+    PLATFORM_KINDS = ("database",)
     PLATFORM_WRITER = True
 
     SETTINGS_SECONDS = 30.0  # the app's settings (the assistants' keys and plans) are read again after this long
@@ -866,6 +910,16 @@ class PlatformApp(Platform):
         self._settings_of = settings  # () -> Settings: a test's; else the app's, read with its login
         self._settings_cache: tuple[float, object] | None = None
         self._invalid: set[str] = set()  # the plugins found not valid by the last status: out of the tray
+        # 0.40.0: the plugins whose needs this machine does not meet now (out of the tray, asked nothing new), each
+        # one's needs as last judged (Connections, the overview), the words of a status that said it is not for this
+        # machine (applies: False), and the internet switch's rule, held in memory, with whether it was brought back
+        # from a signed-in person's store and whether it is kept there
+        self._unmet: set[str] = set()
+        self._needs: dict[str, dict] = {}
+        self._elsewhere: dict[str, str] = {}
+        self._internet = "system"
+        self._internet_recalled = False
+        self._internet_kept = False
         self._unsaid: set[str] = set()  # the plugins whose Internal API could not be read: said once in the log
         self._terminals: dict[str, Terminal] = {}  # a login terminal per plugin (the page's terminal panel)
         self._terminal_of = terminal  # (argv, title) -> Terminal: a test's
@@ -882,7 +936,7 @@ class PlatformApp(Platform):
         self._setups: dict[str, Setup] = {}
         self._lock = threading.Lock()
         self._active: tuple[float, list[str]] | None = None
-        self._states: dict[str, str] = {}  # each plugin's state when last asked: active | disabled | invalid (Connections)
+        self._states: dict[str, str] = {}  # each plugin's state when last asked: active | disabled | invalid | unmet
         self._whys: dict[str, str] = {}  # why, when last asked (0.37.0: plugin_state)
         # 0.31.0: set while it stops (_refuse_stopping), and the asks under way counted for the stop (_under_way)
         self._stopping = False
@@ -930,6 +984,9 @@ class PlatformApp(Platform):
             node = {"id": name, "role": "plugin", "title": p.title, "attached": attached, "state": state,
                     "icon": getattr(p, "ICON", "") or ("analysis" if name in assistants else "chip"),
                     "kind": "assistant" if name in assistants else "machine", "interface": face["id"]}
+            if state == "unmet":  # 0.40.0: not for this machine ("machine") or not met now ("moment")
+                with self._lock:
+                    node["sort"] = str((self._needs.get(name) or {}).get("sort") or "moment")
             if state != "active" and not attached and name not in linked:
                 hidden.append(name)
                 quiet.append(node)
@@ -1050,17 +1107,32 @@ class PlatformApp(Platform):
                     self._active = (self._active[0], [n for n in order if n in names_active])
         return answer
 
-    def _settle(self, p, active: bool) -> None:
+    def _settle(self, p, active: bool, held: bool = False) -> None:
         """A plugin attached while it is active (enabled and valid) and detached otherwise, once the platform
-        attaches its plugins (the user: "if a plugin is not in a valid state it has to be disabled")."""
+        attaches its plugins (the user: "if a plugin is not in a valid state it has to be disabled"). 0.40.0 (the needs
+        plan's S13, M15): one not active is let go only once no job of it runs and nothing it started is in this
+        process's ledger (lifecycle.mine), at the first status read after both have ended, since a detach ends what it
+        started; and never while `held` (its needs unmet by the internet alone: the user's answer 19, "Held"). The
+        switch (set_enabled) and the platform's stop let go at once, as before."""
         if not self._attaching:
             return
         with self._settling:
             attached = self.plugin(p.name) is not None
             if active and not attached and getattr(p, "app", None) is None:
                 self.attach(p)
-            elif not active and attached:
+            elif not active and attached and not held and not self._busy(p.name):
                 self.detach(p.name)
+
+    def _busy(self, name: str) -> bool:
+        """Whether a job of the plugin runs, or a process it started is in this process's ledger (0.40.0)."""
+        with self._lock:
+            setup = self._setups.get(name)
+        if setup is not None and setup.running:
+            return True
+        try:
+            return bool(lifecycle.mine(name))
+        except Exception:  # noqa: BLE001 - a ledger that cannot say holds nothing back
+            return False
 
     def platform_plugin(self, name: str):
         """A machine plugin or an AI assistant of the platform, by name."""
@@ -1073,6 +1145,177 @@ class PlatformApp(Platform):
         if not self.enabled(name):
             raise Refused(HTTPStatus.CONFLICT, f"{name} is disabled: enable it first")
 
+    # -- what its plugins need of this machine (0.40.0; Monday list item 19, part two, release 1: liminal-libs 1.103.0's
+    # needs.py and facts.py; the user, 2026-11-18: "a plugin whose needs this machine cannot meet is not shown in the
+    # left-most list"; the Connections view's Plugins tab, "red for those that could but do not meet current
+    # conditions, shaded for those that never can here") ---------------------------------------------------------
+    def internet_rule(self) -> str:
+        """How the internet is judged: "system", as this system judges it (Windows' NCSI, NetworkManager), or
+        "there", the Plugins tab's switch. Held in memory and read from there at each judgement, never from a store."""
+        with self._lock:
+            return self._internet
+
+    def offline(self) -> str | None:
+        """The setting that makes the platform send nothing, from its own settings (the user's answer 5:
+        LIMINAL_READONLY, LIMINAL_OFFLINE): every internet need unmet then, whatever the switch; None when neither is
+        set or the settings cannot be read."""
+        try:
+            settings = self.settings_now()
+        except Exception:  # noqa: BLE001 - settings that cannot be read set nothing
+            return None
+        if getattr(settings, "read_only", False) is True:
+            return "LIMINAL_READONLY"
+        return "LIMINAL_OFFLINE" if getattr(settings, "offline", False) is True else None
+
+    def plugin_states(self) -> dict[str, str]:
+        """Each plugin's state for a `plugin` need: "attached" while it is attached here, "cannot" for one not for this
+        machine, else its state when last asked."""
+        with self._lock:
+            states, judged = dict(self._states), dict(self._needs)
+        out = {}
+        for p in self.known_plugins():
+            name = str(getattr(p, "name", "") or "")
+            last = judged.get(name) or {}
+            if last.get("met") is False and last.get("sort") == "machine":
+                out[name] = "cannot"
+            elif self.plugin(name) is p:
+                out[name] = "attached"
+            else:
+                out[name] = states.get(name, "")
+        return out
+
+    def _known(self, name: str):
+        p = next((k for k in self.known_plugins() if getattr(k, "name", "") == name), None)
+        if p is None:
+            raise LookupError(f"no plugin {name!r} is known to the platform")
+        return p
+
+    def _judged(self, p, read: dict | None = None, fresh: bool = False, own: str | None = None) -> dict:
+        """A plugin's needs judged (needs.judge) against the facts in hand (`read`, else this machine's kept facts of
+        what its rows name), asking the plugin nothing but its not_for_here(), which by contract asks nothing; with the
+        words of a status that said it is not for this machine (applies: False) as one more need of the machine. The
+        settings are read for an internet row alone (offline), the plugins' states for a plugin row alone. Kept for
+        Connections and the overview."""
+        rows = needs_mod.declared(p)
+        kinds = {str(r.get("attribute", "")).rpartition(":")[2] for r in rows}
+        if read is None:
+            attributes, names = facts_mod.wanted(rows)
+            read = self.machine_facts(attributes, fresh=fresh, names=names)
+        if own is None:
+            with self._lock:
+                elsewhere = self._elsewhere.get(p.name, "")
+            own = "; ".join(w for w in (needs_mod.own_words(p), elsewhere) if w)
+        answer = needs_mod.judge(rows, read, own=own, plugins=self.plugin_states() if "plugin" in kinds else None,
+                                 internet=self.internet_rule(), offline=self.offline() if "internet" in kinds else None,
+                                 declared=needs_mod.says(p))
+        with self._lock:
+            self._needs[p.name] = answer
+        return answer
+
+    def needs_of(self, plugin_or_name, fresh: bool = False) -> dict:
+        """A plugin's needs judged against this machine: any plugin of the platform, attached or not (LookupError for
+        one it does not have), asked nothing but its not_for_here()."""
+        p = self._known(plugin_or_name) if isinstance(plugin_or_name, str) else plugin_or_name
+        return self._judged(p, fresh=fresh)
+
+    def _read_for(self, plugins, fresh: bool = False) -> dict:
+        """One reading of this machine for every plugin given: what their rows name."""
+        attributes, names = facts_mod.wanted([r for p in plugins for r in needs_mod.declared(p)])
+        return self.machine_facts(attributes | {"kernel", "architecture"}, fresh=fresh, names=names)
+
+    def _kind_of(self, p) -> tuple[str, str]:
+        """A plugin's kind and section as the overview says them."""
+        if self._machine_kind(p):
+            return "machine", section_of(p)
+        if getattr(p, "KIND", "") == "database":
+            return "database", DATABASES_SECTION
+        return "assistant", "assistant"
+
+    def needs_report(self, fresh: bool = False, only: str | None = None) -> dict:
+        """GET /api/needs, the platform's (the frame's route): this machine's facts and every plugin it has, attached
+        or not, with its needs judged and its state here (`only`: one, by name; LookupError for one it does not have).
+        `held` and `switch` are true: the platform holds its plugins by their needs and takes the internet switch;
+        `internet` says the rule, how the system judges it, whether it is kept in the signed-in person's store, and the
+        setting that makes it send nothing."""
+        plugins = [self._known(only)] if only else self.known_plugins()
+        read = self._read_for(plugins, fresh=fresh)
+        off = self.disabled()
+        with self._lock:
+            states, whys = dict(self._states), dict(self._whys)
+        out = []
+        for p in plugins:
+            kind, section = self._kind_of(p)
+            answer = self._judged(p, read)
+            state = states.get(p.name, "")
+            if kind != "database" and p.name in off:
+                state = "disabled"
+            elif answer.get("met") is False:
+                state = "unmet"
+            elif state == "unmet":  # met again since it was last asked: its page asks its status at once
+                state = ""
+            out.append({"name": p.name, "title": str(getattr(p, "title", "") or p.name), "kind": kind,
+                        "section": section, "group": group_of(p) if kind == "machine" else "",
+                        "icon": getattr(p, "ICON", "") or ("analysis" if kind == "assistant" else "chip"),
+                        "state": state, "why": whys.get(p.name, "") if state in ("invalid", "unmet") else "",
+                        "needs": answer})
+        internet = read.get("internet") if isinstance(read.get("internet"), dict) else {}
+        with self._lock:
+            rule, kept = self._internet, self._internet_kept
+        return {"v": 1, "vocabulary": needs_mod.VOCABULARY, "facts": read,
+                "internet": {"rule": rule, "by": str(internet.get("by") or ""), "state": internet.get("state"),
+                             "switch": True, "kept": kept, "offline": self.offline()},
+                "held": True, "switch": True, "plugins": out}
+
+    def set_internet(self, rule: str, handler=None) -> dict:
+        """The internet switch set (POST /api/needs/internet): "system" or "there". Held in memory for the whole
+        platform at once, and kept as the preference pair INTERNET_PAIR in the store of the person signed in at
+        `handler`'s browser when their login keeps settings (`kept`); with a login that keeps none it holds until the
+        platform restarts. No file is written."""
+        if rule not in INTERNET_RULES:
+            raise Refused(HTTPStatus.BAD_REQUEST, f"rule is one of {', '.join(INTERNET_RULES)}")
+        with self._lock:
+            self._internet, self._internet_recalled = rule, True
+        kept = False
+        if keep_setting is not None:
+            where = keep_setting(self.user_login(handler), INTERNET_PAIR, rule, lambda value: None,
+                                 label="how the platform judges the internet for its plugins' needs")
+            kept = where == "your login's store"
+        with self._lock:
+            self._internet_kept = kept
+        self.log(f"platform: the internet {'taken as there' if rule == 'there' else 'as this system judges it'}"
+                 f" ({'kept in your login' if kept else 'until the platform restarts'})")
+        return {"rule": rule, "kept": kept}
+
+    def _recall_internet(self, handler, method: str, path: str) -> None:
+        """The internet switch brought back from the signed-in person's store, once, when their page first asks GET
+        /api/needs after a start (a page with nobody signed in brings back nothing: asked again by the next)."""
+        if method != "GET" or path != NEEDS_PATH or recall_setting is None or keeps_settings is None:
+            return
+        with self._lock:
+            if self._internet_recalled:
+                return
+        login = self.user_login(handler)
+        if not keeps_settings(login):
+            return
+        value = recall_setting(login, INTERNET_PAIR, lambda: None)
+        with self._lock:
+            if self._internet_recalled:  # set meanwhile: the switch just set wins
+                return
+            self._internet_recalled = True
+            if value in INTERNET_RULES:
+                self._internet, self._internet_kept = value, True
+
+    def _refuse_unmet(self, p) -> None:
+        """Nothing new asked of a plugin whose needs this machine does not meet (0.40.0): 409 in its needs' words. A
+        job under way runs to its end; its settings may still be kept."""
+        answer = self._judged(p)
+        if answer.get("met") is False:
+            title = str(getattr(p, "title", "") or p.name)
+            if answer.get("sort") == "machine":
+                raise Refused(HTTPStatus.CONFLICT, f"{title} is not for this machine: {answer.get('why')}")
+            raise Refused(HTTPStatus.CONFLICT, f"{title}'s needs are not met now: {answer.get('why')}. It is asked "
+                                               "again once they are")
+
     # -- the tray: the chip, then an icon per active plugin (the user, 2026-11-07: "active plugins, will be part
     # of the tray on the very right side") ------------------------------------------------------------------
     def active(self, fresh: bool = False) -> list[str]:
@@ -1083,9 +1326,9 @@ class PlatformApp(Platform):
         if cached is not None and not fresh and now - cached[0] < self.ACTIVE_SECONDS:
             return list(cached[1])
         names = []
-        off = self.disabled() | set(self._invalid)
+        off = self.disabled() | set(self._invalid) | set(self._unmet)
         for name, m in self.machines().items():
-            if name in off:
+            if name in off or self._judged(m).get("met") is False:  # 0.40.0: its needs first, asked nothing while unmet
                 continue
             self.traffic.own(m, name)
             try:
@@ -1117,8 +1360,9 @@ class PlatformApp(Platform):
             if name in hidden or name in off:
                 continue
             state = self._states.get(name)
-            if state is None:  # not asked yet: whether its key and its plan serve
-                state = "active" if self.assistant_validity(p)[0] else "invalid"
+            if state is None:  # not asked yet: its needs first (0.40.0), then whether its key and its plan serve
+                state = ("unmet" if self._judged(p).get("met") is False
+                         else "active" if self.assistant_validity(p)[0] else "invalid")
             if state == "active":
                 out.append(TrayItem(name, getattr(p, "ICON", "") or "analysis", p.title, "plugin", self.NAME))
         for group in AI_GROUPS:
@@ -1166,21 +1410,26 @@ class PlatformApp(Platform):
         """An AI assistant as the page shows it: who it is, enabled (the user's), valid (a key and a plan with API
         access) and why not; attached while both (its keys and plans are set on the charts app's Plugins view)."""
         on = self.enabled(p.name)
+        answer = self._judged(p)  # 0.40.0: its needs first, from the facts in hand; asked nothing while unmet
         self.traffic.own(p, p.name)
-        if on:
+        if on and answer.get("met") is False:
+            valid, why = False, str(answer.get("why") or "its needs are not met here")
+        elif on:
             with self.traffic.timed(self.NAME, p.name, "read", "valid? (its key, its plan)"):
                 valid, why = self.assistant_validity(p)
         else:
             valid, why = None, ""
-        state = "active" if on and valid else "disabled" if not on else "invalid"
+        state = needs_mod.state_of(on, answer, valid)
         with self._lock:
             self._states[p.name] = state
-        self._settle(p, state == "active")
+            (self._unmet.add if state == "unmet" else self._unmet.discard)(p.name)
+            self._whys[p.name] = why if state in ("invalid", "unmet") else ""
+        self._settle(p, state == "active", held=state == "unmet" and bool(answer.get("held")))
         return {"name": p.name, "title": p.title, "about": p.about, "version": p.version, "vendor": str(getattr(p, "vendor", "") or ""),
                 "icon": getattr(p, "ICON", "") or "analysis",  # its maker's mark (0.10.1), else the chart
                 "model": str(getattr(p, "default_model", "") or ""), "enabled": on, "valid": valid, "why": why, "state": state,
-                "hidden": p.name in self.hidden(), "settings": self.settings_of(p), **self.api_card(p, on),
-                **self.internal_card(p)}
+                "hidden": p.name in self.hidden(), "settings": self.settings_of(p), "needs": answer,
+                **self.api_card(p, on and state != "unmet"), **self.internal_card(p)}
 
     # -- a plugin's settings, entered on its page (the user, 2026-11-08: "i need a way to put my credentials in to the
     # namecheap plugin and allow it to function"): its keys (KeyVar), kept through the platform's login (Login.save:
@@ -1262,27 +1511,48 @@ class PlatformApp(Platform):
     def attach_plugins(self, plugins=None) -> list[str]:
         """Every platform plugin the registry loaded (the machines, the AI assistants; or `plugins`), attached
         here but those disabled and those another app holds; returns the names attached. 0.36.0: with the registry's,
-        the database plugins too (Platform.attach_needs: the kinds it needs), which no switch disables: the other apps
-        open their databases through them."""
+        the database plugins too (Platform.attach_kinds, 0.40.0: the kinds it takes), which no switch disables: the
+        other apps open their databases through them. 0.40.0: none whose required needs this machine does not meet
+        (item 38: a plugin whose needs are unmet is never started). The Windows features the plugins' rows name are
+        read first, in a thread of the reader's (the slow read, about 0.7 s): a plugin whose rows name one is attached
+        once they are read, or after FEATURES_WAIT_S, its feature then unknown; the others meanwhile."""
         self._attaching = True
-        needs = plugins is None
+        registry = plugins is None
         if plugins is None:
             from liminal_libs.sources.registry import assistants, machines
 
             plugins = [*assistants().values(), *machines().values()]
         off, out = self.disabled(), []
-        for p in plugins:
-            if p.SYSTEM != "platform" or p.name in off or (p.app is not None and p.app is not self):
-                continue
-            self.attach(p)
-            out.append(p.name)
-        if needs:
-            out += [name for name in self.attach_needs() if name not in out]
+        mine = [p for p in plugins
+                if p.SYSTEM == "platform" and p.name not in off and (p.app is None or p.app is self)]
+        rows = {p.name: needs_mod.declared(p) for p in mine}
+        features = facts_mod.wanted([r for rs in rows.values() for r in rs])[1].get("windows.feature") or []
+        reader = facts_mod.reader()
+        if features:
+            reader.begin_features(features)
+        waits = [p for p in mine if features and any(str(r.get("attribute", "")).rpartition(":")[2] == "windows.feature"
+                                                      for r in rows[p.name])]
+
+        def take(p) -> None:
+            if self._judged(p).get("met") is not False:
+                self.attach(p)
+                out.append(p.name)
+
+        for p in mine:
+            if p not in waits:
+                take(p)
+        if waits:  # once the features are read, or after FEATURES_WAIT_S (then unknown: never hidden for it)
+            reader.features_ready(facts_mod.FEATURES_WAIT_S)
+            for p in waits:
+                take(p)
+        if registry:
+            out += [name for name in self.attach_kinds() if name not in out]
         return out
 
     def instances(self) -> list[dict]:
         off = self.disabled()
-        return [i.describe() for i in docker_mod.instances(machines=[m for n, m in self.machines().items() if n not in off])]
+        return [i.describe() for i in docker_mod.instances(machines=[
+            m for n, m in self.machines().items() if n not in off and self._judged(m).get("met") is not False])]
 
     def status(self) -> dict:
         machines = {n: self.machine_status(m) for n, m in self.machines().items()}
@@ -1303,13 +1573,19 @@ class PlatformApp(Platform):
         off, hidden = self.disabled(), self.hidden()
         with self._lock:
             states = dict(self._states)
+        # 0.40.0: each one's needs, judged from the facts in hand and its not_for_here() (it asks nothing): one not met
+        # leaves the list at once, before its status comes (the needs plan's M20)
+        read = self._read_for([*self.machines().values(), *self.assistant_plugins().values()])
 
         def row(name: str, p, kind: str, icon: str) -> dict:
             machine = kind == "machine"  # an assistant's section is its kind, and it names no group under AI (0.31.0)
+            answer = self._judged(p, read)
+            state = "disabled" if name in off else "unmet" if answer.get("met") is False else states.get(name)
             return {"name": name, "title": p.title, "about": p.about, "version": p.version,
                     "icon": getattr(p, "ICON", "") or icon, "kind": kind, "section": section_of(p) if machine else kind,
                     "group": group_of(p) if machine else "", "enabled": name not in off, "hidden": name in hidden,
-                    "state": "disabled" if name in off else states.get(name)}
+                    "state": state,
+                    "needs": answer}
 
         return {"app": self.describe(), "machine": facts(), "disabled": sorted(off),
                 "plugins": [*(row(n, m, "machine", "chip") for n, m in self.machines().items()),
@@ -1342,30 +1618,63 @@ class PlatformApp(Platform):
             (names.add if active else names.discard)(name)
             self._active = (self._active[0], [n for n in order if n in names])
 
+    def _status_of(self, m) -> dict:
+        """A machine plugin's own status, the platform's login lent, attached or not (its settings read through it)."""
+        self.traffic.own(m, m.name)
+        if getattr(m, "login", None) is None:
+            m.login = self.login_for(m.name)
+        try:
+            with self.traffic.timed(self.NAME, m.name, "read", "status"):
+                status = m.status()
+        except Exception as e:  # noqa: BLE001 - a plugin's trouble is shown, not raised
+            status = {"present": False, "problem": f"{type(e).__name__}: {e}"}
+        return status if isinstance(status, dict) else {"present": False, "problem": "its status is not a mapping"}
+
     def machine_status(self, m) -> dict:
+        """A machine plugin as its page draws it. 0.40.0: its needs judged first, from the facts in hand. Not for this
+        machine: its status asked only when its not_for_here() gives words (the Admin and Firewall bases' tables of
+        elsewhere), else nothing asked; not met now: nothing asked. Met or unknown: its status as before, an `applies:
+        False` in it one more need of the machine. Its state is needs.state_of's (disabled, unmet, invalid, active);
+        unmet, it is `valid` False with its needs' why, and of the machine `status.applies` False, so a page from before
+        draws it as it did."""
         on = self.enabled(m.name)
+        answer = self._judged(m)
+        unmet = answer.get("met") is False
         if not on:  # asked nothing
             status = {"present": None, "summary": "disabled: the platform asks it nothing"}
+        elif unmet and answer.get("sort") == "machine":
+            status = (self._status_of(m) if needs_mod.own_words(m)
+                      else {"present": None, "summary": f"not for this machine: {answer.get('why')}"})
+        elif unmet:
+            status = {"present": None, "summary": f"not met now: {answer.get('why')}"}
         else:
-            self.traffic.own(m, m.name)
-            if getattr(m, "login", None) is None:  # the platform's login lent, attached or not: its settings read through it
-                m.login = self.login_for(m.name)
-            try:
-                with self.traffic.timed(self.NAME, m.name, "read", "status"):
-                    status = m.status()
-            except Exception as e:  # noqa: BLE001 - a plugin's trouble is shown, not raised
-                status = {"present": False, "problem": f"{type(e).__name__}: {e}"}
+            status = self._status_of(m)
+        elsewhere = ""
+        if on and status.get("applies") is False and not needs_mod.own_words(m):
+            elsewhere = str(status.get("why") or status.get("problem") or status.get("summary") or "not for this machine")
+        with self._lock:
+            changed = self._elsewhere.get(m.name, "") != elsewhere
+            (self._elsewhere.__setitem__(m.name, elsewhere) if elsewhere else self._elsewhere.pop(m.name, None))
+        if changed:
+            answer = self._judged(m)
+            unmet = answer.get("met") is False
         valid, why = None, ""
-        if on:  # its own word when it says (liminal-libs 1.24.0), else present without a problem
+        if on and unmet:
+            valid, why = False, str(answer.get("why") or "its needs are not met here")
+        elif on:  # its own word when it says (liminal-libs 1.24.0), else present without a problem
             valid = bool(status["valid"]) if "valid" in status else bool(status.get("present")) and not status.get("problem")
             why = "" if valid else str(status.get("why") or status.get("problem") or status.get("summary") or "not present")
-        state = "active" if on and valid else "disabled" if not on else "invalid"
+        state = needs_mod.state_of(on, answer, valid)
+        if state == "unmet" and answer.get("sort") == "machine":
+            status = {**status, "applies": False}
         with self._lock:
             (self._invalid.add if state == "invalid" else self._invalid.discard)(m.name)
+            (self._unmet.add if state == "unmet" else self._unmet.discard)(m.name)
             self._states[m.name] = state
-            self._whys[m.name] = why if state == "invalid" else ("turned off on its page or in the tray" if not on else "")
+            self._whys[m.name] = (why if state in ("invalid", "unmet")
+                                  else ("turned off on its page or in the tray" if not on else ""))
         self._tray_follows(m.name, state == "active")
-        self._settle(m, state == "active")
+        self._settle(m, state == "active", held=state == "unmet" and bool(answer.get("held")))
         with self._lock:
             setup = self._setups.get(m.name)
         return {"name": m.name, "title": m.title, "about": m.about, "version": m.version, "status": status,
@@ -1375,7 +1684,8 @@ class PlatformApp(Platform):
                 "hidden": m.name in self.hidden(), "steps": list(getattr(m, "STEPS", ()) or ()), "asks": self.asks(m) if state == "active" else [],
                 "tabs": tabs_of(m), "hooks": self.hooks(m), "setup": setup.describe(last=200) if setup else None,
                 "terminal": {"open": self.terminal_of(m.name) is not None}, "settings": self.settings_of(m),
-                **self.api_card(m, on), **self.internal_card(m, status if on else None)}
+                "needs": answer, **self.api_card(m, on and state != "unmet"),
+                **self.internal_card(m, status if on and state != "unmet" else None)}
 
     @staticmethod
     def api_card(p, live: bool = True) -> dict:
@@ -1443,7 +1753,8 @@ class PlatformApp(Platform):
     def plugin_state(self, name: str) -> dict:
         """The platform's last word on a plugin (0.37.0; service-containers-design §3.10), asked nothing: its state
         (active, disabled, invalid; unknown before its first look; not installed) and why, and where its page is. A
-        service plugin says with it why a container plugin it lists is not active."""
+        service plugin says with it why a container plugin it lists is not active. 0.40.0: "unmet", with its needs' why,
+        for one whose needs this machine does not meet."""
         key = str(name or "")
         with self._lock:
             state, why = self._states.get(key), self._whys.get(key, "")
@@ -1563,6 +1874,7 @@ class PlatformApp(Platform):
         caller = who or self.NAME
         m = self.machine(name)
         self._refuse_disabled(name)
+        self._refuse_unmet(m)  # 0.40.0: nothing new while its needs are unmet (409)
         plugin = who if who and who != self.NAME else None  # a plugin asking another through the platform
         named = None if plugin == PAGE else plugin
         with _asked_by(named) if plugin else contextlib.nullcontext():
@@ -1663,6 +1975,7 @@ class PlatformApp(Platform):
             raise Refused(HTTPStatus.NOT_FOUND, f"{name} takes no requests here: it names none of its hooks for them "
                                                 "(RPC_HOOK)")
         self._refuse_disabled(name)
+        self._refuse_unmet(m)
         with self._lock:
             self._refuse_stopping()
         heard, gone, title = rpc_headers(handler), gone_of(handler), str(getattr(m, "title", "") or name)
@@ -1686,6 +1999,7 @@ class PlatformApp(Platform):
         environment to see if it supports installing the operating system it has in its name\")."""
         m = self.machine(name)
         self._refuse_disabled(name)
+        self._refuse_unmet(m)
         if "check" not in self.hooks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} checks nothing")
         try:
@@ -1700,6 +2014,7 @@ class PlatformApp(Platform):
         locked out\"); the steps that prepare this PC (WSL itself) are never locked; an update needs it installed."""
         m = self.machine(name)
         self._refuse_disabled(name)
+        self._refuse_unmet(m)
         hooks = self.hooks(m)
         if action == "update":
             if "update_packages" not in hooks:
@@ -1736,6 +2051,7 @@ class PlatformApp(Platform):
         a hook that prints its first line or ends sooner is not waited for longer."""
         m = self.machine(name)
         self._refuse_disabled(name)
+        self._refuse_unmet(m)
         if hook not in self.asks(m) or hook not in tuple(getattr(m, "JOB_HOOKS", ()) or ()):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} runs no {hook!r} as a job")
         if not isinstance(args, list) or len(args) > 16:
@@ -1847,6 +2163,7 @@ class PlatformApp(Platform):
         the platform."""
         m = self.machine(name)
         self._refuse_disabled(name)
+        self._refuse_unmet(m)
         if "terminal" not in self.hooks(m):
             raise Refused(HTTPStatus.BAD_REQUEST, f"{name} offers no terminal")
         self._close_idle()
@@ -2011,6 +2328,7 @@ class PlatformApp(Platform):
 
     def api(self, handler, method: str, path: str, query: dict, body: dict | None):
         body = body or {}
+        self._recall_internet(handler, method, path)  # 0.40.0: GET /api/needs (the frame's) brings the switch back once
         if method == "GET" and path == "/api/status":
             return 200, self.status()
         if method == "GET" and path == "/api/overview":  # 0.21.0: at once, no plugin asked; then each part on its own
@@ -2032,6 +2350,9 @@ class PlatformApp(Platform):
                 return 200, self.instances_asked(body)
             except db_section.Asked as e:  # the plugin's words, and what accepts its refusal (a second confirmation)
                 return e.status, e.answer()
+        if method == "POST" and path == "/api/needs/internet":  # 0.40.0: the internet switch {rule: system | there}
+            self._at_the_page(handler, "The internet switch is set")
+            return 200, self.set_internet(body.get("rule"), handler)
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/settings"):
             self._at_the_page(handler, "A plugin's settings are kept")  # 0.39.1: the page's own routes ask the login
             return 200, self.save_settings(path[len("/api/plugins/"):-len("/settings")], body)

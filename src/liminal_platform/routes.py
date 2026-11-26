@@ -37,6 +37,10 @@ ROUTES = (
                                          "(confirm: true), a refusal with what accepts it (a server off this machine: "
                                          "asked twice); a password never logged or echoed; a change (all but test)"
                                          " refused (401) when the login says you are not at the page", "change", "page"),
+    ("POST", "/api/needs/internet", "the internet switch {rule: system | there} (0.40.0): how every plugin's internet "
+                                    "need is judged, as this system judges it or taken as there; held in memory, kept "
+                                    "in the signed-in person's own store when their login keeps settings (kept: true)"
+     + AT_THE_PAGE, "change", "page"),
     ("POST", "/api/plugins/{name}/settings", "a plugin's settings kept through the login {values, forget}: its own "
                                              "keys only, a value never shown back or logged" + AT_THE_PAGE,
      "change", "page"),

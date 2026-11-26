@@ -121,10 +121,10 @@ def post(app, **form):
 
 # -- the platform core under the platform app ----------------------------------------------------------------------------
 def test_the_platform_app_is_the_platform_core_and_the_one_writer():
-    assert issubclass(PlatformApp, Platform) and PlatformApp.PLATFORM_NEEDS == ("database",)
+    assert issubclass(PlatformApp, Platform) and PlatformApp.PLATFORM_KINDS == ("database",)
     assert PlatformApp.PLATFORM_WRITER is True and DATABASES_SECTION == "databases" == DatabasePlugin.SECTION
     app = PlatformApp(log=lambda m: None, login=EnvironmentLogin(env={}), machines={}, assistants={})
-    assert app.is_platform and app.needs("database") and not app.needs("machine")  # its machines are its own, as before
+    assert app.is_platform and app.takes("database") and not app.takes("machine")  # its machines are its own, as before
 
 
 def test_the_registrys_plugins_attach_the_database_plugins_too(found):

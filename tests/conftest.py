@@ -181,6 +181,22 @@ def _none_of_this_users_saved_variables(monkeypatch):
     monkeypatch.setattr(app_module, "saved_variables", lambda: {})
 
 
+@pytest.fixture(autouse=True)
+def stand_in_facts():
+    """Every test (0.40.0, the needs plan's M14): this machine's facts for the plugins' needs are a recorded machine's
+    (liminal-libs 1.103.0's needs_machines: this PC's on Windows, a plain Ubuntu's elsewhere), so every need the system
+    the suite runs on can meet is met and nothing of this machine is read, even by a test that missed its seam (the real
+    reads refuse under a test as well: facts.refused). A test names another machine with
+    facts.use(needs_machines.reader(NAME)); the one before is put back after."""
+    from liminal_libs import facts, needs_machines
+
+    before = facts.use(needs_machines.reader("this-pc" if os.name == "nt" else "ubuntu-26.04"))
+    try:
+        yield
+    finally:
+        facts.use(before)
+
+
 HOSTS_VARIABLE = "LIMINAL_HOSTS_RECORDING"  # liminal-libs 1.65.0's hostbook.VARIABLE, named here for older libraries
 
 

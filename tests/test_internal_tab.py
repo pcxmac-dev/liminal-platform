@@ -349,7 +349,9 @@ INDIRECT = {"instances": "liminal_libs.docker.instances asks each machine plugin
             # 0.36.0: a database plugin's, through the library's Databases section (liminal_libs.apps.databases)
             **{n: "liminal_libs.apps.databases: the section's overview and forms" for n in (
                 "test", "new_database", "connect_to", "share", "set_port", "set_credentials", "forget", "ENGINE",
-                "SERVER")}}
+                "SERVER")},
+            # 0.40.0: a plugin's needs, read and asked through liminal-libs' needs.py (declared, says, own_words)
+            "NEEDS": "liminal_libs.needs.declared and says read it", "not_for_here": "liminal_libs.needs.own_words"}
 
 
 def _plugin(node) -> bool:
