@@ -10,7 +10,7 @@ asks (PLUGIN_ONLY_HOOKS) is never asked over HTTP, one only its page asks (PAGE_
 0.36.0 (Monday list item 30, step 2; the user, 2026-11-24: "inheritance bro", "through the rust interface";
 2026-11-25: the instance forms move to the platform's Databases section, the platform the only writer of instance
 settings): PlatformApp is built on liminal-libs 1.90.0's platform core (apps/platform.py: Platform), which the charts
-and the integrator inherit too. It attaches the database plugins (PLATFORM_NEEDS), it is the one writer of their
+and the integrator inherit too. It attaches the database plugins (PLATFORM_KINDS), it is the one writer of their
 instance settings (PLATFORM_WRITER), it answers the Databases section's two routes (GET /api/databases/plugins, POST
 /api/databases/instances: liminal_libs.apps.databases) and, once served, serves the section as the liminal-net node
 platform-databases (cli.cmd_serve: serve_databases), which the other apps reach for a change.
