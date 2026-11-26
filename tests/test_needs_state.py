@@ -174,6 +174,25 @@ def test_a_status_that_says_it_does_not_apply_is_one_need_of_the_machine(this_pc
     assert e.value.status == 409 and "not for this machine" in e.value.reason
 
 
+def test_a_status_that_says_it_does_not_apply_stays_unmet_read_after_read(this_pc):
+    p = SaysNoApply()
+    app = app_of(p)
+    for _ in range(3):  # each read the same: never 'invalid' between (the review of 0.40.0)
+        answer = app.machine_status(p)
+        assert answer["state"] == "unmet" and answer["needs"]["sort"] == "machine" and "only on a Mac" in answer["why"]
+        assert answer["status"]["applies"] is False
+    assert p.name in app._unmet and p.name not in app._invalid
+
+
+def test_a_status_that_no_longer_says_it_does_not_apply_comes_back(this_pc):
+    p = SaysNoApply()
+    app = app_of(p)
+    assert app.machine_status(p)["state"] == "unmet"
+    p.status = lambda: {"present": True}
+    answer = app.machine_status(p)
+    assert answer["state"] == "active" and answer["needs"]["met"] is not False
+
+
 def test_a_need_of_the_moment_asks_nothing_and_says_how(this_pc):
     p = ContainersOnly()  # this PC's Containers and Windows Sandbox are off (map-facts, 2026-11-17)
     app = app_of(p)

@@ -1633,25 +1633,32 @@ class PlatformApp(Platform):
     def machine_status(self, m) -> dict:
         """A machine plugin as its page draws it. 0.40.0: its needs judged first, from the facts in hand. Not for this
         machine: its status asked only when its not_for_here() gives words (the Admin and Firewall bases' tables of
-        elsewhere), else nothing asked; not met now: nothing asked. Met or unknown: its status as before, an `applies:
+        elsewhere) or when its own status said so before (asked again, so it stays unmet and can come back), else nothing
+        asked; not met now: nothing asked. Met or unknown: its status as before, an `applies:
         False` in it one more need of the machine. Its state is needs.state_of's (disabled, unmet, invalid, active);
         unmet, it is `valid` False with its needs' why, and of the machine `status.applies` False, so a page from before
         draws it as it did."""
         on = self.enabled(m.name)
         answer = self._judged(m)
         unmet = answer.get("met") is False
+        with self._lock:
+            held_words = self._elsewhere.get(m.name, "")
+        asked = False  # whether its own status was asked: only then can it change what its status said before
         if not on:  # asked nothing
             status = {"present": None, "summary": "disabled: the platform asks it nothing"}
-        elif unmet and answer.get("sort") == "machine":
-            status = (self._status_of(m) if needs_mod.own_words(m)
-                      else {"present": None, "summary": f"not for this machine: {answer.get('why')}"})
+        elif unmet and answer.get("sort") == "machine" and not (needs_mod.own_words(m) or held_words):
+            status = {"present": None, "summary": f"not for this machine: {answer.get('why')}"}
+        elif unmet and answer.get("sort") == "machine":  # its own words, or its status said so before: asked again
+            status, asked = self._status_of(m), True
         elif unmet:
             status = {"present": None, "summary": f"not met now: {answer.get('why')}"}
         else:
-            status = self._status_of(m)
-        elsewhere = ""
-        if on and status.get("applies") is False and not needs_mod.own_words(m):
-            elsewhere = str(status.get("why") or status.get("problem") or status.get("summary") or "not for this machine")
+            status, asked = self._status_of(m), True
+        elsewhere = held_words
+        if asked:
+            elsewhere = ""
+            if status.get("applies") is False and not needs_mod.own_words(m):
+                elsewhere = str(status.get("why") or status.get("problem") or status.get("summary") or "not for this machine")
         with self._lock:
             changed = self._elsewhere.get(m.name, "") != elsewhere
             (self._elsewhere.__setitem__(m.name, elsewhere) if elsewhere else self._elsewhere.pop(m.name, None))
