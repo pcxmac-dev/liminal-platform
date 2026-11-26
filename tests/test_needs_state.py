@@ -21,6 +21,13 @@ from liminal_platform.app import INTERNET_PAIR, PlatformApp
 pytestmark = pytest.mark.usefixtures("no_outside")  # nothing started, served or reached (tests/conftest.py)
 
 
+class Row:
+    """A stand-in row of the ledger (lifecycle.Row): its process's id and when it started."""
+
+    def __init__(self, pid: int, started: int | None):
+        self.pid, self.started = pid, started
+
+
 class Counted(Box):
     """A stand-in machine plugin that counts what it is asked."""
 
@@ -273,8 +280,10 @@ def test_unmet_once_attached_is_let_go_only_after_its_job_and_its_processes(monk
     p.setup = setup
     job = app.start_setup(p.name, ["slow"])
     assert ran.wait(5)
-    mine = {"windowsy": ["a row"]}
+    mine = {"windowsy": [Row(4242, 77)]}
     monkeypatch.setattr(app_module.lifecycle, "mine", lambda owner=None: list(mine.get(owner, [])))
+    monkeypatch.setattr(app_module.proc_mod, "pid_alive", lambda pid: pid == 4242)
+    monkeypatch.setattr(app_module.proc_mod, "started", lambda pid: 77 if pid == 4242 else None)
     older = copy.deepcopy(needs_machines.facts_of("this-pc"))
     older["windows"]["build"] = 26100  # its build need is unmet now (of the moment: Windows Update)
     facts.use(facts.StandIn(older))
@@ -288,6 +297,23 @@ def test_unmet_once_attached_is_let_go_only_after_its_job_and_its_processes(monk
     assert app.machine_status(p)["state"] == "unmet" and app.plugin(p.name) is p  # its process is in the ledger
     mine.clear()
     assert app.machine_status(p)["state"] == "unmet" and app.plugin(p.name) is None  # let go at the first read after
+
+
+def test_a_process_that_ended_by_itself_holds_nothing_back(monkeypatch, this_pc):
+    p = Windowsy()
+    app = app_of(p)
+    app.attach_plugins([p])
+    rows = [Row(4242, 77), Row(4343, 88)]  # still in the ledger: only end_owned takes rows out
+    monkeypatch.setattr(app_module.lifecycle, "mine", lambda owner=None: list(rows) if owner == p.name else [])
+    monkeypatch.setattr(app_module.proc_mod, "pid_alive", lambda pid: pid == 4343)  # 4242 ended
+    monkeypatch.setattr(app_module.proc_mod, "started", lambda pid: 99 if pid == 4343 else None)  # 4343 reused
+    ended = []  # the detach ends what is left of it: told, nothing signalled here
+    monkeypatch.setattr(app_module.lifecycle, "end_owned", lambda owner, *a, **k: ended.append(owner) or [])
+    older = copy.deepcopy(needs_machines.facts_of("this-pc"))
+    older["windows"]["build"] = 26100
+    facts.use(facts.StandIn(older))
+    assert app.machine_status(p)["state"] == "unmet" and app.plugin(p.name) is None  # nothing of it runs: let go
+    assert ended == [p.name]
 
 
 def test_the_switch_lets_go_at_once_as_before(this_pc):

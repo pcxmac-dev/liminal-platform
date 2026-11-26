@@ -44,6 +44,7 @@ from liminal_libs import docker as docker_mod
 from liminal_libs import layout, lifecycle
 from liminal_libs import facts as facts_mod  # this machine's facts, read without sending anything (liminal-libs 1.103.0)
 from liminal_libs import needs as needs_mod  # what a plugin needs of the machine, and its judgement (1.103.0)
+from liminal_libs import proc as proc_mod  # whether a process of the ledger still runs (_busy)
 from liminal_libs.apps import App, EnvironmentLogin, Refused, TrayItem, Unauthorized, program_name, saved_variables
 from liminal_libs.apps import databases as db_section  # the Databases section's overview and forms (liminal-libs 1.90.0)
 from liminal_libs.apps.platform import Platform  # the platform's core, the base the apps inherit (liminal-libs 1.90.0)
@@ -1124,13 +1125,17 @@ class PlatformApp(Platform):
                 self.detach(p.name)
 
     def _busy(self, name: str) -> bool:
-        """Whether a job of the plugin runs, or a process it started is in this process's ledger (0.40.0)."""
+        """Whether a job of the plugin runs, or a process it started is in this process's ledger and still runs (0.40.0).
+        A row stays in the ledger after its process ended by itself (only end_owned takes rows out), so a row counts only
+        while its process is alive and started when it started (never a reused id); else a plugin that ever started
+        anything would never be let go."""
         with self._lock:
             setup = self._setups.get(name)
         if setup is not None and setup.running:
             return True
         try:
-            return bool(lifecycle.mine(name))
+            return any(r.started is not None and proc_mod.pid_alive(r.pid) and proc_mod.started(r.pid) == r.started
+                       for r in lifecycle.mine(name))
         except Exception:  # noqa: BLE001 - a ledger that cannot say holds nothing back
             return False
 
