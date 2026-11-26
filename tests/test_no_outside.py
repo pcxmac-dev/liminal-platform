@@ -99,7 +99,8 @@ def test_a_firewall_the_platform_attaches_under_a_login_that_says_always_starts_
         no_real_hosts.clear()  # (read on purpose: the guard's own check at the end stays quiet)
         assert hostbook.path().is_relative_to(tmp_path) and infrastructure.folder().is_relative_to(tmp_path)
         assert view.book.path.is_relative_to(tmp_path) and view.index.folder.is_relative_to(tmp_path)
-        assert geo.data_folder().is_relative_to(tmp_path) and wall.world_view().folder.is_relative_to(tmp_path)
+        assert geo.data_folder().is_relative_to(tmp_path) and (wall.world_view(make=False) is None  # 1.105.0: no view
+                                                                    or wall.world_view().folder.is_relative_to(tmp_path))
         assert not hostbook.path().exists()  # nothing was kept
     finally:
         app.detach("wall")
@@ -146,9 +147,16 @@ def test_a_host_on_the_internet_is_placed_by_the_tests_own_geoip_folder_alone(mo
 
     looked: list = []
     monkeypatch.setattr(geo.GeoIP, "find", classmethod(lambda cls, folder=None, *args, **kw: looked.append(folder)))
+    from liminal_libs.machines.firewall import Firewall
+
     wall = Wall()
     wall.sockets = [sock(remote="81.2.69.142", remote_port=443, started=time.time() - 60)]
-    app = PlatformApp(log=lambda m: None, machines={"wall": wall}, assistants={}, state=tmp_path / "platform")
+    machines = {"wall": wall}
+    if not callable(getattr(Firewall, "world", None)):  # 0.39.2, liminal-libs 1.105.0: the places are the World Wide
+        from test_worldwideweb import Web  # Web plugin's, its GeoIP folder the data folder's (the guard's)
+        machines["worldwideweb"] = Web(None)
+    app = PlatformApp(log=lambda m: None, machines=machines, assistants={}, state=tmp_path / "platform")
+    app.attach_plugins(list(machines.values()))
     try:
         status, out = app.api(None, "POST", "/api/machines/wall/ask", {}, {"hook": "netstat", "args": []})
     finally:
