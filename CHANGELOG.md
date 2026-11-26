@@ -20,6 +20,11 @@ every page of the platform's.
 - Connections: the part picked is told under the tool (its links among its facts), Unpick or Escape letting it go.
 - Codebase: the side the tool, the repository picked under it.
 - A library without side.js (before 1.105.0): the side drawn whole, as before. No route changed.
+- The World Wide Web tab as a plugin of its own (Monday list item 33: plugin-platform-worldwideweb 0.1.0 on liminal-libs
+  1.105.0): an old address of a firewall's tab (#firewall-windows/world, #firewall-linux/world) is written again as
+  #worldwideweb/world once that plugin is listed and the firewall, loaded, no longer declares the tab; a firewall that
+  still has it (an older library) keeps its address. Nothing else of the platform changes for it: its tab is drawn as
+  every plugin's, and its asks of a firewall go through the platform's ask as every plugin's.
 
 ## 0.40.0 (2026-11-26)
 

@@ -3459,10 +3459,22 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   // 0.32.0: an address written before names the API tab (#name/api). It opens External API (tabOf) and is written
   // again in place as #name/external, so the address says what is shown (decision C3); the platform's own entry has
   // External API at its own address, so #app/api and #app/external are written again as #app
+  // 0.39.2 (Monday list item 33): the World Wide Web tab left the firewalls for a plugin of its own,
+  // plugin-platform-worldwideweb (liminal-libs 1.105.0): an address of a firewall's tab (a link, a bookmark, a page left
+  // open) goes to that plugin's, once it is listed and the firewall, loaded, declares no such tab. A firewall that still
+  // has the tab (an older library) keeps its address.
+  const WWW = 'worldwideweb', OLD_WWW = /^firewall-(windows|linux)$/;
+  function wwwMoved(name, tab) {
+    const fw = st && st.machines && st.machines[name];
+    return tab === 'world' && OLD_WWW.test(name || '') && !!fw && !!st.machines[WWW]
+      && !declaredTabs(fw).some((t) => t.id === 'world');
+  }
+
   function oldAddress() {
     const [name, tab] = hashParts(), mine = name === OWN && !!window.LiminalInternal;
     const again = mine && (tab === 'api' || tab === 'external') ? `#${OWN}`
-      : name && tab === 'api' ? `#${enc(name)}/external` : '';
+      : name && tab === 'api' ? `#${enc(name)}/external`
+      : wwwMoved(name, tab) ? `#${WWW}/world` : '';
     try {
       if (again) history.replaceState(null, '', again);
     } catch (e) { /* a page that may not: tabOf reads #name/api as External API all the same */ }

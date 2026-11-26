@@ -443,6 +443,11 @@ def test_a_firewalls_netstat_and_its_globes_layers_through_the_platform(tmp_path
     own words and shapes are the library's tests'. Asked of the app directly: nothing served, no port opened, no socket
     table read but the stand-in."""
     pytest.importorskip("liminal_libs.machines.netstat", reason="a library before 1.65.0 has no Netstat tab")
+    from liminal_libs.machines.firewall import Firewall
+
+    if not callable(getattr(Firewall, "world", None)):
+        pytest.skip("liminal-libs 1.105.0: the globe's layers and picks are the World Wide Web plugin's "
+                    "(test_worldwideweb.py)")
     now, lines, wall = time.time(), [], Wall()
     wall.sockets = [sock(local_port=51000, remote="192.168.1.50", remote_port=445, started=now - 3 * 86400),
                     sock(local="0.0.0.0", local_port=8775, state="listening", pid=901, program="python.exe",
