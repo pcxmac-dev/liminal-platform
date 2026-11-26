@@ -30,3 +30,21 @@ def test_a_machine_disabled_and_enabled_from_the_command_line(monkeypatch, capsy
     assert cli.main(["machine", "box", "setup"]) == 2 and "box is disabled" in capsys.readouterr().err and box.setups == []
     assert cli.main(["machine", "box", "enable"]) == 0 and capsys.readouterr().out == "box: enabled\n"
     assert cli.main(["status"]) == 0 and "box: A box; present" in capsys.readouterr().out
+
+
+class Linuxy(Box):
+    name, title = "linuxy", "Linuxy"
+    NEEDS = (("kernel", "linux", "required", "its Linux programs"),)
+
+
+def test_a_machine_whose_needs_are_unmet_is_said_and_asked_nothing(monkeypatch, capsys):
+    """0.40.0: the status says a plugin's needs in the page's words, and its setup is refused before it is asked."""
+    from liminal_libs import facts, needs_machines
+
+    facts.use(needs_machines.reader("this-pc"))  # Windows: a Linux plugin is not for this machine
+    box = Linuxy()
+    monkeypatch.setattr(cli, "_app", lambda log=print: PlatformApp(log=lambda m: None, machines={"linuxy": box}))
+    assert cli.main(["status"]) == 0
+    assert "linuxy: Linuxy; not for this machine: " in capsys.readouterr().out
+    assert cli.main(["machine", "linuxy", "setup"]) == 2 and "linuxy is not for this machine" in capsys.readouterr().err
+    assert box.setups == []

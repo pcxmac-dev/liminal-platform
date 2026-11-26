@@ -191,7 +191,12 @@ def cmd_status(args) -> int:
         if not app.enabled(name):
             print(f"{name}: {m.title}; disabled")
             continue
-        st = app.machine_status(m)["status"]
+        answer = app.machine_status(m)
+        st = answer["status"]
+        if answer.get("state") == "unmet":  # 0.40.0: its needs, in the page's words
+            sort = (answer.get("needs") or {}).get("sort")
+            print(f"{name}: {m.title}; {'not for this machine' if sort == 'machine' else 'not met now'}: {answer['why']}")
+            continue
         engine = st.get("engine") or {}
         print(f"{name}: {m.title}; " + ("present" if st.get("present") else "not present")
               + (f"; Docker inside {'running' if engine.get('running') else 'installed, not running'} ({engine.get('version')})" if engine.get("installed") else "; no Docker inside")
@@ -217,6 +222,11 @@ def cmd_machine(args) -> int:
         return 0
     if not app.enabled(m.name):
         print(f"{m.name} is disabled: liminal-platform machine {m.name} enable", file=sys.stderr)
+        return 2
+    needs = app.needs_of(m)  # 0.40.0: nothing asked of a plugin whose needs are unmet
+    if needs.get("met") is False:
+        print(f"{m.name} is {'not for this machine' if needs.get('sort') == 'machine' else 'not met now'}: "
+              f"{needs.get('why')}", file=sys.stderr)
         return 2
     if args.action == "setup":
         done = m.setup(log=print, steps=args.rest or None)
