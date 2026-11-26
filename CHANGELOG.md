@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.39.1 (2026-11-25)
+
+The page's own routes ask the login too (the review of the sweep after PLT-H1, 2026-11-25: its findings on the
+platform, rated high). 0.34.0 asks its login before a hook a plugin says only its page asks (`PAGE_ONLY_HOOKS`), on
+`POST /api/machines/{name}/ask` and `/job {action: hook}`. The page's other routes ask no hook by name, so no plugin's
+word reached them, and any program on this PC sent them with the two headers PLT-H1 named and no sign-in:
+- `POST /api/machines/{name}/terminal` and `/terminal/input` opened a login terminal and typed into it: a shell in a
+  WSL distribution, though the library's WSL base says `terminal` is its page's alone (the route calls `terminal()`
+  itself and never read the word). `GET .../terminal` read what the shell printed.
+- `POST /api/machines/{name}/setup` and `/job {action: install | update}` ran a plugin's setup and its packages'
+  update (`update_packages`: the WSL base's word names it too).
+- `POST /api/plugins/{name}/settings` kept or forgot a plugin's settings: a cloud plugin's Dynamic DNS hosts, which
+  its own background then writes as records with your token (what its page-only `ddns_update` was to stop), its token
+  forgotten, the ports hw-stats lists.
+- `POST /api/plugins/{name}/enabled`, `/api/machines/{name}/enabled` and `/api/plugins/{name}/hidden` switched a
+  plugin off or out of the dock: a model server's plugin switched off stops every server a click started and cancels
+  its install. `POST /api/machines/{name}/job/cancel` stopped a job.
+- `POST /api/databases/instances` made, connected, shared, moved and forgot a database's instance: its `confirm` and
+  `accept_remote` are arguments the asker sets.
+
+Each now answers 401 when the login says you are not at the page (`App.present` False: today, a browser not signed in
+to the platform), before the request is read any further: nothing is looked up, changed, started, typed or logged.
+Each is answered as before when the login says you are there, or when the platform holds no login. The page sends them
+from a signed-in browser, so it works as it did; a refusal is said on the plugin's page, in the route's own words.
+- Asked by anyone, as before: every read (the status, the overview, a job's lines, a check), an instance's `test` in
+  the Databases section, and a hook asked by name, which its plugin's own words hold (0.34.0). The command line calls
+  a plugin's setup in its own process, not through a route.
+- **What this does not close.** The login's word is that a browser is signed in, and a local login signs `secret` and
+  `default` in with no password, so a program on this PC can sign itself in and send them still, in two requests where
+  one did: a speed bump, as README.md says of the hooks. A proof that a program cannot make is the login's and the
+  platform's to give.
+- routes.py says it of each route (`AT_THE_PAGE`), so the platform's Internal API tab lists it.
+- Tests: `tests/test_page_routes.py`, the app asked as its server asks it, over a stand-in plugin that says neither
+  word, a stand-in shell and a login kept in a dict: each of the nineteen requests refused (401) when the login says
+  you are not there, the login shown each request once, nothing kept, switched, started, typed, read, closed or
+  logged; each answered as before when it says you are there and when the platform holds no login; the reads answered
+  and the login asked nothing for them; the routes table saying it of each and of no other. The check taken out of any
+  one route fails it.
+
 ## 0.39.0 (2026-11-25)
 
 The Source Control section (Monday list item 35; the user, 2026-11-22: "another class of plugins for platform,

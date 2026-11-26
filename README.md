@@ -171,6 +171,14 @@ one); no one otherwise.
   there (`App.present`: today, a browser signed in to the platform's login), refused (401) when it says you are not,
   and asked when the platform holds no login. A signed-in session can be opened by any program that signs in as the
   passwordless user: it is a speed bump, not a proof. The proof the user picks later takes its place there.
+- The page's own routes ask the login the same way (0.39.1). They ask no hook by name, so no plugin's word reaches
+  them: a plugin's settings (`POST /api/plugins/{name}/settings`), its switches (`.../enabled`, `.../hidden`,
+  `/api/machines/{name}/enabled`), its setup, its install and its packages' update (`.../setup`, `.../job`), a job's
+  Cancel (`.../job/cancel`), its login terminal (opened, read, typed into, closed) and a change in the Databases
+  section (`POST /api/databases/instances`, all but `test`). Each is refused (401) when the login says you are not
+  there, before it is read any further, and answered as before when it says you are or when the platform holds no
+  login. Before, any program on this PC sent them with two headers: a shell in a WSL distribution, a cloud plugin's
+  Dynamic DNS hosts set. It is the same speed bump, and the same proof takes its place.
 - A plugin whose words cannot be read is asked nothing by name. A plugin that says neither word is asked as before, and
   the login is asked nothing for it.
 - With a liminal-libs before 1.66.0 the platform reads the two words from the plugin itself and holds them the same;

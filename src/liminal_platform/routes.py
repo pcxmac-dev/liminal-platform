@@ -14,6 +14,9 @@ chain does not answer, or a class other than classify's fails it. So a route add
 from __future__ import annotations
 
 MACHINE = "/api/machines/{name}"  # one machine plugin's routes start here
+# 0.39.1: what is said of a route of the page's own that changes something, and of a login terminal's four: none asks
+# a hook by name, so the platform asks its login there itself (PlatformApp._at_the_page), as for a page-only hook
+AT_THE_PAGE = "; refused (401) when the login says you are not at the page"
 
 ROUTES = (
     ("GET", "/api/status", "everything at once: this machine, Docker, every plugin's status, the instances and the "
@@ -32,13 +35,15 @@ ROUTES = (
     ("POST", "/api/databases/instances", "one of a database plugin's forms {plugin, action, name, ...}: test, new, "
                                          "connect, share, port, credentials or forget; a change only once confirmed "
                                          "(confirm: true), a refusal with what accepts it (a server off this machine: "
-                                         "asked twice); a password never logged or echoed", "change", "page"),
+                                         "asked twice); a password never logged or echoed; a change (all but test)"
+                                         " refused (401) when the login says you are not at the page", "change", "page"),
     ("POST", "/api/plugins/{name}/settings", "a plugin's settings kept through the login {values, forget}: its own "
-                                             "keys only, a value never shown back or logged", "change", "page"),
-    ("POST", "/api/plugins/{name}/enabled", "a plugin enabled or disabled {on}: disabled, it is asked nothing and "
-                                            "detached", "change", "page"),
-    ("POST", "/api/plugins/{name}/hidden", "a plugin's icon hidden from the dock, or shown there again {on}",
+                                             "keys only, a value never shown back or logged" + AT_THE_PAGE,
      "change", "page"),
+    ("POST", "/api/plugins/{name}/enabled", "a plugin enabled or disabled {on}: disabled, it is asked nothing and "
+                                            "detached" + AT_THE_PAGE, "change", "page"),
+    ("POST", "/api/plugins/{name}/hidden", "a plugin's icon hidden from the dock, or shown there again {on}"
+     + AT_THE_PAGE, "change", "page"),
     ("GET", MACHINE, "one machine plugin's status: what its page draws (its tabs, its hooks, its External and "
                      "Internal API)", "read", "page"),
     ("GET", MACHINE + "/setup", "its setup or job under way, or its last one, with its lines", "stream", "client"),
@@ -46,19 +51,22 @@ ROUTES = (
                               "most)", "stream", "page"),
     ("GET", MACHINE + "/check", "its check of this machine for what it installs", "read", "page"),
     ("POST", MACHINE + "/job/cancel", "its job under way asked to stop {startedAt}: only a job whose hook its "
-                                      "CANCEL_HOOKS names, which ends by itself between its steps", "change",
-     "page"),
+                                      "CANCEL_HOOKS names, which ends by itself between its steps" + AT_THE_PAGE,
+     "change", "page"),
     ("POST", MACHINE + "/job", "a job started {action: install | update | hook, hook, args}: its setup, its "
                                "packages' update, or one of its JOB_HOOKS with its arguments (a hook refused as /ask "
-                               "refuses it; the page its asker, in the job's own thread too)", "change", "page"),
-    ("POST", MACHINE + "/terminal", "its login terminal opened, or the one open given back from its last lines",
+                               "refuses it; the page its asker, in the job's own thread too); an install or an update"
+                               " refused (401) when the login says you are not at the page", "change", "page"),
+    ("POST", MACHINE + "/terminal", "its login terminal opened, or the one open given back from its last lines"
+     + AT_THE_PAGE, "stream", "page"),
+    ("GET", MACHINE + "/terminal", "its terminal's output after an offset (?since=, ?wait=)" + AT_THE_PAGE,
      "stream", "page"),
-    ("GET", MACHINE + "/terminal", "its terminal's output after an offset (?since=, ?wait=)", "stream", "page"),
     ("POST", MACHINE + "/terminal/input", "keys typed into its terminal {data}: the request noted in who talks to "
-                                          "whom, and as keys typed, the keys themselves never noted or logged",
-     "stream", "page"),
-    ("POST", MACHINE + "/terminal/close", "its terminal closed", "stream", "page"),
-    ("POST", MACHINE + "/setup", "its setup started {steps}: only those steps, or all of them", "change", "page"),
+                                          "whom, and as keys typed, the keys themselves never noted or logged"
+     + AT_THE_PAGE, "stream", "page"),
+    ("POST", MACHINE + "/terminal/close", "its terminal closed" + AT_THE_PAGE, "stream", "page"),
+    ("POST", MACHINE + "/setup", "its setup started {steps}: only those steps, or all of them" + AT_THE_PAGE,
+     "change", "page"),
     ("POST", MACHINE + "/ask", "one of its hooks asked by name {hook, args}: the arguments by position, its answer "
                                "as JSON, its refusal in its own words; one only other plugins ask refused (403), one "
                                "only its page asks refused (401) when the login says you are not there", "ask",
@@ -70,6 +78,6 @@ ROUTES = (
                               "POST, DELETE)", "ask", "client"),
     ("DELETE", MACHINE + "/rpc", "the same route's DELETE, handed over as a POST is (MCP: a legacy session ended)",
      "ask", "client"),
-    ("POST", MACHINE + "/enabled", "the plugin enabled or disabled {on}, as POST /api/plugins/{name}/enabled does",
-     "change", "client"),
+    ("POST", MACHINE + "/enabled", "the plugin enabled or disabled {on}, as POST /api/plugins/{name}/enabled does, "
+                                   "and refused as it is", "change", "client"),
 )

@@ -1614,6 +1614,20 @@ class PlatformApp(Platform):
         with _asked_by(PAGE):
             yield
 
+    def _at_the_page(self, handler, what: str) -> None:
+        """One of the page's own routes that changes something, and a login terminal's four (0.39.1): a plugin's
+        settings, its switches, its setup or its packages' update, a job's Cancel, a terminal opened, read, typed into
+        or closed, a change in the Databases section. None asks a hook by name, so no plugin's PAGE_ONLY_HOOKS reaches
+        them: the platform asks its login itself, as _from_page does for a hook only the page asks. Refused (401) when
+        the login says the person at this browser is not shown to be there (App.present False: today, a browser not
+        signed in to the platform); answered when it says they are, or when the platform holds no login (None), as
+        before. Asked before the request is read any further, so nothing is looked up, changed or logged for a refusal.
+        `what`: the route in words, the refusal's first ("A plugin's settings are kept")."""
+        if self._present(handler) is False:
+            raise Refused(HTTPStatus.UNAUTHORIZED, f"{what} only from the platform's page, and the platform's login "
+                                                   "does not show that you are there: sign in on the platform's page, "
+                                                   "then ask again.")
+
     def _present(self, handler) -> bool | None:
         """Whether the person at the browser of `handler` is shown to be there (liminal-libs 1.66.0's App.present: the
         login's own proof when it offers one, else a browser signed in to it; None when the platform holds no login).
@@ -2012,18 +2026,23 @@ class PlatformApp(Platform):
         if method == "GET" and path == "/api/databases/plugins":  # 0.36.0: the Databases section (the library's)
             return 200, self.databases_overview()
         if method == "POST" and path == "/api/databases/instances":
+            if db_section.text_of(body, "action") in db_section.CHANGES:  # 0.39.1: a change is the page's own
+                self._at_the_page(handler, "A database's instance is changed")
             try:
                 return 200, self.instances_asked(body)
             except db_section.Asked as e:  # the plugin's words, and what accepts its refusal (a second confirmation)
                 return e.status, e.answer()
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/settings"):
+            self._at_the_page(handler, "A plugin's settings are kept")  # 0.39.1: the page's own routes ask the login
             return 200, self.save_settings(path[len("/api/plugins/"):-len("/settings")], body)
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/enabled"):
+            self._at_the_page(handler, "A plugin is enabled or disabled")
             on = body.get("on")
             if not isinstance(on, bool):
                 raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
             return 200, self.set_enabled(path[len("/api/plugins/"):-len("/enabled")], on)
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/hidden"):
+            self._at_the_page(handler, "A plugin's icon is hidden or shown")
             on = body.get("on")
             if not isinstance(on, bool):
                 raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
@@ -2045,6 +2064,7 @@ class PlatformApp(Platform):
             if method == "GET" and action == "check":
                 return 200, self.check(name)
             if method == "POST" and action == "job/cancel":  # 0.31.0: the job under way asked to stop (its Cancel)
+                self._at_the_page(handler, "A job is asked to stop")
                 started = body.get("startedAt")  # the job meant, as the page was told it (none: the one under way)
                 if started is not None and (isinstance(started, bool) or not isinstance(started, (int, float))):
                     raise Refused(HTTPStatus.BAD_REQUEST, "startedAt is the job's own, a number as its state says it")
@@ -2062,11 +2082,18 @@ class PlatformApp(Platform):
                         return e.status, e.answer()
                 if what not in ("install", "update"):
                     raise Refused(HTTPStatus.BAD_REQUEST, "action is install, update or hook")
+                # 0.39.1: its setup and its packages' update are called on the plugin itself (Setup._run), not asked by
+                # name, so its PAGE_ONLY_HOOKS (the WSL base's update_packages) never held them here: the login is asked
+                self._at_the_page(handler, "A plugin's install or its packages' update is started")
                 job = self.start_setup(name, None, "update" if what == "update" else "setup")
                 return 202, job.describe(since=0)
+            # 0.39.1: a login terminal is the page's alone, whoever's word names it (the WSL base's PAGE_ONLY_HOOKS do:
+            # these routes call terminal() themselves and never read them). Opened, read, typed into and closed
             if action == "terminal" and method == "POST":
+                self._at_the_page(handler, "A terminal is opened")
                 return 200, self.open_terminal(name)
             if action == "terminal" and method == "GET":
+                self._at_the_page(handler, "A terminal is read")
                 term = self.terminal_of(name)
                 if term is None:
                     raise Refused(HTTPStatus.NOT_FOUND, f"no terminal is open into {name}")
@@ -2074,6 +2101,7 @@ class PlatformApp(Platform):
                 self._close_idle()
                 return 200, got
             if action == "terminal/input" and method == "POST":
+                self._at_the_page(handler, "A terminal is typed into")
                 data, term = body.get("data"), self.terminal_of(name)
                 if not isinstance(data, str) or len(data) > MAX_INPUT:
                     raise Refused(HTTPStatus.BAD_REQUEST, f"data is the keys typed, at most {MAX_INPUT} characters")
@@ -2083,8 +2111,10 @@ class PlatformApp(Platform):
                 self.traffic.record(self.NAME, self._terminal_program(term), "stream", "keys typed")  # never the keys
                 return 200, {"sent": len(data)}
             if action == "terminal/close" and method == "POST":
+                self._at_the_page(handler, "A terminal is closed")
                 return 200, {"closed": self.close_terminal(name)}
             if method == "POST" and action == "setup":
+                self._at_the_page(handler, "A plugin's setup is started")
                 steps = body.get("steps") or None
                 if steps is not None and (not isinstance(steps, list) or not all(isinstance(s, str) for s in steps)):
                     raise Refused(HTTPStatus.BAD_REQUEST, "steps is a list of step names")
@@ -2101,6 +2131,7 @@ class PlatformApp(Platform):
             if action == "rpc" and method in ("POST", "GET", "DELETE"):  # 0.34.0: an agent's request, to its plugin
                 return self.rpc(handler, name, method, None if method == "GET" else body)
             if method == "POST" and action == "enabled":
+                self._at_the_page(handler, "A plugin is enabled or disabled")
                 on = body.get("on")
                 if not isinstance(on, bool):
                     raise Refused(HTTPStatus.BAD_REQUEST, "on is true or false")
