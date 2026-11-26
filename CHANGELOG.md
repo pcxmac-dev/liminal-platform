@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.40.0 (2026-11-26, provisional: renumbered when it lands)
+
+What each plugin needs of this machine (Monday list item 19, part two, release 1; the user, 2026-11-18: every plugin
+has a "needs" requirement, the operating system, the hardware platform, GPUs, the internet; a plugin whose needs this
+machine cannot meet is not shown in the left-most list; the Connections view gets a tab of all of the app's plugins,
+red for those that could but do not meet current conditions, shaded for those that never can here). Built on
+liminal-libs 1.103.0: a plugin says it in `NEEDS`, `needs.py` judges it against this machine's facts, which `facts.py`
+reads without sending anything. The plan's revision 2 of 2026-11-24, with your twenty answers of 2026-11-25.
+
+- **The state "unmet".** Each plugin's needs are judged before its status, from the facts in hand, the plugin asked
+  nothing but its `not_for_here()` (by contract it asks nothing). One whose required needs are unmet is in the state
+  `unmet` (`needs.state_of`): `valid` false with its needs' `why`, out of the tray, never attached while unmet (item
+  38). Not for this machine (another system, another processor), it is asked its status only when its
+  `not_for_here()` gives words, for the Admin and Firewall bases' tables of elsewhere, and its status says `applies:
+  false`, so a page from before draws it as it did. Not met now (a Windows feature off, the internet gone, an older
+  build), nothing is asked: `{"present": null, "summary": "not met now: ..."}`. A status that says `applies: false` is
+  one more need of the machine. A need that cannot be read never hides a plugin (your answer 10).
+- **Asked nothing new.** `ask`, `rpc`, `check`, a setup, a job and a login terminal answer 409 in its needs' words. A
+  job under way runs to its end.
+- **Let go only once nothing of it runs.** A plugin attached that is no longer active is let go only after its job has
+  ended and nothing it started is in this process's ledger (`lifecycle.mine`), at the first status read after both,
+  since a detach ends what it started. That holds for one not valid too. One whose needs are unmet by the internet
+  alone is held, never let go for it (your answer 19, "Held"): out of the list and the tray, asked nothing new, its own
+  background work going on; active again at the first reading that finds the internet. The switch and the stop let go
+  at once, as before.
+- **The attach.** The Windows features the plugins' rows name are read first, in the reader's own thread (about
+  0.7 s); a plugin whose rows name one is attached once they are read, or after `FEATURES_WAIT_S` (2 s), the feature
+  then unknown; the others meanwhile. The overview, the tray's assistants not asked yet, Connections' quiet nodes
+  (their `sort`) and `plugin_state` say the needs; This machine's architecture (`x86-64`, `arm64`) and memory (usable,
+  and `memoryInstalledMb`) come from the same reading.
+- **`GET /api/needs`** (the frame's route, the platform's report): this machine's facts and every plugin, attached or
+  not, with its needs judged and its state; `?plugin=NAME` one, `?fresh=1` this machine read again. `held` and
+  `switch` are true here.
+- **The internet switch** (your answer 3): `POST /api/needs/internet {"rule": "system" | "there"}`, "as this system
+  judges it" (Windows' NCSI, NetworkManager) or "taken as there". Held in memory, read from there at each judgement;
+  kept as the preference pair `platform-internet` in the signed-in person's own store when their login keeps settings
+  (`kept: true`), and brought back once, when their page first asks `GET /api/needs` after a start. With the
+  platform's own login, which keeps nothing here, it holds until the platform restarts. No file. Refused (401) when the
+  login says you are not at the page. `LIMINAL_OFFLINE` and `LIMINAL_READONLY` make every internet need unmet, whatever
+  the switch (your answer 5).
+- **The page.** The list, the tray and This machine's tables leave out every plugin whose needs say `met: false`,
+  switch on or off (your answer 6); under the sections, "Not listed: N not for this machine, M not met now.
+  Connections, Plugins lists them all."; one shown by its address at the foot, dimmed. A plugin's Main says why, with
+  its needs' table (the library's `needs.js`); its switch is held ("Disabled: not met now"); its check is not asked
+  while its needs are unmet; the right column has its Needs list. Connections gets two tabs beside its title (your
+  answer 8): Who talks to whom (`#connections`) and Plugins (`#connections/plugins`), every plugin by section, shaded
+  only for "not for this machine", red and said for "not met now", with the counts, Read again, the switch and how the
+  internet is read; a plugin picked fills the right column with its needs. This machine's page says what the needs
+  are read against. `GET api/needs` is asked every 30 s while the page is shown, every 15 s on the Plugins tab.
+- **Older mixes.** This page with a platform or a liminal-libs from before: `GET /api/needs` answers 404, the list
+  leaves out what a status says is not for this machine, and the page says to start the platform again (and asks no
+  more until a reload). With a platform process from before 0.40.0 on liminal-libs 1.103.0 (`held: false`): the list
+  filtered by the route, no switch, and the words "does not hold them by them yet". A page from before draws the new
+  state as not valid. Each was looked at in headless Edge over stand-in answers, with and without `needs.js`.
+- `liminal-platform status` says "not for this machine: ..." or "not met now: ...", and `liminal-platform machine
+  NAME setup` (and its other actions) refuse such a plugin before asking it.
+- `PLATFORM_KINDS = ("database",)` in place of `PLATFORM_NEEDS` (your "Rename it": "needs" is what a plugin needs of
+  the machine); liminal-libs reads the old name one release more for the apps that still set it. CALLS says
+  `not_for_here` and "while its needs are met"; ATTRIBUTES `NEEDS`.
+- The floor is liminal-libs>=1.103.0 (its needs.py, facts.py and PLATFORM_KINDS).
+- Not in this release: the External API cards of what `facts.py` reads (WMI's classes through `_wmi`, the Network List
+  Manager, kernel32's calls, the registry keys, NetworkManager through nmcli, the Linux files), whose makers' pages are
+  to be read first. And until it is agreed with the library's owner, `liminal-signal ASK --plugin NAME needs` finds a
+  plugin only where an app holds it attached; for any other it may start the plugin's node, which attaches it with the
+  environment's login and judges nothing.
+
 ## 0.39.1 (2026-11-25)
 
 The page's own routes ask the login too (the review of the sweep after PLT-H1, 2026-11-25: its findings on the

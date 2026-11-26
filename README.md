@@ -48,7 +48,19 @@ packages and opens a login terminal into it, on the page.
 
 A plugin not in a valid state (set up for Liminal: a WSL plugin with its own Liminal-named distribution, a firewall
 with Liminal's rules, an admin with the rights; an AI assistant with a key and a plan with API access) is disabled
-until it is: shaded, out of the tray, its switch held off with the reason, its setup still there. A plugin's own
+until it is: shaded, out of the tray, its switch held off with the reason, its setup still there.
+
+From 0.40.0 (Monday list item 19, part two) each plugin's needs come first: what it says it needs of this machine
+(its `NEEDS`, liminal-libs 1.103.0's `needs.py`) judged against this machine's facts, read without sending anything
+(`facts.py`). One whose needs this machine does not meet is in the state `unmet`: out of the list on the left and the
+tray, whether its switch is on or off, asked nothing new, never attached while unmet. "Not for this machine" is one
+nothing here can change (another system, another processor); "not met now" one something can (a Windows feature
+turned on, the internet back, a newer Windows), and its page says what. A need that cannot be read never hides a
+plugin. Under the list a line says how many are not listed; Connections' second tab, Plugins (`#connections/plugins`),
+lists them all, red for not met now, shaded for not for this machine, with the internet switch ("as this system judges
+it" or "taken as there", kept in your login when it keeps settings).
+
+A plugin's own
 charts, tables and choices are drawn in the middle (the
 hardware stats' charts and tables; the Preferences plugin's themes), and every page is painted in the UI's
 theme (the library's `theme.js`, the data folder's `ui.json`).
@@ -115,6 +127,9 @@ shown on its own Internal API view:
   connect, share, port, credentials or forget; a change only with `"confirm": true`; a refusal that names what accepts
   it answers 400 with `accept`, for the page's second question). Both are liminal-libs' (`liminal_libs.apps.databases`).
 - `POST /api/plugins/<name>/settings` (its settings kept through the login), `/enabled` and `/hidden` (`{"on": ...}`).
+- `GET /api/needs` (the frame's route, 0.40.0: this machine's facts and every plugin with its needs judged and its
+  state; `?plugin=NAME`, `?fresh=1`) and `POST /api/needs/internet` (`{"rule": "system" | "there"}`: the internet
+  switch, held in memory and kept in the signed-in person's own store when their login keeps settings).
 - `GET /api/machines/<name>` (its status; it and the plugin's row in the overview say its `section` and its `group`,
   the group empty outside AI plugins), `GET /api/machines/<name>/check` (its check of this machine).
 - `POST /api/machines/<name>/setup` (`{"steps": [...]}`, 202; `GET` the same path for the lines and the result) and
