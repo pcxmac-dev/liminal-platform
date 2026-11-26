@@ -82,6 +82,13 @@
   const icon = window.LiminalIcons.icon;
   const Charts = window.LiminalCharts;
   const list = $('list'), data = $('data'), side = $('side'), rail = $('rail');
+  // 0.39.2 (Monday list item 31; the library's docs/PAGES.md: "the right hand menu holds the 'tool' selected on the left
+  // hand menu in the top portion of it's menu", and what is picked in the middle "underneath"): the right-hand menu is
+  // the library's side.js panel, the tool picked on the left at its top and the row, place or part picked in the middle
+  // told in full under it. A library without side.js: the side drawn whole, as before
+  const Side = window.LiminalSide || null;
+  const sidePanel = Side ? Side.panel(side, { app: 'platform', onPick: (p) => sidePicked(p) }) : null;
+  const pickSpecs = new Map();  // what each row drawn tells when picked: its table's details, by the row's key
   if (new URLSearchParams(location.search).get('embedded') === '1') document.body.classList.add('embedded');
   let st = null;  // what the platform said last: the overview (GET api/overview), then each part's own answer (0.21.0)
   let tray = null;  // the last GET api/tray
@@ -729,30 +736,31 @@
       + (unknown ? `<h5 class="group">Not known here</h5><dl class="facts">${unknown}</dl>` : '');
   }
 
+  const mainPick = (key) => (sidePanel ? ` data-pick="${esc(key)}"` : '');  // 0.39.2: a row of the Main tab's own tables
   function tables(m) {
     // what a plugin's status lists: Liminal's rules (a firewall), services, startups, processes (the admin)
     const s = m.status || {}, can = new Set(m.asks || []), out = [];
     const btn = (hook, args, text) => (can.has(hook) ? `<button type="button" class="ask" data-machine="${esc(m.name)}" data-hook="${esc(hook)}" data-args='${esc(JSON.stringify(args))}'>${esc(text)}</button>` : '');
     if (Array.isArray(s.rules)) {
       out.push(`<h4>Liminal's rules</h4>` + (s.rules.length ? `<table class="list"><thead><tr><th>Rule</th><th>Ports</th><th>Direction</th><th>From</th><th></th></tr></thead><tbody>` + s.rules.map((r) =>
-        `<tr><td>${esc(r.label)}</td><td class="mono">${esc((r.ports || []).join(', ') || 'every')}/${esc(r.protocol)}</td><td>${esc(r.direction)} ${esc(r.action)}</td><td>${esc(r.remote)}</td>`
+        `<tr${mainPick(`rule|${r.name}`)}><td>${esc(r.label)}</td><td class="mono">${esc((r.ports || []).join(', ') || 'every')}/${esc(r.protocol)}</td><td>${esc(r.direction)} ${esc(r.action)}</td><td>${esc(r.remote)}</td>`
         + `<td>${r.owned ? btn('remove', [r.name], 'Remove') : ''}</td></tr>`).join('') + `</tbody></table>` : '<div class="muted small">None: its setup adds what the framework\'s services need.</div>'));
     }
     if (Array.isArray(s.services) && s.services.length) {
       out.push(`<h4>Services</h4><table class="list"><thead><tr><th>Service</th><th>State</th><th>Start</th><th>For</th><th></th></tr></thead><tbody>` + s.services.map((v) =>
-        `<tr><td class="mono">${esc(v.name)}</td><td>${esc(v.state)}</td><td>${esc(v.startup)}</td><td class="muted">${esc(v.usedFor)}</td><td>`
+        `<tr${mainPick(`service|${v.name}`)}><td class="mono">${esc(v.name)}</td><td>${esc(v.state)}</td><td>${esc(v.startup)}</td><td class="muted">${esc(v.usedFor)}</td><td>`
         + (v.state === 'absent' ? '' : v.state === 'running' ? btn('service', [v.name, 'restart'], 'Restart') + btn('service', [v.name, 'stop'], 'Stop') : btn('service', [v.name, 'start'], 'Start'))
         + `</td></tr>`).join('') + `</tbody></table>`);
     }
     if (Array.isArray(s.startups) && s.startups.length) {
       out.push(`<h4>Startups</h4><table class="list"><thead><tr><th>App</th><th>Startup</th><th>State</th><th></th></tr></thead><tbody>` + s.startups.map((v) =>
-        `<tr><td>${esc(v.app)}</td><td class="mono">${esc(v.name)}</td><td>${esc(v.state)}</td><td>`
+        `<tr${mainPick(`startup|${v.app}`)}><td>${esc(v.app)}</td><td class="mono">${esc(v.name)}</td><td>${esc(v.state)}</td><td>`
         + (v.state === 'absent' ? btn('register', [v.app], 'Start at logon') : btn('startup', [v.app, 'run'], 'Run') + btn('startup', [v.app, 'end'], 'End') + btn('unregister', [v.app], 'Remove'))
         + `</td></tr>`).join('') + `</tbody></table>`);
     }
     if (Array.isArray(s.processes)) {
       out.push(`<h4>The framework's processes</h4>` + (s.processes.length ? `<table class="list"><thead><tr><th>Process</th><th>App</th><th>Memory</th><th>Command</th></tr></thead><tbody>` + s.processes.map((p) =>
-        `<tr><td class="mono">${esc(p.pid)}</td><td>${esc(p.app)}</td><td>${esc(p.memoryMb)} MB</td><td class="mono muted small">${esc(p.command)}</td></tr>`).join('') + `</tbody></table>` : '<div class="muted small">None running.</div>'));
+        `<tr${mainPick(`process|${p.pid}`)}><td class="mono">${esc(p.pid)}</td><td>${esc(p.app)}</td><td>${esc(p.memoryMb)} MB</td><td class="mono muted small">${esc(p.command)}</td></tr>`).join('') + `</tbody></table>` : '<div class="muted small">None running.</div>'));
     }
     return out.join('');
   }
@@ -1038,6 +1046,13 @@
 
   function statTables(m) {
     const forms = formsOf(m), can = new Set(m.asks || []);
+    pickSpecs.clear();  // the tables drawn now are what a pick is told from
+    const pickAttr = (t, r, i) => {  // 0.39.2: a plain table's row picked into the right-hand menu (not where pick: false)
+      if (!sidePanel || t.pick === false) return '';
+      const key = rowKey(t, r, i), d = Array.isArray(t.details) ? t.details[i] : null;
+      if (d && typeof d === 'object') pickSpecs.set(key, d);
+      return ` data-pick="${esc(key)}"`;
+    };
     const under = (t) => {
       const buttons = (Array.isArray(t.actions) ? t.actions : []).map((b) => (b && b.form ? formButton(m, b, forms)
         : b && b.terminal ? shellButton(m, b.title, b) : askButton(m, b, can))).join('');  // {terminal, title}: its terminal (0.12.0)
@@ -1047,7 +1062,7 @@
     return ((m.status && m.status.tables) || []).map((t) => `<h4>${esc(t.title)}</h4>${searchBox(m, t, forms)}${t.note ? `<div class="muted small mono note">${esc(t.note)}</div>` : ''}${picks(t)}`
       + (Array.isArray(t.groups) && Array.isArray(t.columns) ? groupedTable(m, t, forms, can)
         : t.select && Array.isArray(t.columns) ? selectTable(m, t, forms, can) : (t.rows || []).length ? `<table class="list stats"><thead><tr>${t.columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.title)}</th>`).join('')}</tr></thead><tbody>`
-        + t.rows.map((r) => `<tr>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
+        + t.rows.map((r, ri) => `<tr${pickAttr(t, r, ri)}>${r.map((c, i) => `<td${t.columns[i] && t.columns[i].num ? ' class="num"' : longWord(c) ? ' class="long"' : ''}>${cellHtml(c, m, forms)}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
         : `<div class="muted small">${esc(t.empty || 'None.')}</div>`) + under(t)).join('');
   }
 
@@ -2032,8 +2047,12 @@
   // drawn by the Main tab's drawers (statTables, actionsHtml, formsOf), given the plugin with them as its status. A table
   // they cannot draw (one without columns) is left out, and so is a plain table's row that is not a list of cells
   function pageTables(p) {
-    return listOf(p.tables).filter((t) => Array.isArray(t.columns)).map((t) => (Array.isArray(t.groups) || t.select ? t
-      : { ...t, rows: (Array.isArray(t.rows) ? t.rows : []).filter(Array.isArray) }));
+    return listOf(p.tables).filter((t) => Array.isArray(t.columns)).map((t) => {
+      if (Array.isArray(t.groups) || t.select) return t;
+      const rows = Array.isArray(t.rows) ? t.rows : [], details = Array.isArray(t.details) ? t.details : [];
+      const kept = rows.map((r, i) => [r, details[i] || null]).filter(([r]) => Array.isArray(r));  // 0.39.2: each row's details with it
+      return { ...t, rows: kept.map(([r]) => r), details: kept.map(([, d]) => d) };
+    });
   }
   const pagePlugin = (m, p) => ({ ...m, status: { tables: pageTables(p), forms: listOf(p.forms), actions: listOf(p.actions) } });
 
@@ -2077,11 +2096,19 @@
     if (slot) slot.replaceWith(v.globeEl);
     else if (box && v.globeEl.parentNode !== box) { box.textContent = ''; box.appendChild(v.globeEl); }
     if (!v.globe || v.globeWay !== way) {
-      v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load });
+      v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load,
+        onPick: (item) => globePicked(item) });  // 0.39.2: a place, home, a router or a feature told in the right-hand menu
       v.globeWay = way;
     } else if (v.globeSpec !== spec) v.globe.update(spec);
     v.globeSpec = spec;
     v.drawn.globe = 'drawn';
+  }
+  // the globe's pick: told in the panel, sharing the one pick with the tables' rows (one or none); its own let go: the
+  // panel's too, when it was the globe's
+  function globePicked(item) {
+    if (!sidePanel) return;
+    if (item) sidePanel.pick(window.LiminalGlobe.describe ? window.LiminalGlobe.describe(item) : item);
+    else if (sidePanel.picked && String(sidePanel.picked.key).startsWith('globe:')) sidePanel.unpick();
   }
   function dropGlobe(v) {
     if (v.globe) { try { v.globe.destroy(); } catch (e) { /* gone with its element */ } }
@@ -2320,6 +2347,7 @@
         }
       } catch (e) { box.innerHTML = `<p class="error">Its ${esc(part)} could not be drawn: ${esc(e.message)}</p>`; v.drawn[part] = ''; }
     }));
+    sideRows();  // 0.39.2: the pick told anew from this answer (kept, marked, when its row is gone)
   }
 
   // the tab shown asked, the one left let go: after every draw of the pane, as the page is shown or hidden again (its frame
@@ -2477,7 +2505,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   function showCodebase() {
     if (codebaseShown) return;
     codebaseShown = true;
-    window.LiminalCodebase.mount(data, side, { get: (path) => api('GET', path), send: (path, body) => api('POST', path, body) });
+    window.LiminalCodebase.mount(data, side, { get: (path) => api('GET', path), send: (path, body) => api('POST', path, body),
+      panel: sidePanel, scope: 'codebase' });  // 0.39.2: the side the panel's top, the repository picked under it (a library before 1.105.0 ignores both)
   }
   function leaveCodebase() {
     if (!codebaseShown) return;
@@ -3156,7 +3185,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       + `<span class="swatch-line" aria-hidden="true"></span><span class="what"><span>${k} <span class="muted">${counts[k] || 0}</span></span><span class="sub">${esc(classes[k])}</span></span></button>`).join('');
     const n = focusNode && t ? ((t.nodes || []).find((x) => x.id === focusNode) || (connView === 'sphere' && sphere.model && sphere.model.byId.get(focusNode)) || null) : null;
     let picked = '';
-    if (n) {
+    if (n && !sidePanel) {  // 0.39.2: with the panel, told under the tool (nodePick)
       const members = focusMembers();
       const mine = (t.links || []).filter((l) => touchesFocus(l, members));
       const rows = mine.map((l) => `<tr><td>${l.from === n.id ? `→ ${esc(nodeTitle(t, l.to))}` : l.to === n.id ? `← ${esc(nodeTitle(t, l.from))}` : `${esc(nodeTitle(t, l.from))} → ${esc(nodeTitle(t, l.to))}`}</td><td><span class="kind k-${esc(l.kind)}">${esc(l.kind)}</span></td>`
@@ -3180,10 +3209,25 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
       runs along it for each new interaction. Pick a box to see its own links.</p>`;
   }
 
+  // 0.39.2: the part picked in the picture, told under the tool: what it is, who it is built on, its links
+  function nodePick(t, n) {
+    const members = focusMembers();
+    const mine = ((t && t.links) || []).filter((l) => touchesFocus(l, members));
+    const withWhom = (l) => (l.from === n.id ? `→ ${nodeTitle(t, l.to)}` : l.to === n.id ? `← ${nodeTitle(t, l.from)}` : `${nodeTitle(t, l.from)} → ${nodeTitle(t, l.to)}`);
+    return { key: `node:${n.id}`, title: n.title, sub: n.sub || n.role,
+      facts: [['Part', n.role], ['State', n.role === 'plugin' ? n.state : ''], ['Built on it', members ? n.members.map((p) => p.title).join(', ') : '']].filter(([, v]) => v),
+      sections: [{ title: 'Its links', facts: mine.map((l) => [withWhom(l), `${l.kind} · ${l.count} times${l.failed ? ` (${l.failed} failed)` : ''}${l.ms ? ` · ${l.ms} ms mean` : ''}`]) }],
+      note: mine.length ? '' : 'Nothing said to it or by it yet.' };
+  }
   function drawConnectionsSide() {  // drawn again with every answer; the legend's button that had the focus keeps it
     if (onPluginsTab()) return;  // 0.40.0: the Plugins tab's own
     const a = document.activeElement, kind = a && side.contains(a) ? a.dataset.kind || (a.classList.contains('conn-unpick') ? '*' : '') : '';
-    side.innerHTML = connectionsSide(traffic);
+    setSide('connections', connectionsSide(traffic));
+    if (sidePanel) {  // 0.39.2: the part picked, under the tool
+      const t = traffic, n = focusNode && t ? ((t.nodes || []).find((x) => x.id === focusNode) || (connView === 'sphere' && sphere.model && sphere.model.byId.get(focusNode)) || null) : null;
+      if (n) sidePanel.pick(nodePick(t, n));
+      else if (sidePanel.picked) sidePanel.unpick();
+    }
     const again = kind === '*' ? side.querySelector('.conn-unpick') : kind ? side.querySelector(`[data-kind="${kind}"]`) : null;
     if (again) again.focus({ preventScroll: true });
   }
@@ -3270,6 +3314,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     Object.entries(jobs).forEach(([name, j]) => { if (j.open) j.term.attach($(`job-term-${name}`)); });
     Object.values(shells).forEach((sh) => { if (sh.panel && !sh.panel.isConnected) sh.term.attach(null); });  // not shown: not drawn
     syncTab();  // 0.27.0: the tab shown asked (its globe back in its place), one left let go
+    sideRows();  // 0.39.2
     data.scrollTop = scrolled;
     if (tabPicked) {  // 0.22.0: the tab now shown keeps the focus a click or a key gave its button
       tabPicked = false;
@@ -3353,9 +3398,62 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
     if (sel === CONNECTIONS) { if (onPluginsTab()) side.innerHTML = pluginsSide(); else drawConnectionsSide(); return; }
     if (sel === CODEBASE && window.LiminalCodebase) return;  // drawn with its data (codebase.js)
-    if (ownShown()) { side.innerHTML = ownSide(); return; }  // 0.32.0: before a plugin of its name, which it shadows
+    if (ownShown()) { setSide(sideScope(), ownSide()); return; }  // 0.32.0: before a plugin of its name, which it shadows
     const db = m || a ? null : dbOf(sel);  // 0.36.0: a database plugin's specifics
-    side.innerHTML = sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : db ? dbSide(db) : '';
+    setSide(sideScope(), sel === 'machine' ? machineSide() : m ? pluginSide(m) : a ? assistantSide(a) : db ? dbSide(db) : '');
+  }
+  // 0.39.2: the right-hand menu's top, the tool picked on the left, in its scope (the tool and its view: another one lets
+  // the pick go, the standard's "a pick belongs to one tool and one view"); without side.js, the side whole
+  function setSide(scope, html) {
+    if (sidePanel) sidePanel.tool(scope, html);
+    else side.innerHTML = html;
+  }
+  // the tool and its view, as the library's standard.json names the platform's tools: machine, plugin, assistant,
+  // database, connections, codebase, own; the tab after a plugin's, a database's and the own entry's name
+  function sideScope() {
+    const sel = selected(), tab = hashParts()[1] || 'main';
+    if (sel === CONNECTIONS) return 'connections';
+    if (sel === CODEBASE) return 'codebase';
+    if (ownShown()) return `own:${tab}`;
+    if (sel === 'machine') return 'machine';
+    if (st && st.machines[sel]) return `plugin:${sel}/${tab}`;
+    if (st && (st.assistants || []).some((x) => x.name === sel)) return `assistant:${sel}`;
+    return `database:${sel}/${tab}`;
+  }
+  // a row's key: what its table's details name it, else its table and the words of its first cells that are not
+  // counts (a count changes from answer to answer, what the row is does not)
+  const cellWords = (c) => (c && typeof c === 'object' ? String(c.text ?? c.title ?? '') : String(c ?? ''));
+  function rowKey(t, r, i) {
+    const d = Array.isArray(t.details) ? t.details[i] : null;
+    if (d && typeof d === 'object' && d.key) return `${t.title || ''}|${d.key}`;
+    return `${t.title || ''}|${r.filter((c, j) => !(t.columns[j] && t.columns[j].num)).slice(0, 3).map(cellWords).join('|')}`;
+  }
+  // what the middle picked tells: a globe's item from the globe drawn now, a row from its table's details, else its cells
+  function pickFind(key) {
+    if (String(key).startsWith('globe:')) {
+      const v = tabView;
+      return v && v.globe && typeof v.globe.describe === 'function' ? v.globe.describe(key) : null;
+    }
+    if (String(key).startsWith('node:')) {  // Connections' part: told while it is the one in focus
+      const t = traffic, n = focusNode && t && `node:${focusNode}` === key ? ((t.nodes || []).find((x) => x.id === focusNode)
+        || (connView === 'sphere' && sphere.model && sphere.model.byId.get(focusNode)) || null) : null;
+      return n ? nodePick(t, n) : null;
+    }
+    if (pickSpecs.has(key)) return pickSpecs.get(key);
+    const tr = [...data.querySelectorAll('tr[data-pick]')].find((x) => x.dataset.pick === key);
+    return tr ? Side.fromRow(tr) : null;
+  }
+  // after the middle is drawn: its rows picked into the panel (one set of listeners on the pane), the pick told anew
+  function sideRows() {
+    if (!sidePanel) return;
+    Side.rows(data, { selector: 'tr[data-pick]', panel: sidePanel, describe: (tr, key) => pickSpecs.get(key) || Side.fromRow(tr) });
+    sidePanel.refresh(pickFind);
+  }
+  // the panel's pick changed (a row, the globe, Unpick, Escape): the globe forgets its own, and Connections its part
+  function sidePicked(p) {
+    const key = p ? String(p.key) : '';
+    if (tabView && tabView.globe && typeof tabView.globe.unpick === 'function' && !key.startsWith('globe:')) tabView.globe.unpick();
+    if (!p && focusNode && selected() === CONNECTIONS) { focusNode = null; updateConnections(false); }
   }
 
   // 0.32.0: an address written before names the API tab (#name/api). It opens External API (tabOf) and is written

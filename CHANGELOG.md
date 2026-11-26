@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.39.2 (provisional)
+
+The right-hand menu by the library's page standard (Monday list item 31; liminal-libs 1.105.0's docs/PAGES.md and
+side.js; the user, 2026-11-22: "the right hand menu holds the 'tool' selected on the left hand menu in the top portion
+of it's menu. However, if there is amplifying information selected from the main screen (in between) it shows up as
+amplifying information underneath the plugin or tools' info in the right hand menu"). First the World Wide Web tab, then
+every page of the platform's.
+- The side is the library's panel: the tool picked on the left (the machine, a plugin, an assistant, a database,
+  Connections, Codebase, the platform's own entry) at its top, drawn again alone, so a status asked every few seconds
+  never takes the pick away. Another tool, or another tab, lets the pick go.
+- A row of a plugin's tables (its Main tab's, and its own tabs' pages) is picked by a click, Enter, Space or a tap, and
+  told in full under the tool: by its table's `details` where the plugin gives them (the World Wide Web tab's ports,
+  places, hosts and routers), else by its cells under their headings. A row is keyed by what it is, not where it is, so
+  the pick stays on a port as the busiest ports reorder, told anew with every answer, and marked when its row has gone.
+  A table marked `pick: false` (the GeoIP sources' buttons) picks nothing.
+- The globe's place, home, router or feature picked (a click, a tap, Enter) is told there too, sharing the one pick with
+  the rows.
+- Connections: the part picked is told under the tool (its links among its facts), Unpick or Escape letting it go.
+- Codebase: the side the tool, the repository picked under it.
+- A library without side.js (before 1.105.0): the side drawn whole, as before. No route changed.
+
 ## 0.40.0 (2026-11-26)
 
 What each plugin needs of this machine (Monday list item 19, part two, release 1; the user, 2026-11-18: every plugin

@@ -213,7 +213,7 @@ def test_the_page_draws_what_a_tab_answers_with_the_drawers_it_has(served):
     js = _page(port)
     # the globe: the library's, made once in an element kept across redraws, given each answer, destroyed when left
     # (0.33.0: with the key its layers' switches are remembered under and the way to their geometry)
-    assert "window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load });" in js
+    assert "window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load,\n" in js.replace("\r\n", "\n")
     assert "v.globe.update(spec);" in js
     assert "v.globe.destroy();" in js and 'data-globe-slot="${esc(m.name)}"' in js and "slot.replaceWith(v.globeEl);" in js
     # charts: LiminalCharts cards whose ids are the tab's, in place when they are the same charts
