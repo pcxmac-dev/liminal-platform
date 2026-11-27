@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.39.2 (provisional)
+## 0.41.0 (2026-11-26)
 
 The right-hand menu by the library's page standard (Monday list item 31; liminal-libs 1.105.0's docs/PAGES.md and
 side.js; the user, 2026-11-22: "the right hand menu holds the 'tool' selected on the left hand menu in the top portion
@@ -20,14 +20,23 @@ every page of the platform's.
   by Tab, the pick highlighted) and the pick told anew from them.
 - The globe's place, home, router or feature picked (a click, a tap, Enter) is told there too, sharing the one pick with
   the rows.
-- Connections: the part picked is told under the tool (its links among its facts), Unpick or Escape letting it go.
+- Connections: the part picked is told under the tool (its links among its facts), Unpick or Escape letting it go;
+  on 0.40.0's Plugins tab of Connections the side is the panel's too (its scope connections/plugins), so a pick there
+  goes when the tab changes.
 - Codebase: the side the tool, the repository picked under it.
 - A library without side.js (before 1.105.0): the side drawn whole, as before. No route changed.
 - The World Wide Web tab as a plugin of its own (Monday list item 33: plugin-platform-worldwideweb 0.1.0 on liminal-libs
   1.105.0): an old address of a firewall's tab (#firewall-windows/world, #firewall-linux/world) is written again as
   #worldwideweb/world once that plugin is listed and the firewall, loaded, no longer declares the tab; a firewall that
-  still has it (an older library) keeps its address. Nothing else of the platform changes for it: its tab is drawn as
-  every plugin's, and its asks of a firewall go through the platform's ask as every plugin's.
+  still has it (an older library) keeps its address. Its tab is drawn as every plugin's, and its asks of a firewall go
+  through the platform's ask as every plugin's.
+- **The globe's layers by area and its sky** (the user, 2026-11-26): the page's layer loader keeps its two parameters,
+  `(id, more)`: the hook is asked with the id alone, or, where the spec says the layers are read by area
+  (`layer_area`, liminal-libs 1.105.0's `world_layer(layer, area, zoom)`), with the area in view (`[west, south, east,
+  north]`, none while the whole globe shows) and the zoom, so a layer is read nearer as the globe comes nearer. The satellites' loader asks
+  the spec's sky hook (`world_sky`) with the time. Both are given to the globe at its draw and again with every new
+  spec (`handle.update(spec, {load, sky})`); a globe drawn with a loader the spec no longer names is drawn anew.
+  Checked in headless Edge on stand-ins.
 
 ## 0.40.0 (2026-11-26)
 
