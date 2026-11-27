@@ -182,6 +182,23 @@ def _none_of_this_users_saved_variables(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _nothing_kept_in_this_users_environment(monkeypatch):
+    """Every test (the user, 2026-11-26: two stand-in plugins' grants were found in their real user environment): an
+    app a test builds with no login of its own makes the platform's, an EnvironmentLogin whose `save` keeps a setting
+    in the user's Environment key in the registry (config.save_user_variable), so a test that grants, sets a domain or
+    saves any setting through such an app wrote this user's real variables. In a test a setting is kept in the
+    process's environment alone, and that is undone when the test ends."""
+    import liminal_libs.config as config
+
+    def keep_here(name, value, registry=None):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    monkeypatch.setattr(config, "save_user_variable", keep_here)
+
+
+@pytest.fixture(autouse=True)
 def stand_in_facts():
     """Every test (0.40.0, the needs plan's M14): this machine's facts for the plugins' needs are a recorded machine's
     (liminal-libs 1.103.0's needs_machines: this PC's on Windows, a plain Ubuntu's elsewhere), so every need the system

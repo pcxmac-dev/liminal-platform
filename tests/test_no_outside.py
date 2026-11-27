@@ -135,6 +135,30 @@ def test_an_app_built_with_no_login_reads_none_of_this_users_saved_variables(mon
     assert opened == []
 
 
+def test_an_app_built_with_no_login_keeps_nothing_in_this_users_environment(monkeypatch):
+    """A setting saved through an app a test builds with no login of its own (a grant, a domain: Login.save) stays in
+    the process's environment, which the test's end undoes, and never reaches the user's Environment key (the guard,
+    _nothing_kept_in_this_users_environment). The registry's way in is stood in here by one that notes each key opened
+    and refuses it, so nothing is written either way: without the guard the save is refused here and this test fails."""
+    opened: list[str] = []
+    if os.name == "nt":
+        import winreg
+
+        def refuse(key, sub_key, *args, **kwargs):
+            opened.append(str(sub_key))
+            raise OSError("the test opened this user's registry for real")
+        monkeypatch.setattr(winreg, "OpenKey", refuse)
+    app = PlatformApp(log=lambda m: None, machines={}, assistants={})  # no login given: the platform's own
+    try:
+        app.login.save("LIMINAL_TEST_KEPT_NOWHERE", "x")
+        assert app.login.variables(["LIMINAL_TEST_KEPT_NOWHERE"]) == {"LIMINAL_TEST_KEPT_NOWHERE": "x"}
+        app.login.save("LIMINAL_TEST_KEPT_NOWHERE", None)
+        assert "LIMINAL_TEST_KEPT_NOWHERE" not in os.environ
+    finally:
+        app.stop()
+    assert opened == []
+
+
 def test_a_host_on_the_internet_is_placed_by_the_tests_own_geoip_folder_alone(monkeypatch, tmp_path):
     """0.33.0: a connection to a host on the internet sends the Netstat tab to the plugin's GeoIP file for its place
     (WorldView.geoip: the data folder's geoip/ unless the plugin names a folder of its own); in a test that folder is
