@@ -94,7 +94,9 @@ def test_connections_has_two_tabs_at_their_addresses(js):
     assert "['who', 'Who talks to whom', CONNECTIONS], ['plugins', 'Plugins', `${CONNECTIONS}/plugins`]" in js
     assert "if (connTab() === 'plugins') return pluginsTab();" in js
     assert "<h2>Connections</h2>${connTabs()}<span class=\"conn-tools\">" in js
-    assert "if (sel === CONNECTIONS) { if (onPluginsTab()) side.innerHTML = pluginsSide(); else drawConnectionsSide(); return; }" in js
+    # 0.41.0: drawn as the right-hand panel's top (setSide), in its own scope: connections/plugins
+    assert "if (sel === CONNECTIONS) { if (onPluginsTab()) setSide(sideScope(), pluginsSide()); else drawConnectionsSide(); return; }" in js
+    assert "if (sel === CONNECTIONS && onPluginsTab()) return 'connections/plugins';" in js
 
 
 def test_the_plugins_tab_shades_only_what_cannot_run_here(js):

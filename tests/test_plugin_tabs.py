@@ -213,8 +213,8 @@ def test_the_page_draws_what_a_tab_answers_with_the_drawers_it_has(served):
     js = _page(port)
     # the globe: the library's, made once in an element kept across redraws, given each answer, destroyed when left
     # (0.33.0: with the key its layers' switches are remembered under and the way to their geometry)
-    assert "window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load,\n" in js.replace("\r\n", "\n")
-    assert "v.globe.update(spec);" in js
+    assert "window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load, sky,\n" in js.replace("\r\n", "\n")
+    assert "v.globe.update(spec, { load, sky });" in js  # 0.41.0: the loaders handed again with the spec
     assert "v.globe.destroy();" in js and 'data-globe-slot="${esc(m.name)}"' in js and "slot.replaceWith(v.globeEl);" in js
     # charts: LiminalCharts cards whose ids are the tab's, in place when they are the same charts
     assert "const chartsId = (m, t, i) => `${t.id}-${m.name}-${i}`;" in js and "Charts.cards(s, { id: chartsId(m, t, i) })" in js
@@ -502,15 +502,22 @@ def test_the_page_loads_a_globes_layers_through_the_platform_and_draws_flagged_o
     loader = _between(js, "const layerLoader = (m, spec) => {", "\n  };")
     assert "const hook = typeof spec.layer_hook === 'string' ? spec.layer_hook : '', name = m.name;" in loader
     assert "return hook && (m.asks || []).includes(hook)" in loader and ": null;" in loader
-    assert "(id) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: [String(id)] })" in loader
+    # 0.41.0: the area and the zoom the globe asks past 6x passed on as the hook's second and third arguments, and the
+    # loader declares both its parameters (the globe asks by area only of one whose length is 2)
+    assert "? (id, more) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: more && typeof more === 'object'" in loader
+    assert ("? [String(id), Array.isArray(more.area) ? more.area.slice(0, 4).map(Number) : null,\n"
+            "          Number.isFinite(more.zoom) ? more.zoom : null]\n        : [String(id)] })") in loader.replace("\r\n", "\n")
+    assert "(id, more =" not in loader and "...more" not in loader  # no default nor rest: its length stays 2
     assert ".then((out) => (out ? out.answer : null), (e) => { throw new Error(refusalWords(e)); })" in loader
     assert "m.status" not in loader  # what it keeps of the plugin: its name alone, never its status
     place = _between(js, "function placeGlobe(on) {", "function dropGlobe(v) {")
-    assert "const load = layerLoader(m, spec), way = load ? spec.layer_hook : '';" in place
-    gone = "if (v.globe && v.globeWay && !way) dropGlobe(v);"  # its way gone: made anew, with none
+    assert "const load = layerLoader(m, spec), sky = skyLoader(m, spec);" in place  # 0.41.0: the sky's beside it
+    assert "const way = load || sky ? `${load ? spec.layer_hook : ''}|${sky ? spec.sky.hook : ''}` : '';" in place
+    gone = "if (v.globe && ((wasLoad && !load) || (wasSky && !sky))) dropGlobe(v);"  # a way gone: made anew, with none
     assert gone in place and place.index(gone) < place.index("if (!v.globeEl) {") < place.index("const slot = ")
     assert "if (!v.globe || v.globeWay !== way) {" in place and "v.globeWay = way;" in place
-    assert "} else if (v.globeSpec !== spec) v.globe.update(spec);" in place
+    assert "key: `${m.name}/${v.id}`, load, sky," in place
+    assert "} else if (v.globeSpec !== spec) v.globe.update(spec, { load, sky });" in place
     assert "v.globeWay = '';" in _between(js, "function dropGlobe(v) {", "// its charts (page.charts")
     assert "globeSpec: null, globeWay: '' };" in js
     flows = _between(js, "const FLOW_COLUMNS = {", "function drawTab(name) {")
@@ -529,3 +536,16 @@ def test_the_page_loads_a_globes_layers_through_the_platform_and_draws_flagged_o
     lasted = _between(flows, "function lasted(v) {", "\n  }")  # "Up for": three days are "3 d 0 h", not "72.0 h"
     days = "if (s >= 86400) return `${Math.floor(s / 86400).toLocaleString()} d ${Math.floor((s % 86400) / 3600)} h`;"
     assert days in lasted and lasted.index("return '–';") < lasted.index(days) < lasted.index("return s < 1 ?")
+
+
+def test_the_page_asks_the_satellites_places_through_the_platform_with_the_moment_shown():
+    """0.41.0 (liminal-libs 1.104.0's sky, the World Wide Web plugin's tab): skyLoader is the globe's `sky` option, the
+    spec's sky.hook (world_sky, a read) asked through the platform with the moment shown (seconds since 1970), only
+    where the platform may ask the plugin for it; a refusal in the plugin's own words; none without a sky in the spec."""
+    js = page_script()
+    sky = _between(js, "const skyLoader = (m, spec) => {", "\n  };")
+    assert "const hook = spec.sky && typeof spec.sky.hook === 'string' ? spec.sky.hook : '', name = m.name;" in sky
+    assert "return hook && (m.asks || []).includes(hook)" in sky and ": null;" in sky
+    assert "? (t) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: [Number(t)] })" in sky
+    assert ".then((out) => (out ? out.answer : null), (e) => { throw new Error(refusalWords(e)); })" in sky
+    assert "m.status" not in sky

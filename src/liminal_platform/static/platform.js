@@ -2067,11 +2067,28 @@
   // (liminal-libs 1.65.0's globe asks it once a layer's version, while the layer is on and drawn): the spec's
   // layer_hook (the firewalls' world_layer, a read: files on this machine), asked through the platform with the
   // layer's id, its answer the geometry and a refusal the plugin's own words. None where the spec names no hook or the
-  // platform may not ask the plugin for it: the globe then keeps its layers off and says why. An older globe ignores it
+  // platform may not ask the plugin for it: the globe then keeps its layers off and says why. An older globe ignores it.
+  // 0.41.0 (liminal-libs 1.104.0's globe, now the World Wide Web plugin's tab): the globe asks a layer's whole coarse copy
+  // with {zoom} and, past 6x where the spec says layer_area, the view's area with {area: [w, s, e, n], zoom}; passed on
+  // as the hook's second and third arguments (world_layer(layer, area, zoom); null read as not given). The globe asks
+  // by area only of a loader that declares both its parameters (load.length 2): no default value or rest on `more`
   const layerLoader = (m, spec) => {
     const hook = typeof spec.layer_hook === 'string' ? spec.layer_hook : '', name = m.name;
     return hook && (m.asks || []).includes(hook)
-      ? (id) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: [String(id)] })
+      ? (id, more) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: more && typeof more === 'object'
+        ? [String(id), Array.isArray(more.area) ? more.area.slice(0, 4).map(Number) : null,
+          Number.isFinite(more.zoom) ? more.zoom : null]
+        : [String(id)] })
+        .then((out) => (out ? out.answer : null), (e) => { throw new Error(refusalWords(e)); })
+      : null;
+  };
+  // 0.41.0 (liminal-libs 1.104.0, Monday list item 32): the globe's way to the satellites' places, the spec's sky.hook
+  // (the World Wide Web plugin's world_sky, a read), asked through the platform with the moment shown (seconds since
+  // 1970); none where the spec names no sky or the platform may not ask it: the globe then draws nothing of the sky
+  const skyLoader = (m, spec) => {
+    const hook = spec.sky && typeof spec.sky.hook === 'string' ? spec.sky.hook : '', name = m.name;
+    return hook && (m.asks || []).includes(hook)
+      ? (t) => api('POST', `api/machines/${enc(name)}/ask`, { hook, args: [Number(t)] })
         .then((out) => (out ? out.answer : null), (e) => { throw new Error(refusalWords(e)); })
       : null;
   };
@@ -2090,17 +2107,20 @@
     // given again (drawn into the same element: the same globe, updated in place) when the way to them changed since
     // (a platform started again on a library whose firewalls name one, the page left open meanwhile). The library's
     // draw takes a new loader but keeps the one it has when given none, so a globe whose way is gone is made anew
-    const load = layerLoader(m, spec), way = load ? spec.layer_hook : '';
-    if (v.globe && v.globeWay && !way) dropGlobe(v);
+    // 0.41.0: and the sky's loader beside the layers', each a part of the way (either gone: the globe made anew)
+    const load = layerLoader(m, spec), sky = skyLoader(m, spec);
+    const way = load || sky ? `${load ? spec.layer_hook : ''}|${sky ? spec.sky.hook : ''}` : '';
+    const [wasLoad = '', wasSky = ''] = String(v.globeWay || '').split('|');
+    if (v.globe && ((wasLoad && !load) || (wasSky && !sky))) dropGlobe(v);  // its way gone: made anew, with none
     if (!v.globeEl) { v.globeEl = document.createElement('div'); v.globeEl.className = 'tab-globe'; }
     const slot = box && box.querySelector('[data-globe-slot]');
     if (slot) slot.replaceWith(v.globeEl);
     else if (box && v.globeEl.parentNode !== box) { box.textContent = ''; box.appendChild(v.globeEl); }
     if (!v.globe || v.globeWay !== way) {
-      v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load,
+      v.globe = window.LiminalGlobe.draw(v.globeEl, spec, { theme: themeNow(), key: `${m.name}/${v.id}`, load, sky,
         onPick: (item) => globePicked(item) });  // 0.39.2: a place, home, a router or a feature told in the right-hand menu
       v.globeWay = way;
-    } else if (v.globeSpec !== spec) v.globe.update(spec);
+    } else if (v.globeSpec !== spec) v.globe.update(spec, { load, sky });  // 0.41.0: an older globe takes the spec alone
     v.globeSpec = spec;
     v.drawn.globe = 'drawn';
   }
@@ -3397,7 +3417,8 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   function drawSide() {
     const sel = selected();
     const m = st.machines[sel], a = (st.assistants || []).find((x) => x.name === sel);
-    if (sel === CONNECTIONS) { if (onPluginsTab()) side.innerHTML = pluginsSide(); else drawConnectionsSide(); return; }
+    // 0.41.0: Connections' Plugins tab (0.40.0) draws its side, its row's Needs list among it, as the panel's top
+    if (sel === CONNECTIONS) { if (onPluginsTab()) setSide(sideScope(), pluginsSide()); else drawConnectionsSide(); return; }
     if (sel === CODEBASE && window.LiminalCodebase) return;  // drawn with its data (codebase.js)
     if (ownShown()) { setSide(sideScope(), ownSide()); return; }  // 0.32.0: before a plugin of its name, which it shadows
     const db = m || a ? null : dbOf(sel);  // 0.36.0: a database plugin's specifics
@@ -3413,6 +3434,7 @@ table.flows .flow-words{color:var(--muted);font-size:11px;overflow-wrap:anywhere
   // database, connections, codebase, own; the tab after a plugin's, a database's and the own entry's name
   function sideScope() {
     const sel = selected(), tab = hashParts()[1] || 'main';
+    if (sel === CONNECTIONS && onPluginsTab()) return 'connections/plugins';  // 0.41.0: its Plugins tab (0.40.0)
     if (sel === CONNECTIONS) return 'connections';
     if (sel === CODEBASE) return 'codebase';
     if (ownShown()) return `own:${tab}`;
