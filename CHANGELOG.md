@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.42.1 (2026-11-26)
+
+The approval dialog begins its job (found at the first live install of a service, Jenkins in Liminal-Ubuntu).
+
+- Once the last plan of a dialog was approved, the dialog was drawn busy while the job that carries the plans out was
+  begun, and its drawing read the plan after the last one: it threw, the job was never begun, and the approved plans
+  expired unused (the plugin's own "Carry it out…" was the only way on). The last plan stays shown while the job is
+  begun.
+- A test reads the page's script for it; the path has not been run in a browser test yet, only live.
+
 ## 0.42.0 (2026-11-26)
 
 Closed by default (the user, 2026-11-26: "Yes, closed by default"; liminal-libs 1.107.0). The security sweep of

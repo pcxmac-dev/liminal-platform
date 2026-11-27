@@ -27,6 +27,19 @@ SPEC = {"owner": "jenkins", "name": "ci", "title": "Jenkins", "system": "linux",
     "volumes": [{"name": "home", "path": "/var/jenkins_home", "holds": "its jobs"}], "memory": 1 << 30}]}
 
 
+def test_the_dialog_is_drawn_after_its_last_plan_is_approved():
+    """0.42.1 (the first live install, 2026-11-26): planYes steps past the last plan (a.i == a.items.length) and
+    planThen draws the dialog busy before it begins the job; approvalHtml read a.items[a.i] there, threw, and the job
+    was never begun. The script's text is read (no browser here): approvalHtml never takes a plan past the list's
+    end."""
+    js = (PlatformApp.STATIC / "platform.js").read_text(encoding="utf-8")
+    body = js[js.index("function approvalHtml("):js.index("async function planYes(")]
+    assert "a.items[a.i]" not in body
+    assert "a.items[Math.min(a.i, a.items.length - 1)]" in body
+    then = js[js.index("async function planThen("):js.index("async function planDecline(")]
+    assert then.index("drawDialog()") < then.index("/job`")  # it is drawn there, past the last plan
+
+
 def _world(tmp_path):
     out = standins.Outside(sleep=lambda s: None, health=lambda h, p, path: True, platform="windows::TEST",
                            folder=tmp_path)

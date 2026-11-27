@@ -1617,7 +1617,9 @@
     focusStep();
   }
   function approvalHtml(head, btn) {
-    const a = dlg.approval, w = a.words || {}, item = a.items[a.i];
+    // 0.42.1: once the last plan is approved a.i is past the list while the job is begun (planThen draws the dialog busy):
+    // the last plan stays shown; reading the plan at a.i there threw, and the job was never begun (first live install)
+    const a = dlg.approval, w = a.words || {}, item = a.items[Math.min(a.i, a.items.length - 1)];
     const who = (pluginOf(item.plugin) || {}).title || item.plugin;
     const accepts = listOf(w.accepts).filter((x) => x && typeof x.name === 'string');
     const many = a.items.length > 1 ? ` <span class="muted small">(${a.i + 1} of ${a.items.length})</span>` : '';
