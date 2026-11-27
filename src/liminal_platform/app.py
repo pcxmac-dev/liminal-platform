@@ -465,6 +465,22 @@ def _page_only(plugin) -> tuple[str, ...]:
         return ()
 
 
+def person_alone(plugin, hook: str) -> bool:
+    """Whether an ask of a plugin's `hook` over HTTP waits for the login's word that a person is at the page (0.42.0;
+    the user, 2026-11-26: "Yes, closed by default"). With liminal-libs 1.107.0 (internal.audience): every hook but
+    one the plugin declares a read anyone here may ask (its READ_HOOKS, a tab of its own), so a hook it declares for
+    no one, and a service other plugins ask (its SERVICE_HOOKS) asked here by name, is a person's alone over HTTP.
+    With an older library: the hooks its PAGE_ONLY_HOOKS name, as before. True when its words cannot be read (every
+    ask of it is refused all the same)."""
+    audience = getattr(internal_mod, "audience", None) if internal_mod is not None else None
+    if not callable(audience):
+        return hook in _page_only(plugin)
+    try:
+        return audience(plugin, hook) != "read"
+    except Exception:  # noqa: BLE001 - words that cannot be read open nothing
+        return True
+
+
 def _asker() -> str | None:
     """Who asks now, as the library hands it over (asking.asker): PAGE, a plugin's name, or None. None with a library
     before 1.66.0, which hands no one over."""
@@ -786,7 +802,9 @@ ASK_TERMS = (f"the hooks a machine plugin answers (its tabs' too), while it is e
              "and the argument that accepts it, a failure 502; none begun while the platform stops (503). From 0.34.0 "
              "a hook its PLUGIN_ONLY_HOOKS names is asked by another plugin alone (403 over HTTP), one its "
              "PAGE_ONLY_HOOKS names from its page alone (403 to a plugin; 401 over HTTP without the login's word that "
-             "you are there), and the hook its RPC_HOOK names through its route alone")
+             "you are there), and the hook its RPC_HOOK names through its route alone. From 0.42.0 (liminal-libs "
+             "1.107.0) closed by default: a hook it declares for no one is its page's alone too, and only a read it "
+             "declares (READ_HOOKS, a tab) is asked over HTTP without the login's word")
 PAGE_ASKS_DEPTH = 6  # how deep a plugin's status is walked for the hooks its page asks (page_asks)
 PAGE_ASKS_NODES = 2000  # and how many of its dicts and lists at the most
 PAGE_ASKS_EACH = 100  # values of each looked at: a table's rows past its first hundred are more of the same
@@ -888,6 +906,9 @@ class PlatformApp(Platform):
         "A hook its PAGE_ONLY_HOOKS names is asked only from its page: a plugin's ask of it is refused (403); over "
         "HTTP it is asked when the login says you are there (App.present: today, a browser signed in to the "
         "platform), else refused (401), or when the platform holds no login. The page is its asker, in a job too.",
+        "Closed by default (0.42.0, liminal-libs 1.107.0): a hook a plugin answers and declares for no one (no "
+        "READ_HOOKS, SERVICE_HOOKS, PLUGIN_ONLY_HOOKS, PAGE_ONLY_HOOKS, tab or RPC_HOOK names it) is its page's alone, "
+        "as if PAGE_ONLY_HOOKS named it. Over HTTP every hook but a declared read waits for the login's word.",
         "The Databases section (0.36.0) is liminal-libs' platform core: its plugins attached with the platform's login, "
         "their instances' forms answered by GET /api/databases/plugins and POST /api/databases/instances, a change "
         "only once confirmed. The platform is the one writer of instance settings, and serves the section as the "
@@ -1926,11 +1947,16 @@ class PlatformApp(Platform):
         the plugin says only another plugin asks (PLUGIN_ONLY_HOOKS) is refused (403). One it says only its page asks
         (PAGE_ONLY_HOOKS) is refused (401) when the login says the person at this browser is not shown to be there
         (App.present False: today, a browser not signed in to the platform), and asked when it says they are, or when
-        the platform holds no login (None). A hook in neither word is asked as before."""
+        the platform holds no login (None).
+
+        0.42.0, closed by default (liminal-libs 1.107.0; the user, 2026-11-26: "Yes, closed by default"): the login is
+        asked for every hook but one the plugin declares a read (person_alone): a hook it declares for no one is its
+        page's alone as if PAGE_ONLY_HOOKS named it, and a service other plugins ask is a person's when it is asked
+        here by name. A read it declares (READ_HOOKS, a tab) is asked as before, the login asked nothing."""
         words = refusal(m, hook, PAGE)
         if words:
             raise HookRefused(HTTPStatus.FORBIDDEN, words, words)
-        if hook in _page_only(m) and self._present(handler) is False:
+        if person_alone(m, hook) and self._present(handler) is False:
             title = str(getattr(m, "title", "") or m.name)
             words = (f"{title}'s {hook} is asked only from its page, and the platform's login does not show that you "
                      "are there: sign in on the platform's page, then ask again.")

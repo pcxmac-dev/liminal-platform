@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.42.0 (2026-11-26)
+
+Closed by default (the user, 2026-11-26: "Yes, closed by default"; liminal-libs 1.107.0). The security sweep of
+2026-11-26: the platform hands an ask over HTTP (`POST /api/machines/{name}/ask`, and `/job`) to a hook as its page,
+and asked its login whether a person was there only for a hook the plugin had named in `PAGE_ONLY_HOOKS`. Every
+other change hook was open to any program on the machine, and to every other plugin.
+
+- **A hook a plugin declares for no one is its page's alone** (the library's `internal.closed`, held by
+  `asking.refusal`): another plugin's ask of it through the platform is refused (403) in words that say how it is
+  declared, and so is the platform's own code when it was handed no asker.
+- **Over HTTP the login is asked for every hook but a declared read** (`person_alone`): a hook left undeclared, a
+  hook in `PAGE_ONLY_HOOKS`, and a service other plugins ask (`SERVICE_HOOKS`) when it is asked here by name. Refused
+  (401) when the login says no one is shown to be there, asked when it says so, or when the platform holds no login.
+  A read the plugin declares (`READ_HOOKS`, a tab of its own) is asked as before, the login asked nothing.
+- **A plugin written before the words** keeps its page: the page asks as the page, signed in. Its reads are asked
+  without the login once it names them in `READ_HOOKS`.
+- **The Internal API tab says who may ask each hook** (the library's `internal.js`, liminal-libs 1.107.0): asked by
+  anyone here, by other plugins and its page, only from its page, or "asked only from its page: declared for no
+  one" for a hook left to the default. The platform's status hands the tab `audience` and `declared` for each hook.
+- With a library before 1.107.0 the platform behaves as 0.40.0 did (the login asked for `PAGE_ONLY_HOOKS` alone).
+- `POST /api/codebase/fetch` is a person's at the page alone too: the frame's own gate, with liminal-libs 1.107.0.
+
+Tests: `tests/test_closed_default.py`, each gate failing a test when it is taken out; the stand-ins of the older
+tests declare the hooks they meant anyone, or another plugin, to ask. Needs liminal-libs>=1.107.0 for the default
+itself; it runs on 1.103.0 as before.
+
 ## 0.41.0 (2026-11-26)
 
 The right-hand menu by the library's page standard (Monday list item 31; liminal-libs 1.105.0's docs/PAGES.md and

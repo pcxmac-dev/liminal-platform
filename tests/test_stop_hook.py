@@ -128,6 +128,7 @@ class Starter(MachinePlugin):
 
     name, title, about, api, order = "starter", "Starter", "a stand-in whose start takes a while", "2.2", 915
     HOOKS = (*MachinePlugin.HOOKS, "start")
+    SERVICE_HOOKS = ("start",)  # other plugins ask it too (0.42.0: undeclared, it would be its page's alone)
 
     def __init__(self, events: list):
         self.events = events

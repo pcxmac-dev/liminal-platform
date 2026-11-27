@@ -41,11 +41,13 @@ def _asker():
 
 
 class Decider(MachinePlugin):
-    """A stand-in whose decisions only its page asks: `decide` by name, `approve` as a job; `look` is in neither word.
+    """A stand-in whose decisions only its page asks: `decide` by name, `approve` as a job; `look` is in neither word:
+    a read it declares (0.42.0: a hook declared for no one is its page's alone, closed by default: test_closed_default).
     Each notes who was asking when it ran, and in which thread."""
 
     name, title, about, api, order = "decider", "A decider", "a stand-in with decisions", "2.2", 940
     HOOKS = (*MachinePlugin.HOOKS, "decide", "approve", "look")
+    READ_HOOKS = ("look",)
     JOB_HOOKS = ("approve",)
     PAGE_ONLY_HOOKS = ("decide", "approve")
 

@@ -1364,6 +1364,10 @@ class Server(MachinePlugin):
 
     name, title, about, api, order = "server", "A model server", "a stand-in model server", "2.2", 915
     HOOKS = (*MachinePlugin.HOOKS, "serving", "models_of")
+    # as liminal-libs' ModelServer declares them: other plugins ask both, and `serving` only reads (0.42.0: a hook
+    # declared for no one is its page's alone, closed by default)
+    READ_HOOKS = ("serving",)
+    SERVICE_HOOKS = ("serving", "models_of")
 
     def __init__(self):
         self.asked: list = []
